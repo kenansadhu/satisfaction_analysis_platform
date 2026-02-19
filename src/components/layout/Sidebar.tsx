@@ -102,7 +102,7 @@ export function Sidebar({
                     )}
                     <NavItem href="/" icon={LayoutDashboard} label="Dashboard Overview" active={pathname === "/"} />
                     <NavItem href="/executive" icon={Activity} label="Executive View" active={pathname === "/executive"} className="text-blue-300 hover:text-white" />
-                    <NavItem href="/units" icon={Building2} label="Organization Units" active={pathname === "/units" || pathname.startsWith("/dashboard/")} />
+                    <NavItem href="/units" icon={Building2} label="Organization Units" active={pathname === "/units" || pathname.startsWith("/analysis/unit/")} />
                     <NavItem href="/import" icon={Upload} label="Import Data" active={pathname === "/import"} />
                     <NavItem href="/suggestions" icon={Lightbulb} label="Suggestions Box" active={pathname === "/suggestions"} />
                 </div>

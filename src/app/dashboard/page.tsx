@@ -135,7 +135,7 @@ export default function DashboardPage() {
                   </Button>
                   <Link href={`/dashboard/${survey.id}`}>
                     <Button size="sm" variant="outline" className="gap-2 group-hover:border-blue-300 group-hover:text-blue-600">
-                      Open Analysis <ArrowRight className="w-4 h-4" />
+                      Manage Data <ArrowRight className="w-4 h-4" />
                     </Button>
                   </Link>
                 </CardFooter>

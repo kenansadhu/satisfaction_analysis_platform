@@ -42,7 +42,7 @@ export function SentimentHeatmap({ units }: { units: UnitPerformance[] }) {
                                         <div className="text-sm font-bold text-slate-900">{unit.score}/100</div>
                                         <div className="text-xs text-slate-400">Sentiment Score</div>
                                     </div>
-                                    <Link href={`/dashboard/${unit.id}`}>
+                                    <Link href={`/analysis/unit/${unit.id}`}>
                                         <div className="p-2 hover:bg-slate-100 rounded-full transition-colors cursor-pointer text-slate-400 hover:text-blue-600">
                                             <ArrowRight className="w-4 h-4" />
                                         </div>

@@ -80,7 +80,7 @@ export default function UnitsPage() {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {filteredUnits.map(unit => (
-                            <Link key={unit.id} href={`/dashboard/${unit.id}`} className="group">
+                            <Link key={unit.id} href={`/analysis/unit/${unit.id}`} className="group">
                                 <Card className="h-full hover:shadow-md transition-all duration-200 border-slate-200 hover:border-blue-300">
                                     <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
                                         <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
@@ -95,7 +95,7 @@ export default function UnitsPage() {
                                             {unit.name}
                                         </CardTitle>
                                         <div className="text-xs text-slate-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                                            View Dashboard <ArrowRight className="w-3 h-3" />
+                                            View Analysis <ArrowRight className="w-3 h-3" />
                                         </div>
                                     </CardContent>
                                 </Card>
