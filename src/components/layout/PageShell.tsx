@@ -43,16 +43,8 @@ export function PageHeader({ title, description, backHref, backLabel, actions }:
 
 export function PageShell({ children }: { children: React.ReactNode }) {
     return (
-        <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
-            <div className="flex-1">
-                {children}
-            </div>
-            <footer className="border-t border-slate-200 bg-white">
-                <div className="max-w-7xl mx-auto px-8 py-5 flex items-center justify-between text-xs text-slate-400">
-                    <span>Student Voice Analytics</span>
-                    <span>Next.js • Supabase • Gemini AI</span>
-                </div>
-            </footer>
-        </div>
+        <>
+            {children}
+        </>
     );
 }

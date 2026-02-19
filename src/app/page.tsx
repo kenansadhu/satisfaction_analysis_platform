@@ -185,12 +185,7 @@ export default async function HomePage() {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white mt-8">
-        <div className="max-w-6xl mx-auto px-8 py-6 flex items-center justify-between text-sm text-slate-400">
-          <span>Student Voice Analytics • AI-Powered Feedback Processing</span>
-          <span>Built with Next.js, Supabase & Gemini AI</span>
-        </div>
-      </footer>
+
     </div>
   );
 }
