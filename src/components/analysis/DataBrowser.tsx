@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
     const [categories, setCategories] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterText, setFilterText] = useState("");
+    const [debouncedFilter, setDebouncedFilter] = useState("");
 
     // Pagination State
     const [page, setPage] = useState(0);
@@ -39,9 +40,18 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
         loadCategories();
     }, [unitId]);
 
+    // Debounce search input (300ms)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedFilter(filterText);
+            setPage(0); // Reset to first page on new search
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [filterText]);
+
     useEffect(() => {
         loadData();
-    }, [unitId, page, filterText]); // Reload when page or filter changes
+    }, [unitId, page, debouncedFilter]); // Reload when page or debounced filter changes
 
     async function loadCategories() {
         const { data } = await supabase.from('analysis_categories').select('*').eq('unit_id', unitId);
@@ -69,8 +79,8 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
             .eq('requires_analysis', true);
 
         // Apply Filter if typed (Simple ILIKE for search)
-        if (filterText) {
-            query = query.ilike('raw_text', `%${filterText}%`);
+        if (debouncedFilter) {
+            query = query.ilike('raw_text', `%${debouncedFilter}%`);
         }
 
         const { data: rawData, count } = await query

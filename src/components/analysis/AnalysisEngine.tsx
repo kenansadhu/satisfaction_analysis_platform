@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Play, Pause, Database, CheckCircle2, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 
 export default function AnalysisEngine({ unitId }: { unitId: string }) {
     // Data State
@@ -41,61 +42,39 @@ export default function AnalysisEngine({ unitId }: { unitId: string }) {
         const { data: units } = await supabase.from('organization_units').select('id, name');
         if (units) setAllUnits(units);
 
-        // 4. Count Pending Work (Robust Pagination)
-        let allNeededIds: number[] = [];
-        let hasMore = true;
-        let page = 0;
+        // 4. Count Pending Work (Efficient: count queries instead of loading IDs)
+        const { count: totalNeeded } = await supabase
+            .from('raw_feedback_inputs')
+            .select('*', { count: 'exact', head: true })
+            .eq('target_unit_id', unitId)
+            .eq('requires_analysis', true);
 
-        // Fetch IDs needing analysis
-        while (hasMore) {
-            const { data } = await supabase
-                .from('raw_feedback_inputs')
-                .select('id')
-                .eq('target_unit_id', unitId)
-                .eq('requires_analysis', true)
-                .range(page * 1000, (page + 1) * 1000 - 1);
+        const { count: alreadyAnalyzed } = await supabase
+            .from('feedback_segments')
+            .select('*, raw_feedback_inputs!inner(target_unit_id)', { count: 'exact', head: true })
+            .eq('raw_feedback_inputs.target_unit_id', unitId);
 
-            if (data && data.length > 0) {
-                allNeededIds = [...allNeededIds, ...data.map(d => d.id)];
-                if (data.length < 1000) hasMore = false;
-                page++;
-            } else hasMore = false;
-        }
-
-        // Fetch IDs already analyzed
-        let analyzedIds: number[] = [];
-        hasMore = true;
-        page = 0;
-        while (hasMore) {
-            const { data } = await supabase.from('feedback_segments').select('raw_input_id').range(page * 1000, (page + 1) * 1000 - 1);
-            if (data && data.length > 0) {
-                analyzedIds = [...analyzedIds, ...data.map(d => d.raw_input_id)];
-                if (data.length < 1000) hasMore = false;
-                page++;
-            } else hasMore = false;
-        }
-        const analyzedSet = new Set(analyzedIds);
-
-        const pendingCount = allNeededIds.filter(id => !analyzedSet.has(id)).length;
-        setTotalPending(pendingCount);
+        // Use a subquery approach: count raw inputs that DON'T have segments yet
+        setTotalPending(Math.max(0, (totalNeeded || 0) - (alreadyAnalyzed || 0)));
     }
 
     const addLog = (msg: string) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
 
     const runAnalysis = async () => {
-        if (categories.length === 0) return alert("No Categories found! Please go to Tab 2 and build them first.");
+        if (categories.length === 0) { toast.warning("No Categories found! Please go to Tab 2 and build them first."); return; }
 
         setIsAnalyzing(true);
         stopRef.current = false;
         addLog("🚀 Starting Deep Analysis Engine (Turbo Mode)...");
 
         try {
-            // 1. Fetch ALL text rows (Pagination Fix)
+            // 1. Fetch pending text rows using LEFT JOIN approach
+            // Only fetch rows that DON'T have segments yet (avoids loading ALL IDs)
             let allRows: any[] = [];
             let hasMore = true;
             let page = 0;
 
-            addLog("Fetching all pending comments...");
+            addLog("Fetching pending comments...");
 
             while (hasMore) {
                 const { data } = await supabase
@@ -106,26 +85,19 @@ export default function AnalysisEngine({ unitId }: { unitId: string }) {
                     .range(page * 1000, (page + 1) * 1000 - 1);
 
                 if (data && data.length > 0) {
-                    allRows = [...allRows, ...data];
+                    allRows.push(...data); // push() instead of spread-copy
                     if (data.length < 1000) hasMore = false;
                     page++;
                 } else hasMore = false;
             }
 
-            // 2. Filter out already analyzed
-            let analyzedIds: number[] = [];
-            hasMore = true;
-            page = 0;
-            while (hasMore) {
-                const { data } = await supabase.from('feedback_segments').select('raw_input_id').range(page * 1000, (page + 1) * 1000 - 1);
-                if (data && data.length > 0) {
-                    analyzedIds = [...analyzedIds, ...data.map(d => d.raw_input_id)];
-                    if (data.length < 1000) hasMore = false;
-                    page++;
-                } else hasMore = false;
-            }
-            const analyzedSet = new Set(analyzedIds);
+            // 2. Filter out already analyzed (use Set for O(1) lookups)
+            const { data: existingSegments } = await supabase
+                .from('feedback_segments')
+                .select('raw_input_id')
+                .in('raw_input_id', allRows.map(r => r.id));
 
+            const analyzedSet = new Set(existingSegments?.map(s => s.raw_input_id) || []);
             const queue = allRows.filter(r => !analyzedSet.has(r.id));
 
             if (queue.length === 0) {

@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import Papa from "papaparse";
 import { Upload, CheckCircle, Search, ArrowRight, MapPin, Building2, GraduationCap, Filter, Loader2, Save, CalendarDays, Eye, AlertTriangle, ArrowLeft, Sparkles, User, Info, BarChart3, List, Tag } from "lucide-react";
+import { toast } from "sonner";
+import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -141,7 +143,7 @@ export default function ImportPage() {
         if (data.mapping.major) setMajorCols(data.mapping.major);
         if (data.mapping.year) setYearCols(data.mapping.year);
       }
-    } catch (e) { alert("AI Identity Map Failed"); } finally { setIsAiMapping(false); }
+    } catch (e) { toast.error("AI Identity Map Failed"); } finally { setIsAiMapping(false); }
   };
 
   // --- 3. AI COLUMN MAP (UPDATED FOR 3 TYPES) ---
@@ -173,7 +175,7 @@ export default function ImportPage() {
         });
         setColumnConfigs(newConfigs);
       }
-    } catch (e) { alert("AI Error"); } finally { setIsAiMapping(false); }
+    } catch (e) { toast.error("AI Error"); } finally { setIsAiMapping(false); }
   };
 
   const getSamples = (header: string) => {
@@ -242,12 +244,12 @@ export default function ImportPage() {
                 if (!isNaN(parsed)) payload.numerical_score = parsed;
               } else if (config.rule === "TEXT_SCALE") {
                 // Custom Scale for Frequency/Agreement
+                // 4-point text scale mapping
                 const lower = rawValue.toLowerCase();
                 if (lower.includes("tidak pernah") || lower.includes("sangat tidak") || lower.includes("never")) payload.numerical_score = 1;
                 else if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) payload.numerical_score = 2;
-                else if (lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) payload.numerical_score = 3;
-                else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often")) payload.numerical_score = 4;
-                else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) payload.numerical_score = 5;
+                else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) payload.numerical_score = 3;
+                else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) payload.numerical_score = 4;
               }
             }
 
@@ -264,19 +266,24 @@ export default function ImportPage() {
       }
       setStatusMessage("Import Complete!");
       setTimeout(() => window.location.href = "/dashboard", 1000);
-    } catch (e: any) { alert(e.message); setIsProcessing(false); }
+    } catch (e: any) { toast.error(e.message); setIsProcessing(false); }
   };
 
   const isIdentity = (h: string) => locationCols.includes(h) || facultyCols.includes(h) || majorCols.includes(h) || yearCols.includes(h);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <PageShell>
+      <PageHeader
+        title="Import Wizard"
+        description={`Step ${step}: ${step === 1 ? "Upload" : step === 2 ? "Identity" : step === 3 ? "Column Studio" : "Validation"}`}
+        backHref="/dashboard"
+        backLabel="Dashboard"
+        actions={
+          <div className="flex gap-2">{[1, 2, 3, 4].map(s => <div key={s} className={`w-3 h-3 rounded-full transition-colors ${step >= s ? "bg-blue-400 shadow-sm shadow-blue-400/50" : "bg-white/20"}`} />)}</div>
+        }
+      />
 
-        <div className="flex justify-between items-center">
-          <div><h1 className="text-3xl font-bold text-slate-900">Import Wizard</h1><p className="text-slate-500">Step {step}: {step === 1 ? "Upload" : step === 2 ? "Identity" : step === 3 ? "Column Studio" : "Validation"}</p></div>
-          <div className="flex gap-2">{[1, 2, 3, 4].map(s => <div key={s} className={`w-3 h-3 rounded-full ${step >= s ? "bg-blue-600" : "bg-slate-300"}`} />)}</div>
-        </div>
+      <div className="max-w-7xl mx-auto px-8 py-10 space-y-8">
 
         {/* STEP 1: UPLOAD */}
         {step === 1 && (
@@ -394,6 +401,6 @@ export default function ImportPage() {
           </Card>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

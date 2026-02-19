@@ -7,14 +7,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, BarChart2, BrainCircuit, Database, ListChecks, PieChart, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { PageShell, PageHeader } from "@/components/layout/PageShell";
 
+// --- IMPORT ENGINES & VIEWS ---
 // --- IMPORT ENGINES & VIEWS ---
 import QuantitativeView from "@/components/analysis/QuantitativeView";
 import CategorizationEngine from "@/components/analysis/CategorizationEngine";
 import AnalysisEngine from "@/components/analysis/AnalysisEngine";
 import DataBrowser from "@/components/analysis/DataBrowser";
 import QualitativeDashboard from "@/components/analysis/QualitativeDashboard";
-import DynamicAnalytics from "@/components/analysis/DynamicAnalytics"; // <--- New Import
+import ComprehensiveDashboard from "@/components/analysis/ComprehensiveDashboard";
+import DynamicAnalytics from "@/components/analysis/DynamicAnalytics";
 
 export default function UnitWorkspace() {
     const params = useParams();
@@ -34,87 +38,81 @@ export default function UnitWorkspace() {
     }, [unitId]);
 
     return (
-        <div className="min-h-screen bg-slate-50 p-8 font-sans">
-            <div className="max-w-7xl mx-auto space-y-6">
+        <PageShell>
+            <PageHeader
+                title={unitName}
+                description="Analysis Workspace"
+                backHref="/analysis"
+                backLabel="Analysis Board"
+            />
 
-                {/* Header Section */}
-                <div className="flex items-center gap-4">
-                    <Link href="/analysis">
-                        <Button variant="ghost" size="icon" className="hover:bg-slate-200">
-                            <ArrowLeft className="w-5 h-5 text-slate-600" />
-                        </Button>
-                    </Link>
-                    <div>
-                        <h1 className="text-2xl font-bold text-slate-900">{unitName}</h1>
-                        <p className="text-slate-500 text-sm">Analysis Workspace</p>
-                    </div>
-                </div>
+            <div className="max-w-7xl mx-auto px-8 py-10 space-y-6">
 
                 {/* Main Workspace Tabs */}
-                <Tabs defaultValue="quantitative" className="w-full">
-                    {/* Update grid-cols to 6 to fit the new tab */}
-                    <TabsList className="grid w-full grid-cols-6 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
-
-                        <TabsTrigger value="quantitative" className="gap-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                            <BarChart2 className="w-4 h-4" /> 1. Quantitative
-                        </TabsTrigger>
+                <Tabs defaultValue="categorization" className="w-full">
+                    {/* Update grid-cols to 5 (Combined 4+5) */}
+                    <TabsList className="grid w-full grid-cols-5 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
 
                         <TabsTrigger value="categorization" className="gap-2 data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
-                            <BrainCircuit className="w-4 h-4" /> 2. Build Categories
+                            <BrainCircuit className="w-4 h-4" /> 1. Build Categories
                         </TabsTrigger>
 
                         <TabsTrigger value="analysis" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
-                            <Database className="w-4 h-4" /> 3. Run Analysis
+                            <Database className="w-4 h-4" /> 2. Run Analysis
                         </TabsTrigger>
 
                         <TabsTrigger value="results" className="gap-2 data-[state=active]:bg-amber-50 data-[state=active]:text-amber-700">
-                            <ListChecks className="w-4 h-4" /> 4. Audit Results
+                            <ListChecks className="w-4 h-4" /> 3. Audit Results
                         </TabsTrigger>
 
                         <TabsTrigger value="insights" className="gap-2 data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
-                            <PieChart className="w-4 h-4" /> 5. Insights
+                            <PieChart className="w-4 h-4" /> 4. Comprehensive Insights
                         </TabsTrigger>
 
-                        {/* NEW TAB 6 */}
                         <TabsTrigger value="datascience" className="gap-2 data-[state=active]:bg-pink-50 data-[state=active]:text-pink-700">
-                            <Sparkles className="w-4 h-4" /> 6. AI Data Scientist
+                            <Sparkles className="w-4 h-4" /> 5. AI Data Scientist
                         </TabsTrigger>
 
                     </TabsList>
 
-                    {/* TAB 1: CHARTS & STATS */}
-                    <TabsContent value="quantitative" className="focus-visible:ring-0">
-                        <QuantitativeView unitId={unitId} />
+                    {/* TAB 1: AI CATEGORY DISCOVERY */}
+                    <TabsContent value="categorization" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <ErrorBoundary fallbackTitle="Category Engine crashed">
+                            <CategorizationEngine unitId={unitId} />
+                        </ErrorBoundary>
                     </TabsContent>
 
-                    {/* TAB 2: AI CATEGORY DISCOVERY */}
-                    <TabsContent value="categorization" className="focus-visible:ring-0">
-                        <CategorizationEngine unitId={unitId} />
+                    {/* TAB 2: DEEP ANALYSIS */}
+                    <TabsContent value="analysis" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <ErrorBoundary fallbackTitle="Analysis Engine crashed">
+                            <AnalysisEngine unitId={unitId} />
+                        </ErrorBoundary>
                     </TabsContent>
 
-                    {/* TAB 3: DEEP ANALYSIS */}
-                    <TabsContent value="analysis" className="focus-visible:ring-0">
-                        <AnalysisEngine unitId={unitId} />
+                    {/* TAB 3: DATA BROWSER (AUDIT) */}
+                    <TabsContent value="results" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <ErrorBoundary fallbackTitle="Data Browser crashed">
+                            <DataBrowser unitId={unitId} />
+                        </ErrorBoundary>
                     </TabsContent>
 
-                    {/* TAB 4: DATA BROWSER (AUDIT) */}
-                    <TabsContent value="results" className="focus-visible:ring-0">
-                        <DataBrowser unitId={unitId} />
+                    {/* TAB 4: COMPREHENSIVE DASHBOARD (Combined Qual + Quant) */}
+                    <TabsContent value="insights" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <ErrorBoundary fallbackTitle="Insights Dashboard crashed">
+                            <ComprehensiveDashboard unitId={unitId} />
+                        </ErrorBoundary>
                     </TabsContent>
 
-                    {/* TAB 5: EXECUTIVE DASHBOARD */}
-                    <TabsContent value="insights" className="focus-visible:ring-0">
-                        <QualitativeDashboard unitId={unitId} />
-                    </TabsContent>
-
-                    {/* TAB 6: DYNAMIC AI ANALYTICS */}
-                    <TabsContent value="datascience" className="focus-visible:ring-0">
-                        <DynamicAnalytics unitId={unitId} />
+                    {/* TAB 5: DYNAMIC AI ANALYTICS */}
+                    <TabsContent value="datascience" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <ErrorBoundary fallbackTitle="AI Analytics crashed">
+                            <DynamicAnalytics unitId={unitId} />
+                        </ErrorBoundary>
                     </TabsContent>
 
                 </Tabs>
 
             </div>
-        </div>
+        </PageShell>
     );
 }

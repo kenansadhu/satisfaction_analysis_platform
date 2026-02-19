@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Loader2, Plus, Trash2, Play, Sparkles, CheckCircle2, Save, X, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type Category = { name: string; description: string; keywords: string[] };
 type Instruction = { id: number; instruction: string };
@@ -27,6 +29,7 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
     const [unitName, setUnitName] = useState("");
 
     const stopRef = useRef(false);
+    const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -99,7 +102,7 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
             }
 
             if (allRows.length === 0) {
-                alert("No text comments found to analyze!");
+                toast.warning("No text comments found to analyze!");
                 setIsProcessing(false);
                 return;
             }
@@ -138,15 +141,21 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
             setStatusMsg("Discovery Complete! Please review categories below.");
             setProgress(100);
         } catch (e: any) {
-            alert("Error during discovery: " + e.message);
+            toast.error("Error during discovery: " + e.message);
         } finally {
             setIsProcessing(false);
         }
     };
 
     const saveTaxonomy = async () => {
-        if (!confirm("This will overwrite existing categories for this unit. Continue?")) return;
+        // 1. Clear existing analysis (segments) to prevent orphans & force re-analysis
+        const { data: inputs } = await supabase.from('raw_feedback_inputs').select('id').eq('target_unit_id', unitId);
+        const inputIds = inputs?.map(i => i.id) || [];
+        if (inputIds.length > 0) {
+            await supabase.from('feedback_segments').delete().in('raw_input_id', inputIds);
+        }
 
+        // 2. Clear old categories
         await supabase.from('analysis_categories').delete().eq('unit_id', unitId);
 
         const payload = categories.map(c => ({
@@ -157,8 +166,9 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
         }));
 
         const { error } = await supabase.from('analysis_categories').insert(payload);
-        if (!error) alert("Taxonomy Saved Successfully!");
-        else alert("Save failed: " + error.message);
+        if (!error) toast.success("Taxonomy Saved Successfully!");
+        else toast.error("Save failed: " + error.message);
+        setShowSaveConfirm(false);
     };
 
     return (
@@ -223,7 +233,7 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
                             <CardTitle className="text-lg flex items-center gap-2 text-green-900"><CheckCircle2 className="w-5 h-5" /> 3. Review Taxonomy</CardTitle>
                             <CardDescription>Found {categories.length} categories. Edit before saving.</CardDescription>
                         </div>
-                        <Button onClick={saveTaxonomy} className="bg-green-600 hover:bg-green-700 shadow-sm"><Save className="w-4 h-4 mr-2" /> Save & Lock Taxonomy</Button>
+                        <Button onClick={() => setShowSaveConfirm(true)} className="bg-green-600 hover:bg-green-700 shadow-sm"><Save className="w-4 h-4 mr-2" /> Save & Lock Taxonomy</Button>
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {categories.map((cat, idx) => (
@@ -262,6 +272,14 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
                     </CardContent>
                 </Card>
             )}
+            <ConfirmDialog
+                open={showSaveConfirm}
+                onOpenChange={setShowSaveConfirm}
+                title="Overwrite Taxonomy?"
+                description="This will overwrite existing categories for this unit. Continue?"
+                confirmLabel="Save & Overwrite"
+                onConfirm={saveTaxonomy}
+            />
         </div>
     );
 }

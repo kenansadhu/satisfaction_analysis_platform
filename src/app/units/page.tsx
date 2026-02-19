@@ -6,11 +6,13 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Plus, Pencil, Trash2, Search, Building2, Save, Loader2, AlertTriangle } from "lucide-react";
-import Link from "next/link";
+import { Plus, Pencil, Trash2, Search, Building2, Loader2 } from "lucide-react";
+import { PageShell, PageHeader } from "@/components/layout/PageShell";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type Unit = {
     id: number;
@@ -25,13 +27,11 @@ export default function ManageUnitsPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
 
-    // Dialog State
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
-
-    // Form State
     const [formData, setFormData] = useState({ name: "", description: "", analysis_context: "" });
+    const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
     useEffect(() => { fetchUnits(); }, []);
 
@@ -59,11 +59,10 @@ export default function ManageUnitsPage() {
     };
 
     const handleSave = async () => {
-        if (!formData.name) return alert("Name is required");
+        if (!formData.name) { toast.warning("Name is required"); return; }
         setIsSaving(true);
         try {
             if (editingUnit) {
-                // Update
                 const { error } = await supabase
                     .from('organization_units')
                     .update({
@@ -74,7 +73,6 @@ export default function ManageUnitsPage() {
                     .eq('id', editingUnit.id);
                 if (error) throw error;
             } else {
-                // Create
                 const { error } = await supabase
                     .from('organization_units')
                     .insert({
@@ -86,47 +84,45 @@ export default function ManageUnitsPage() {
             }
             setIsDialogOpen(false);
             fetchUnits();
+            toast.success(editingUnit ? "Unit updated!" : "Unit created!");
         } catch (e: any) {
-            alert("Error saving unit: " + e.message);
+            toast.error("Error saving unit: " + e.message);
         } finally {
             setIsSaving(false);
         }
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm("Are you sure? This might fail if there is survey data linked to this unit.")) return;
         try {
             const { error } = await supabase.from('organization_units').delete().eq('id', id);
             if (error) throw error;
             fetchUnits();
+            toast.success("Unit deleted");
         } catch (e: any) {
-            alert("Could not delete. It likely has associated data. (Error: " + e.message + ")");
+            toast.error("Could not delete. It likely has associated data. (Error: " + e.message + ")");
         }
+        setDeleteTarget(null);
     };
 
-    // Filter units
     const filteredUnits = units.filter(u => u.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
     return (
-        <div className="min-h-screen bg-slate-50 p-8 font-sans">
-            <div className="max-w-6xl mx-auto space-y-8">
-
-                {/* Header */}
-                <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                        <Link href="/"><Button variant="ghost" size="icon"><ArrowLeft className="w-5 h-5" /></Button></Link>
-                        <div>
-                            <h1 className="text-3xl font-bold text-slate-900">Organization Units</h1>
-                            <p className="text-slate-500">Manage departments and their AI analysis rules.</p>
-                        </div>
-                    </div>
-                    <Button onClick={handleOpenAdd} className="bg-blue-600 hover:bg-blue-700 gap-2 shadow-sm">
+        <PageShell>
+            <PageHeader
+                title="Organization Units"
+                description="Manage departments and their AI analysis rules."
+                backHref="/"
+                backLabel="Home"
+                actions={
+                    <Button onClick={handleOpenAdd} className="gap-2 bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/25 border border-blue-500/50">
                         <Plus className="w-4 h-4" /> Add Unit
                     </Button>
-                </div>
+                }
+            />
 
-                {/* Content */}
-                <Card>
+            <div className="max-w-7xl mx-auto px-8 py-10">
+                <Card className="overflow-hidden">
+                    <div className="h-1 bg-gradient-to-r from-indigo-500 to-purple-500" />
                     <CardHeader className="flex flex-row items-center justify-between pb-4">
                         <div className="relative w-72">
                             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
@@ -137,7 +133,7 @@ export default function ManageUnitsPage() {
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
-                        <Badge variant="outline" className="text-slate-500">{units.length} Units Found</Badge>
+                        <Badge variant="outline" className="text-slate-500">{units.length} Units</Badge>
                     </CardHeader>
                     <CardContent>
                         <Table>
@@ -151,14 +147,21 @@ export default function ManageUnitsPage() {
                             </TableHeader>
                             <TableBody>
                                 {isLoading ? (
-                                    <TableRow><TableCell colSpan={4} className="text-center py-10 text-slate-500">Loading units...</TableCell></TableRow>
+                                    [1, 2, 3].map(i => (
+                                        <TableRow key={i}>
+                                            <TableCell><div className="h-5 w-32 bg-slate-200 rounded animate-pulse" /></TableCell>
+                                            <TableCell><div className="h-4 w-48 bg-slate-100 rounded animate-pulse" /></TableCell>
+                                            <TableCell><div className="h-5 w-24 bg-slate-100 rounded-full animate-pulse" /></TableCell>
+                                            <TableCell><div className="h-8 w-16 bg-slate-100 rounded animate-pulse ml-auto" /></TableCell>
+                                        </TableRow>
+                                    ))
                                 ) : filteredUnits.length === 0 ? (
                                     <TableRow><TableCell colSpan={4} className="text-center py-10 text-slate-500">No units found.</TableCell></TableRow>
                                 ) : (
                                     filteredUnits.map((unit) => (
                                         <TableRow key={unit.id} className="group">
                                             <TableCell className="font-semibold text-slate-800 flex items-center gap-2">
-                                                <div className="p-2 bg-slate-100 rounded-md"><Building2 className="w-4 h-4 text-slate-500" /></div>
+                                                <div className="p-2 bg-indigo-50 rounded-md group-hover:bg-indigo-100 transition-colors"><Building2 className="w-4 h-4 text-indigo-500" /></div>
                                                 {unit.name}
                                             </TableCell>
                                             <TableCell className="text-slate-600 truncate max-w-xs" title={unit.description}>{unit.description || "-"}</TableCell>
@@ -172,7 +175,7 @@ export default function ManageUnitsPage() {
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <Button variant="ghost" size="icon" onClick={() => handleOpenEdit(unit)}><Pencil className="w-4 h-4 text-blue-500" /></Button>
-                                                    <Button variant="ghost" size="icon" onClick={() => handleDelete(unit.id)}><Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" /></Button>
+                                                    <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(unit.id)}><Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" /></Button>
                                                 </div>
                                             </TableCell>
                                         </TableRow>
@@ -219,8 +222,16 @@ export default function ManageUnitsPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-
+                <ConfirmDialog
+                    open={deleteTarget !== null}
+                    onOpenChange={(open) => !open && setDeleteTarget(null)}
+                    title="Delete Unit?"
+                    description="Are you sure? This might fail if there is survey data linked to this unit."
+                    confirmLabel="Delete"
+                    variant="destructive"
+                    onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+                />
             </div>
-        </div>
+        </PageShell>
     );
 }
