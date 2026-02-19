@@ -1,9 +1,17 @@
 import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { runAnalysisSchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
   try {
-    const { comments, taxonomy, allUnits, unitContext } = await req.json();
+    const body = await req.json();
+    const validation = runAnalysisSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { comments, taxonomy, allUnits, unitContext } = validation.data;
 
     const categoriesList = taxonomy.map((c: any) => `- "${c.name}": ${c.description}`).join("\n");
     const unitsList = allUnits.map((u: any) => `- "${u.name}"`).join("\n");

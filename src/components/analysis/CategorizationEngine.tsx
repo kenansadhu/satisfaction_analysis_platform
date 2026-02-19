@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 type Category = { name: string; description: string; keywords: string[] };
 type Instruction = { id: number; instruction: string };
 
-export default function CategorizationEngine({ unitId }: { unitId: string }) {
+export default function CategorizationEngine({ unitId, surveyId, onDataChange }: { unitId: string; surveyId?: string; onDataChange?: () => void }) {
     // Data State
     const [instructions, setInstructions] = useState<Instruction[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
@@ -30,10 +30,11 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
 
     const stopRef = useRef(false);
     const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+    const [instructionToDelete, setInstructionToDelete] = useState<number | null>(null);
 
     useEffect(() => {
         loadData();
-    }, [unitId]);
+    }, [unitId, surveyId]); // Add surveyId dependency
 
     async function loadData() {
         const { data: unit } = await supabase.from('organization_units').select('name').eq('id', unitId).single();
@@ -47,11 +48,26 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
             setCategories(cats.map(c => ({ name: c.name, description: c.description || "", keywords: c.keywords || [] })));
         }
 
-        const { count } = await supabase.from('raw_feedback_inputs')
+        let query = supabase.from('raw_feedback_inputs')
             .select('*', { count: 'exact', head: true })
             .eq('target_unit_id', unitId)
+            .eq('is_quantitative', false) // Sync with dashboard logic
             .eq('requires_analysis', true);
-        setTotalComments(count || 0);
+
+        // Scope by survey if provided
+        // Scope by survey if provided
+        if (surveyId) {
+            const { count } = await supabase.from('raw_feedback_inputs')
+                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
+                .eq('target_unit_id', unitId)
+                .eq('requires_analysis', true)
+                .eq('is_quantitative', false) // Ensure consistency
+                .eq('respondents.survey_id', surveyId);
+            setTotalComments(count || 0);
+        } else {
+            const { count } = await query;
+            setTotalComments(count || 0);
+        }
     }
 
     const addInstruction = async () => {
@@ -61,9 +77,15 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
         setNewInstruction("");
     };
 
-    const deleteInstruction = async (id: number) => {
-        await supabase.from('unit_analysis_instructions').delete().eq('id', id);
-        setInstructions(instructions.filter(i => i.id !== id));
+    const promptDeleteInstruction = (id: number) => {
+        setInstructionToDelete(id);
+    };
+
+    const confirmDeleteInstruction = async () => {
+        if (!instructionToDelete) return;
+        await supabase.from('unit_analysis_instructions').delete().eq('id', instructionToDelete);
+        setInstructions(instructions.filter(i => i.id !== instructionToDelete));
+        setInstructionToDelete(null);
     };
 
     // --- RECURSIVE DISCOVERY ENGINE ---
@@ -83,12 +105,19 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
             const DB_BATCH = 1000;
 
             while (hasMore) {
-                const { data, error } = await supabase
+                let query = supabase
                     .from('raw_feedback_inputs')
-                    .select('id, raw_text')
+                    .select('id, raw_text, respondents!inner(survey_id)') // Explicit join
                     .eq('target_unit_id', unitId)
-                    .eq('requires_analysis', true)
-                    .range(page * DB_BATCH, (page + 1) * DB_BATCH - 1);
+                    .eq('is_quantitative', false)
+                    .eq('requires_analysis', true);
+
+                if (surveyId) {
+                    // Use !inner join to filter by survey_id strict
+                    query = query.eq('respondents.survey_id', surveyId);
+                }
+
+                const { data, error } = await query.range(page * DB_BATCH, (page + 1) * DB_BATCH - 1);
 
                 if (error) throw error;
                 if (data.length > 0) {
@@ -149,10 +178,48 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
 
     const saveTaxonomy = async () => {
         // 1. Clear existing analysis (segments) to prevent orphans & force re-analysis
-        const { data: inputs } = await supabase.from('raw_feedback_inputs').select('id').eq('target_unit_id', unitId);
-        const inputIds = inputs?.map(i => i.id) || [];
-        if (inputIds.length > 0) {
-            await supabase.from('feedback_segments').delete().in('raw_input_id', inputIds);
+        // Robust "Drain" Strategy: Query segments directly and delete them until none remain.
+
+        let clearing = true;
+        while (clearing) {
+            // Find segments linked to this unit
+            let query = supabase
+                .from('feedback_segments')
+                .select('id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))')
+                .eq('raw_feedback_inputs.target_unit_id', unitId)
+                .limit(1000); // Fetch in batches
+
+            if (surveyId) {
+                query = query.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+            }
+
+            const { data: segments, error } = await query;
+
+            if (error) {
+                toast.error("Cleanup failed: " + error.message);
+                return; // Stop if error to avoid infinite loop
+            }
+
+            if (!segments || segments.length === 0) {
+                clearing = false;
+                break;
+            }
+
+            const segmentIds = segments.map(s => s.id);
+
+            // Delete this batch
+            const { error: delError } = await supabase
+                .from('feedback_segments')
+                .delete()
+                .in('id', segmentIds);
+
+            if (delError) {
+                toast.error("Segment deletion failed: " + delError.message);
+                return;
+            }
+
+            // If we fetched fewer than limit, we are likely done, but safe to loop once more to confirm 0
+            if (segments.length < 1000) clearing = false;
         }
 
         // 2. Clear old categories
@@ -166,8 +233,12 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
         }));
 
         const { error } = await supabase.from('analysis_categories').insert(payload);
-        if (!error) toast.success("Taxonomy Saved Successfully!");
-        else toast.error("Save failed: " + error.message);
+        if (!error) {
+            toast.success("Taxonomy Saved Successfully!");
+            if (onDataChange) onDataChange();
+        } else {
+            toast.error("Save failed: " + error.message);
+        }
         setShowSaveConfirm(false);
     };
 
@@ -194,7 +265,7 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
                         {instructions.map(inst => (
                             <Badge key={inst.id} variant="secondary" className="bg-white border-purple-200 text-purple-800 p-2 pl-3 gap-2 text-sm font-normal">
                                 {inst.instruction}
-                                <Trash2 className="w-3 h-3 cursor-pointer hover:text-red-500" onClick={() => deleteInstruction(inst.id)} />
+                                <Trash2 className="w-3 h-3 cursor-pointer hover:text-red-500" onClick={() => promptDeleteInstruction(inst.id)} />
                             </Badge>
                         ))}
                         {instructions.length === 0 && <span className="text-slate-400 text-sm italic">No instructions yet. AI will use general knowledge.</span>}
@@ -279,6 +350,16 @@ export default function CategorizationEngine({ unitId }: { unitId: string }) {
                 description="This will overwrite existing categories for this unit. Continue?"
                 confirmLabel="Save & Overwrite"
                 onConfirm={saveTaxonomy}
+            />
+
+            <ConfirmDialog
+                open={instructionToDelete !== null}
+                onOpenChange={(open) => !open && setInstructionToDelete(null)}
+                title="Delete Instruction?"
+                description="Are you sure you want to remove this customized instruction? This may affect future analysis."
+                confirmLabel="Delete"
+                variant="destructive"
+                onConfirm={confirmDeleteInstruction}
             />
         </div>
     );

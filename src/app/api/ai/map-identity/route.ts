@@ -1,9 +1,17 @@
 import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { mapIdentitySchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
   try {
-    const { headers } = await req.json();
+    const body = await req.json();
+    const validation = mapIdentitySchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { headers } = validation.data;
 
     const prompt = `
       You are a data analyst. Analyze these CSV headers and categorize them into 4 Identity Groups.

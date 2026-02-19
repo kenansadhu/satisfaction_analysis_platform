@@ -1,9 +1,17 @@
 import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { analyzeBatchSchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
   try {
-    const { comments, context, taxonomy } = await req.json();
+    const body = await req.json();
+    const validation = analyzeBatchSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { comments, context, taxonomy } = validation.data;
 
     // Prepare the Taxonomy String for the Prompt
     const categoriesList = taxonomy.categories.map((c: any) => `- ${c.name}: ${c.description}`).join("\n");

@@ -1,9 +1,17 @@
 import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { discoverCategoriesSchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
   try {
-    const { comments, currentCategories, instructions, unitName } = await req.json();
+    const body = await req.json();
+    const validation = discoverCategoriesSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { comments, currentCategories, instructions, unitName } = validation.data;
 
     // Format the "Memory" of what we found so far
     const existingList = currentCategories.length > 0

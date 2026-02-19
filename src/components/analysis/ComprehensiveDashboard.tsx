@@ -31,7 +31,7 @@ type ExecutiveReportData = {
     closing_statement: string;
 };
 
-export default function ComprehensiveDashboard({ unitId }: { unitId: string }) {
+export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: string; surveyId?: string }) {
     const dashboardRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
     const [exportingPdf, setExportingPdf] = useState(false);
@@ -68,10 +68,11 @@ export default function ComprehensiveDashboard({ unitId }: { unitId: string }) {
     useEffect(() => {
         loadAllData();
         loadSavedReport();
-    }, [unitId]);
+    }, [unitId, surveyId]);
 
     // --- DATA LOADING ---
     async function loadSavedReport() {
+        // TODO: ideally scope report by survey_id too if table allows
         const { data } = await supabase.from('unit_ai_reports').select('content, created_at').eq('unit_id', unitId).eq('report_type', 'executive').maybeSingle();
         if (data) {
             const saved = data.content.report;
@@ -96,11 +97,15 @@ export default function ComprehensiveDashboard({ unitId }: { unitId: string }) {
             setCategories(catRes.data || []);
 
             // 2. Qualitative Segments
-            const { data: rawInputs } = await supabase
+            let qualQuery = supabase
                 .from('raw_feedback_inputs')
-                .select(`id, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion)`)
+                .select(`id, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion), respondents!inner(survey_id)`)
                 .eq('target_unit_id', unitId)
                 .eq('requires_analysis', true);
+
+            if (surveyId) qualQuery = qualQuery.eq('respondents.survey_id', surveyId);
+
+            const { data: rawInputs } = await qualQuery;
 
             if (rawInputs) {
                 const flat = rawInputs.flatMap(r => r.feedback_segments).map((s: any) => ({
@@ -111,8 +116,13 @@ export default function ComprehensiveDashboard({ unitId }: { unitId: string }) {
             }
 
             // 3. Quantitative Data
-            const { data: scores } = await supabase.from('raw_feedback_inputs').select('source_column, numerical_score').eq('target_unit_id', unitId).eq('is_quantitative', true).not('numerical_score', 'is', null);
-            const { data: catScores } = await supabase.from('raw_feedback_inputs').select('source_column, raw_text').eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', false);
+            let scoresQuery = supabase.from('raw_feedback_inputs').select('source_column, numerical_score, respondents!inner(survey_id)').eq('target_unit_id', unitId).eq('is_quantitative', true).not('numerical_score', 'is', null);
+            if (surveyId) scoresQuery = scoresQuery.eq('respondents.survey_id', surveyId);
+            const { data: scores } = await scoresQuery;
+
+            let catScoresQuery = supabase.from('raw_feedback_inputs').select('source_column, raw_text, respondents!inner(survey_id)').eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', false);
+            if (surveyId) catScoresQuery = catScoresQuery.eq('respondents.survey_id', surveyId);
+            const { data: catScores } = await catScoresQuery;
 
             const grouped: Record<string, QuestionGroup> = {};
 
@@ -235,7 +245,10 @@ export default function ComprehensiveDashboard({ unitId }: { unitId: string }) {
 
     const handleQuantDrillDown = async (question: string, type: "SCORE" | "CATEGORY", filterValue: string) => {
         setActiveQuantDrillDown({ question, filterValue, type, entries: [], loading: true });
-        let query = supabase.from('raw_feedback_inputs').select('id, raw_text, numerical_score').eq('target_unit_id', unitId).eq('source_column', question);
+        let query = supabase.from('raw_feedback_inputs').select('id, raw_text, numerical_score, respondents!inner(survey_id)').eq('target_unit_id', unitId).eq('source_column', question);
+
+        if (surveyId) query = query.eq('respondents.survey_id', surveyId);
+
         if (type === "SCORE") query = query.eq('numerical_score', parseFloat(filterValue));
         else query = query.eq('raw_text', filterValue);
 
@@ -296,19 +309,21 @@ export default function ComprehensiveDashboard({ unitId }: { unitId: string }) {
         } else {
             let query = supabase
                 .from('raw_feedback_inputs')
-                .select('id, source_column, raw_text, numerical_score', { count: 'exact' })
+                .select('id, source_column, raw_text, numerical_score, respondents!inner(survey_id)', { count: 'exact' })
                 .eq('target_unit_id', unitId)
                 .eq('is_quantitative', true)
                 .not('numerical_score', 'is', null)
                 .order('id', { ascending: true });
 
+            if (surveyId) query = query.eq('respondents.survey_id', surveyId);
             if (search) query = query.ilike('source_column', `%${search}%`);
+
             const { data, count } = await query.range(from, to);
             setRawDataEntries(data || []);
             setRawDataTotal(count || 0);
         }
         setRawDataLoading(false);
-    }, [unitId, categories, allSegments]);
+    }, [unitId, surveyId, allSegments]);
 
     useEffect(() => {
         if (showRawData) loadRawData(rawDataTab, rawDataPage, rawDataSearch);

@@ -1,9 +1,17 @@
 import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { suggestTaxonomySchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
   try {
-    const { unitName, unitDesc, sampleComments, existingCategories, mode, additionalContext } = await req.json();
+    const body = await req.json();
+    const validation = suggestTaxonomySchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { unitName, unitDesc, sampleComments, existingCategories, mode, additionalContext } = validation.data;
 
     let prompt = "";
 

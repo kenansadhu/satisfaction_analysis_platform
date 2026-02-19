@@ -5,18 +5,15 @@ import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import Link from "next/link";
-import { ArrowRight, Building2, Search } from "lucide-react";
+import { ArrowRight, Building2, Search, School } from "lucide-react";
 import { Input } from "@/components/ui/input";
-
-type Unit = {
-    id: number;
-    name: string;
-    analysis_status: string;
-};
+import { OrganizationUnit } from "@/types";
 
 export default function UnitsPage() {
-    const [units, setUnits] = useState<Unit[]>([]);
+    const [units, setUnits] = useState<OrganizationUnit[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
 
@@ -24,7 +21,7 @@ export default function UnitsPage() {
         const fetchUnits = async () => {
             const { data } = await supabase
                 .from('organization_units')
-                .select('id, name, analysis_status')
+                .select('*')
                 .order('name');
 
             if (data) setUnits(data);
@@ -37,7 +34,7 @@ export default function UnitsPage() {
         u.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const getStatusColor = (status: string) => {
+    const getStatusColor = (status: string | undefined) => {
         switch (status) {
             case "COMPLETED": return "bg-green-100 text-green-700 border-green-200";
             case "ANALYZING": return "bg-blue-100 text-blue-700 border-blue-200";
@@ -70,13 +67,15 @@ export default function UnitsPage() {
                 {loading ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {[1, 2, 3, 4, 5, 6].map(i => (
-                            <div key={i} className="h-32 bg-slate-200 rounded-lg animate-pulse" />
+                            <Skeleton key={i} className="h-40 w-full rounded-xl" />
                         ))}
                     </div>
                 ) : filteredUnits.length === 0 ? (
-                    <div className="text-center py-20 text-slate-400">
-                        No units found matching "{searchQuery}"
-                    </div>
+                    <EmptyState
+                        title="No units found"
+                        description={searchQuery ? `No units match "${searchQuery}"` : "No organization units have been created yet."}
+                        icon={School}
+                    />
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {filteredUnits.map(unit => (
@@ -87,7 +86,7 @@ export default function UnitsPage() {
                                             <Building2 className="w-5 h-5" />
                                         </div>
                                         <Badge variant="outline" className={getStatusColor(unit.analysis_status)}>
-                                            {unit.analysis_status.replace(/_/g, " ")}
+                                            {(unit.analysis_status || "NOT_STARTED").replace(/_/g, " ")}
                                         </Badge>
                                     </CardHeader>
                                     <CardContent>

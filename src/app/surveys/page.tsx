@@ -6,20 +6,16 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, ArrowRight, BarChart3, Calendar, Plus, Users } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Trash2, ArrowRight, BarChart3, Calendar, Plus, Users, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Survey } from "@/types";
 
-type Survey = {
-  id: number;
-  title: string;
-  created_at: string;
-  respondent_count?: number;
-};
-
-export default function DashboardPage() {
+export default function SurveysPage() {
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
@@ -46,7 +42,12 @@ export default function DashboardPage() {
         .from('respondents')
         .select('*', { count: 'exact', head: true })
         .eq('survey_id', s.id);
-      return { ...s, respondent_count: count || 0 };
+      return {
+        id: s.id,
+        title: s.title,
+        created_at: s.created_at,
+        respondents: [{ count: count || 0 }] // Match the type definition
+      };
     }));
 
     setSurveys(enrichedSurveys);
@@ -63,7 +64,7 @@ export default function DashboardPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Survey Dashboard"
+        title="Surveys"
         description="Manage your analysis projects and track historical data."
         backHref="/"
         backLabel="Home"
@@ -80,27 +81,23 @@ export default function DashboardPage() {
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
-              <Card key={i} className="border-slate-200 overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-2 flex-1">
-                      <div className="h-5 w-40 bg-slate-200 rounded animate-pulse" />
-                      <div className="h-3 w-24 bg-slate-100 rounded animate-pulse" />
-                    </div>
-                    <div className="h-5 w-16 bg-slate-100 rounded-full animate-pulse" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex justify-between mb-4">
-                    <div className="h-8 w-20 bg-slate-100 rounded animate-pulse" />
-                    <div className="h-8 w-20 bg-slate-100 rounded animate-pulse" />
-                  </div>
-                  <div className="h-9 w-full bg-slate-100 rounded animate-pulse" />
-                </CardContent>
-              </Card>
+              <div key={i} className="flex flex-col space-y-3">
+                <Skeleton className="h-[200px] w-full rounded-xl" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-[80%]" />
+                </div>
+              </div>
             ))}
           </div>
+        ) : surveys.length === 0 ? (
+          <EmptyState
+            title="No surveys found"
+            description="Get started by importing your first CSV file to begin the AI analysis."
+            icon={FolderOpen}
+            actionLabel="Create First Survey"
+            onAction={() => window.location.href = "/import"}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {surveys.map((survey) => (
@@ -125,7 +122,9 @@ export default function DashboardPage() {
                 <CardContent>
                   <div className="flex items-center gap-2 text-slate-600 bg-slate-50 p-3 rounded-md border border-slate-100">
                     <Users className="w-5 h-5 text-blue-500" />
-                    <span className="font-semibold text-lg">{survey.respondent_count?.toLocaleString()}</span>
+                    <span className="font-semibold text-lg">
+                      {survey.respondents?.[0]?.count?.toLocaleString() || 0}
+                    </span>
                     <span className="text-sm text-slate-400">Respondents</span>
                   </div>
                 </CardContent>
@@ -133,29 +132,14 @@ export default function DashboardPage() {
                   <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleteTarget(survey.id)}>
                     <Trash2 className="w-4 h-4" />
                   </Button>
-                  <Link href={`/dashboard/${survey.id}`}>
+                  <Link href={`/surveys/${survey.id}`}>
                     <Button size="sm" variant="outline" className="gap-2 group-hover:border-blue-300 group-hover:text-blue-600">
-                      Manage Data <ArrowRight className="w-4 h-4" />
+                      Analyze Project <ArrowRight className="w-4 h-4" />
                     </Button>
                   </Link>
                 </CardFooter>
               </Card>
             ))}
-
-            {surveys.length === 0 && (
-              <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-200 rounded-xl bg-white">
-                <div className="mx-auto w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                  <BarChart3 className="w-7 h-7 text-slate-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-slate-900">No surveys found</h3>
-                <p className="text-slate-500 mb-6 max-w-sm mx-auto">Get started by importing your first CSV file to begin the AI analysis.</p>
-                <Link href="/import">
-                  <Button className="bg-blue-600 hover:bg-blue-700 gap-2">
-                    <Plus className="w-4 h-4" /> Create First Survey
-                  </Button>
-                </Link>
-              </div>
-            )}
           </div>
         )}
       </div>

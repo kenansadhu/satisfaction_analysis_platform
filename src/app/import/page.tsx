@@ -265,7 +265,7 @@ export default function ImportPage() {
         setStatusMessage(`Processed ${processedRows} rows...`);
       }
       setStatusMessage("Import Complete!");
-      setTimeout(() => window.location.href = "/dashboard", 1000);
+      setTimeout(() => window.location.href = "/surveys", 1000);
     } catch (e: any) { toast.error(e.message); setIsProcessing(false); }
   };
 
@@ -276,7 +276,7 @@ export default function ImportPage() {
       <PageHeader
         title="Import Wizard"
         description={`Step ${step}: ${step === 1 ? "Upload" : step === 2 ? "Identity" : step === 3 ? "Column Studio" : "Validation"}`}
-        backHref="/dashboard"
+        backHref="/surveys"
         backLabel="Dashboard"
         actions={
           <div className="flex gap-2">{[1, 2, 3, 4].map(s => <div key={s} className={`w-3 h-3 rounded-full transition-colors ${step >= s ? "bg-blue-400 shadow-sm shadow-blue-400/50" : "bg-white/20"}`} />)}</div>

@@ -1,9 +1,17 @@
 import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { mapColumnsSchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
   try {
-    const { headers, samples, units } = await req.json();
+    const body = await req.json();
+    const validation = mapColumnsSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { headers, samples, units } = validation.data;
 
     const prompt = `
       You are a Data Architect. Classify Survey Columns into 3 Types.

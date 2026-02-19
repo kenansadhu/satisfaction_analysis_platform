@@ -15,9 +15,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Student Voice Analytics",
-  description: "AI-Powered Student Feedback Processing Platform",
+  title: "SSI UPH Analytics",
+  description: "Helping LP2MU by transforming raw student feedback into actionable intelligence.",
 };
+
+import { AnalysisProvider } from "@/context/AnalysisContext";
 
 export default function RootLayout({
   children,
@@ -29,9 +31,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AppShell>
-          {children}
-        </AppShell>
+        <AnalysisProvider>
+          <AppShell>
+            {children}
+          </AppShell>
+        </AnalysisProvider>
         <Toaster richColors position="top-right" closeButton />
       </body>
     </html>

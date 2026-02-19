@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, BarChart3, Settings, Upload, ArrowRight, Database, Users, Building2, Sparkles, TrendingUp, Zap, PieChart } from "lucide-react";
+import { Plus, BarChart3, Settings, Upload, ArrowRight, Database, Users, Building2, Sparkles, TrendingUp, Zap, PieChart, LayoutDashboard } from "lucide-react";
 
 export const revalidate = 0;
 
@@ -40,13 +40,13 @@ export default async function HomePage() {
                 AI-Powered Analytics Platform
               </div>
               <h1 className="text-4xl font-bold text-white tracking-tight">
-                Student Voice<br />
+                SSI UPH<br />
                 <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
                   Analytics
                 </span>
               </h1>
               <p className="text-slate-400 text-lg max-w-md">
-                Transform raw student feedback into actionable intelligence with AI-driven categorization and sentiment analysis.
+                Helping LP2MU by transforming raw student feedback into actionable intelligence.
               </p>
             </div>
             <div className="flex gap-3">
@@ -82,6 +82,7 @@ export default async function HomePage() {
               </div>
             ))}
           </div>
+
         </div>
       </div>
 
@@ -90,19 +91,19 @@ export default async function HomePage() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-3 gap-4">
-          <Link href="/analysis" className="group">
+          <Link href="/executive" className="group">
             <div className="flex items-center gap-4 p-5 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
               <div className="p-3 bg-blue-50 rounded-xl group-hover:bg-blue-100 transition-colors">
-                <BarChart3 className="w-5 h-5 text-blue-600" />
+                <LayoutDashboard className="w-5 h-5 text-blue-600" />
               </div>
               <div>
-                <div className="font-semibold text-slate-900">Analysis Board</div>
-                <div className="text-sm text-slate-500">Run AI analysis on your units</div>
+                <div className="font-semibold text-slate-900">Executive View</div>
+                <div className="text-sm text-slate-500">See a global view of the SSI result of all units</div>
               </div>
               <ArrowRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
             </div>
           </Link>
-          <Link href="/dashboard" className="group">
+          <Link href="/surveys" className="group">
             <div className="flex items-center gap-4 p-5 bg-white rounded-xl border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
               <div className="p-3 bg-purple-50 rounded-xl group-hover:bg-purple-100 transition-colors">
                 <PieChart className="w-5 h-5 text-purple-600" />
@@ -137,7 +138,7 @@ export default async function HomePage() {
           {surveys && surveys.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {surveys.map((survey) => (
-                <Link key={survey.id} href={`/dashboard/${survey.id}`} className="group">
+                <Link key={survey.id} href={`/surveys/${survey.id}`} className="group">
                   <Card className="h-full hover:shadow-lg transition-all duration-200 border-slate-200 hover:border-blue-300 cursor-pointer group-hover:-translate-y-1 overflow-hidden">
                     {/* Colored top stripe */}
                     <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />

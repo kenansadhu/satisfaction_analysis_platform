@@ -1,11 +1,19 @@
 import { callGemini, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
+import { generateReportSchema } from "@/lib/validators";
 
 export async function POST(req: Request) {
-    try {
-        const { unitName, unitDescription, stats, segments, categoryBreakdown } = await req.json();
+  try {
+    const body = await req.json();
+    const validation = generateReportSchema.safeParse(body);
 
-        const prompt = `You are a Senior Strategic Consultant writing an Executive Analysis Report for the "${unitName}" department/unit.
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { unitName, unitDescription, stats, segments, categoryBreakdown } = validation.data;
+
+    const prompt = `You are a Senior Strategic Consultant writing an Executive Analysis Report for the "${unitName}" department/unit.
 
 CONTEXT: ${unitDescription || 'No additional context provided.'}
 
@@ -56,19 +64,19 @@ RULES:
 - Severity levels: High = systemic issue, Medium = notable pattern, Low = minor friction
 - Priority levels: Immediate = can act this week, Short-term = this semester, Long-term = next academic year`;
 
-        const reportJson = await callGemini(prompt, { jsonMode: true });
+    const reportJson = await callGemini(prompt, { jsonMode: true });
 
-        // Parse and validate
-        let parsed;
-        try {
-            parsed = typeof reportJson === 'string' ? JSON.parse(reportJson) : reportJson;
-        } catch {
-            return NextResponse.json({ error: 'AI returned invalid JSON' }, { status: 500 });
-        }
-
-        return NextResponse.json({ report: parsed });
-
-    } catch (error) {
-        return handleAIError(error);
+    // Parse and validate
+    let parsed;
+    try {
+      parsed = typeof reportJson === 'string' ? JSON.parse(reportJson) : reportJson;
+    } catch {
+      return NextResponse.json({ error: 'AI returned invalid JSON' }, { status: 500 });
     }
+
+    return NextResponse.json({ report: parsed });
+
+  } catch (error) {
+    return handleAIError(error);
+  }
 }

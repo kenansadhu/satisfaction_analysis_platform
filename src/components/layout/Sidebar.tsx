@@ -75,20 +75,20 @@ export function Sidebar({
             {/* Header */}
             <div className="h-16 flex items-center px-4 border-b border-slate-800/50 shrink-0">
                 {!isCollapsed || isMobile ? (
-                    <div className="flex items-center gap-2 text-white font-bold tracking-tight">
+                    <Link href="/" className="flex items-center gap-2 text-white font-bold tracking-tight hover:opacity-90 transition-opacity">
                         <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
                             <span className="text-lg">S</span>
                         </div>
-                        <span className="bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Student Voice</span>
-                    </div>
+                        <span className="bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">SSI UPH</span>
+                    </Link>
                 ) : (
-                    <div
+                    <Link
+                        href="/"
                         className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/20 mx-auto cursor-pointer hover:bg-blue-500 transition-colors"
-                        onClick={toggleCollapse}
-                        title="Click to expand sidebar"
+                        title="Go to Home"
                     >
                         <span className="text-lg font-bold text-white">S</span>
-                    </div>
+                    </Link>
                 )}
             </div>
 
@@ -100,10 +100,10 @@ export function Sidebar({
                     {(!isCollapsed || isMobile) && (
                         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">Platform</h3>
                     )}
-                    <NavItem href="/" icon={LayoutDashboard} label="Dashboard Overview" active={pathname === "/"} />
-                    <NavItem href="/executive" icon={Activity} label="Executive View" active={pathname === "/executive"} className="text-blue-300 hover:text-white" />
+                    <NavItem href="/surveys" icon={LayoutDashboard} label="Surveys" active={pathname === "/surveys" || pathname.startsWith("/surveys/")} />
+                    <NavItem href="/executive" icon={Activity} label="Executive View" active={pathname === "/executive"} />
                     <NavItem href="/units" icon={Building2} label="Organization Units" active={pathname === "/units" || pathname.startsWith("/analysis/unit/")} />
-                    <NavItem href="/import" icon={Upload} label="Import Data" active={pathname === "/import"} />
+
                     <NavItem href="/suggestions" icon={Lightbulb} label="Suggestions Box" active={pathname === "/suggestions"} />
                 </div>
 

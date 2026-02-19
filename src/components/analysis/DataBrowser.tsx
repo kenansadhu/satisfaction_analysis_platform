@@ -24,7 +24,12 @@ type FeedbackRow = {
     segments: Segment[];
 };
 
-export default function DataBrowser({ unitId }: { unitId: string }) {
+import { useAnalysis } from "@/context/AnalysisContext";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2 } from "lucide-react";
+
+export default function DataBrowser({ unitId, surveyId }: { unitId: string; surveyId?: string }) {
+    const { isAnalyzing, currentUnitId, progress } = useAnalysis();
     const [rows, setRows] = useState<FeedbackRow[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -38,7 +43,7 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
 
     useEffect(() => {
         loadCategories();
-    }, [unitId]);
+    }, [unitId, surveyId]);
 
     // Debounce search input (300ms)
     useEffect(() => {
@@ -51,9 +56,11 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
 
     useEffect(() => {
         loadData();
-    }, [unitId, page, debouncedFilter]); // Reload when page or debounced filter changes
+    }, [unitId, surveyId, page, debouncedFilter]); // Reload when page or debounced filter changes
 
     async function loadCategories() {
+        // Categories are unit-specific (likely shared across surveys for consistency, or we could scope them too?
+        // Usually taxonomy is persistent. Let's keep it unit-scoped for now.)
         const { data } = await supabase.from('analysis_categories').select('*').eq('unit_id', unitId);
         if (data) setCategories(data);
     }
@@ -67,6 +74,7 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
             .select(`
             id, 
             raw_text,
+            respondents!inner(survey_id),
             feedback_segments (
                 id,
                 segment_text,
@@ -77,6 +85,10 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
         `, { count: 'exact' }) // Get Total Count
             .eq('target_unit_id', unitId)
             .eq('requires_analysis', true);
+
+        if (surveyId) {
+            query = query.eq('respondents.survey_id', surveyId);
+        }
 
         // Apply Filter if typed (Simple ILIKE for search)
         if (debouncedFilter) {
@@ -142,6 +154,15 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
 
     return (
         <div className="space-y-6 animate-in fade-in">
+            {isAnalyzing && currentUnitId === unitId && (
+                <Alert className="bg-blue-50 border-blue-200 animate-pulse">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                    <AlertTitle className="text-blue-800">Analysis In Progress</AlertTitle>
+                    <AlertDescription className="text-blue-700">
+                        New data is being processed ({progress.percentage}%). Results shown here may be incomplete.
+                    </AlertDescription>
+                </Alert>
+            )}
 
             {/* Toolbar */}
             <div className="flex justify-between items-center bg-white p-4 rounded-lg border shadow-sm sticky top-0 z-10">
@@ -167,10 +188,10 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
                         </Button>
                     </div>
                 </div>
-            </div>
+            </div >
 
             {/* The New Clean Table with Fixed Widths & Wrapping */}
-            <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
+            < div className="border rounded-lg bg-white overflow-hidden shadow-sm" >
                 <Table className="table-fixed w-full">
                     <TableHeader>
                         <TableRow className="bg-slate-50 border-b border-slate-200">
@@ -259,12 +280,12 @@ export default function DataBrowser({ unitId }: { unitId: string }) {
                         )}
                     </TableBody>
                 </Table>
-            </div>
+            </div >
 
             {/* Pagination Footer */}
-            <div className="flex justify-center pt-4 pb-8">
+            < div className="flex justify-center pt-4 pb-8" >
                 <div className="text-xs text-slate-400">Page {page + 1} of {totalPages}</div>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 }

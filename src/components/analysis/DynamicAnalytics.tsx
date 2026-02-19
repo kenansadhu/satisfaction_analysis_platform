@@ -20,11 +20,17 @@ type ChartConfig = {
     aggregation?: "AVG" | "COUNT" | "SUM";
 };
 
-export default function DynamicAnalytics({ unitId }: { unitId: string }) {
+import { useAnalysis } from "@/context/AnalysisContext";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+export default function DynamicAnalytics({ unitId, surveyId }: { unitId: string; surveyId?: string }) {
+    const { isAnalyzing, currentUnitId, progress } = useAnalysis();
     const [loading, setLoading] = useState(false);
     const [blueprint, setBlueprint] = useState<ChartConfig[]>([]);
     const [rawData, setRawData] = useState<any[]>([]);
     const [error, setError] = useState<string | null>(null);
+
+    // 1. Load existing report from Database
 
     // 1. Load existing report from Database
     const loadSavedInsight = useCallback(async () => {
@@ -45,7 +51,7 @@ export default function DynamicAnalytics({ unitId }: { unitId: string }) {
         } catch (err: any) {
             console.error("Load Error:", err.message);
         }
-    }, [unitId]);
+    }, [unitId]); // TODO: Dependent on surveyId too if reports become survey-scoped
 
     useEffect(() => {
         loadSavedInsight();
@@ -59,7 +65,7 @@ export default function DynamicAnalytics({ unitId }: { unitId: string }) {
             const res = await fetch('/api/ai/generate-dashboard', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ unitId })
+                body: JSON.stringify({ unitId, surveyId }) // Pass surveyId
             });
 
             if (!res.ok) throw new Error(`API returned ${res.status}`);
@@ -122,51 +128,92 @@ export default function DynamicAnalytics({ unitId }: { unitId: string }) {
     // --- COMPONENT RENDERERS ---
     const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#3b82f6', '#10b981'];
 
+    const renderChart = (chart: ChartConfig) => {
+        const chartData = prepareChartData(chart);
+        switch (chart.type) {
+            case "PIE":
+                return (
+                    <PieChart>
+                        <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5}>
+                            {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                        <Legend verticalAlign="bottom" wrapperStyle={{ fontSize: '10px' }} />
+                    </PieChart>
+                );
+            case "HORIZONTAL_BAR":
+                return (
+                    <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 10 }} tickFormatter={(t) => t.slice(0, 15) + '...'} />
+                        <Tooltip cursor={{ fill: '#f8fafc' }} />
+                        <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20} />
+                    </BarChart>
+                );
+            case "SCATTER":
+                return (
+                    <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" dataKey="x" name={chart.xKey} />
+                        <YAxis type="number" dataKey="y" name={chart.yKey} />
+                        <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                        <Scatter data={chartData} fill="#a855f7" />
+                    </ScatterChart>
+                );
+            case "BAR":
+            default:
+                return (
+                    <BarChart data={chartData} margin={{ bottom: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" interval={0} />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <Tooltip cursor={{ fill: 'transparent' }} />
+                        <Bar dataKey="value" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={30} />
+                    </BarChart>
+                );
+        }
+    };
+
+    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>;
+
     return (
-        <div className="space-y-6 pb-20 animate-in fade-in duration-500">
+        <div className="space-y-6">
+            {isAnalyzing && currentUnitId === unitId && (
+                <Alert className="bg-blue-50 border-blue-200 animate-pulse">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                    <AlertTitle className="text-blue-800">Analysis In Progress</AlertTitle>
+                    <AlertDescription className="text-blue-700">
+                        New data is being processed ({progress.percentage}%). Models may be training on incomplete data.
+                    </AlertDescription>
+                </Alert>
+            )}
 
-            {/* Header Card */}
-            <Card className="bg-slate-900 border-none shadow-xl overflow-hidden">
-                <CardContent className="p-8">
-                    <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-                        <div className="space-y-2">
-                            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Sparkles className="w-6 h-6 text-indigo-400" /> AI Data Scientist
-                            </h2>
-                            <p className="text-slate-400 max-w-lg">
-                                Automated discovery of patterns within your unique survey structure.
-                            </p>
-                        </div>
-                        <Button
-                            onClick={generateInsights}
-                            disabled={loading}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-12 px-8 transition-transform active:scale-95"
-                        >
-                            {loading ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                            {blueprint.length > 0 ? "Re-Discover Patterns" : "Discover Patterns"}
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
+            {/* Header */}
+            <div className="flex justify-between items-center">
+                <div>
+                    <h2 className="text-2xl font-bold flex items-center gap-2">
+                        <Sparkles className="w-6 h-6 text-purple-600" />
+                        AI Data Scientist
+                    </h2>
+                    <p className="text-slate-500">Auto-generated correlations & insights</p>
+                </div>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={loadSavedInsight}><RefreshCw className="w-4 h-4 mr-2" /> Refresh Data</Button>
+                    <Button onClick={generateInsights} disabled={loading} className="bg-purple-600 hover:bg-purple-700">
+                        <Sparkles className="w-4 h-4 mr-2" /> Re-Run Analysis
+                    </Button>
+                </div>
+            </div>
 
-            {/* Error View */}
             {error && (
-                <div className="bg-red-50 border border-red-100 p-4 rounded-lg flex items-center gap-3 text-red-800">
+                <div className="bg-red-50 text-red-600 p-4 rounded border border-red-200 flex items-center gap-2">
                     <AlertCircle className="w-5 h-5" />
-                    <p className="text-sm">Error: {error}. Try re-generating.</p>
+                    {error}
                 </div>
             )}
 
-            {/* Empty State */}
-            {!loading && blueprint.length === 0 && !error && (
-                <div className="text-center py-24 bg-white border border-slate-200 rounded-xl border-dashed">
-                    <BarChart3 className="mx-auto w-12 h-12 text-slate-200 mb-4" />
-                    <h3 className="text-lg font-medium text-slate-900">No Insights Generated</h3>
-                    <p className="text-slate-500 text-sm">Click "Discover Patterns" to analyze this unit's variables.</p>
-                </div>
-            )}
-
-            {/* Dashboard Grid */}
+            {/* Charts Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {blueprint.map((chart) => {
                     const chartData = prepareChartData(chart);

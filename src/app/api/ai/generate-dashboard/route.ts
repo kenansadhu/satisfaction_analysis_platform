@@ -1,26 +1,40 @@
 import { callGemini, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { generateDashboardSchema } from "@/lib/validators";
 
 export const maxDuration = 60; // Allow longer timeout for deep reasoning
 
 export async function POST(req: Request) {
   try {
-    const { unitId } = await req.json();
+    const body = await req.json();
+    const validation = generateDashboardSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
+    }
+
+    const { unitId, surveyId } = validation.data;
 
     // 1. Fetch raw data with linking IDs
-    const { data: rawData, error } = await supabase
+    let query = supabase
       .from('raw_feedback_inputs')
       .select(`
                 id, respondent_id, source_column, numerical_score, raw_text,
+                respondents!inner(survey_id),
                 feedback_segments (
                     sentiment,
                     is_suggestion,
                     analysis_categories (name)
                 )
             `)
-      .eq('target_unit_id', unitId)
-      .limit(1000);
+      .eq('target_unit_id', unitId);
+
+    if (surveyId) {
+      query = query.eq('respondents.survey_id', surveyId);
+    }
+
+    const { data: rawData, error } = await query.limit(1000);
 
     if (error || !rawData || rawData.length === 0) throw new Error("No data found for this unit.");
 
