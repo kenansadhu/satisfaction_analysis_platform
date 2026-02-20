@@ -119,33 +119,49 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
 }
+
 @layer utilities {
   @keyframes marquee {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
+    0% {
+      transform: translateX(0);
+    }
+
+    100% {
+      transform: translateX(-50%);
+    }
   }
+
   .animate-marquee {
     animation: marquee 40s linear infinite;
     display: flex;
     min-width: 100%;
   }
+
   .animate-marquee:hover {
     animation-play-state: paused;
   }
 }
 
 @media print {
+
   /* Hide unnecessary UI elements */
-  header, nav, aside, button {
+  header,
+  nav,
+  aside,
+  button,
+  [data-sonner-toaster],
+  .sonner-toast {
     display: none !important;
   }
-  
+
   /* Reset margins for printing */
-  body, main {
+  body,
+  main {
     background: white !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -158,7 +174,10 @@
   }
 
   /* Avoid cutting cards in half */
-  .card, .recharts-wrapper, .pie-chart, .bar-chart {
+  .card,
+  .recharts-wrapper,
+  .pie-chart,
+  .bar-chart {
     page-break-inside: avoid;
     break-inside: avoid;
   }

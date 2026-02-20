@@ -19,7 +19,7 @@ export default async function HomePage() {
   const totalRespondents = surveys?.reduce((acc, s) => acc + (s.respondents?.[0]?.count || 0), 0) || 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans transition-colors duration-300">
 
       {/* --- HERO SECTION --- */}
       <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950">
@@ -74,7 +74,7 @@ export default async function HomePage() {
               <div key={i} className="relative group">
                 <div className="absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl blur-xl -z-10"
                   style={{ background: `linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))` }} />
-                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-5 hover:bg-white/10 transition-all duration-300">
+                <div className="bg-white/5 backdrop-blur-sm border border-white/10 dark:border-white/5 rounded-xl p-5 hover:bg-white/10 transition-all duration-300">
                   <stat.icon className="w-5 h-5 text-blue-400 mb-2" />
                   <div className="text-2xl font-bold text-white">{stat.value}</div>
                   <div className="text-sm text-slate-400">{stat.label}</div>
@@ -92,72 +92,72 @@ export default async function HomePage() {
         {/* Quick Actions */}
         <div className="grid grid-cols-3 gap-4">
           <Link href="/executive" className="group">
-            <div className="flex items-center gap-4 p-5 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
-              <div className="p-3 bg-blue-50 rounded-xl group-hover:bg-blue-100 transition-colors">
-                <LayoutDashboard className="w-5 h-5 text-blue-600" />
+            <div className="flex items-center gap-4 p-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl group-hover:bg-blue-100 dark:group-hover:bg-blue-900/40 transition-colors">
+                <LayoutDashboard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <div className="font-semibold text-slate-900">Executive View</div>
-                <div className="text-sm text-slate-500">See a global view of the SSI result of all units</div>
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Executive View</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">See a global view of the SSI result of all units</div>
               </div>
-              <ArrowRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="w-4 h-4 text-slate-300 dark:text-slate-600 ml-auto group-hover:text-blue-500 transition-all" />
             </div>
           </Link>
           <Link href="/surveys" className="group">
-            <div className="flex items-center gap-4 p-5 bg-white rounded-xl border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
-              <div className="p-3 bg-purple-50 rounded-xl group-hover:bg-purple-100 transition-colors">
-                <PieChart className="w-5 h-5 text-purple-600" />
+            <div className="flex items-center gap-4 p-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
+              <div className="p-3 bg-purple-50 dark:bg-purple-950/40 rounded-xl group-hover:bg-purple-100 dark:group-hover:bg-purple-900/40 transition-colors">
+                <PieChart className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
               <div>
-                <div className="font-semibold text-slate-900">Survey Dashboard</div>
-                <div className="text-sm text-slate-500">Review all imported surveys</div>
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Survey Dashboard</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Review all imported surveys</div>
               </div>
-              <ArrowRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-purple-500 group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="w-4 h-4 text-slate-300 dark:text-slate-600 ml-auto group-hover:text-purple-500 transition-all" />
             </div>
           </Link>
           <Link href="/units" className="group">
-            <div className="flex items-center gap-4 p-5 bg-white rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
-              <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-100 transition-colors">
-                <Building2 className="w-5 h-5 text-indigo-600" />
+            <div className="flex items-center gap-4 p-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5">
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/40 transition-colors">
+                <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               </div>
               <div>
-                <div className="font-semibold text-slate-900">Organization Units</div>
-                <div className="text-sm text-slate-500">Manage faculties & departments</div>
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Organization Units</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Manage faculties & departments</div>
               </div>
-              <ArrowRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="w-4 h-4 text-slate-300 dark:text-slate-600 ml-auto group-hover:text-indigo-500 transition-all" />
             </div>
           </Link>
         </div>
 
         {/* Survey Grid */}
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-slate-400" /> Recent Survey Projects
+          <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-slate-400 dark:text-slate-400" /> Recent Survey Projects
           </h2>
 
           {surveys && surveys.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {surveys.map((survey) => (
                 <Link key={survey.id} href={`/surveys/${survey.id}`} className="group">
-                  <Card className="h-full hover:shadow-lg transition-all duration-200 border-slate-200 hover:border-blue-300 cursor-pointer group-hover:-translate-y-1 overflow-hidden">
+                  <Card className="h-full bg-white dark:bg-slate-900 hover:shadow-lg transition-all duration-200 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 cursor-pointer group-hover:-translate-y-1 overflow-hidden">
                     {/* Colored top stripe */}
                     <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
                     <CardHeader>
                       <div className="flex justify-between items-start mb-2">
-                        <Badge variant="secondary" className="bg-slate-50 text-slate-600 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                        <Badge variant="secondary" className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                           {new Date(survey.created_at).toLocaleDateString()}
                         </Badge>
                       </div>
-                      <CardTitle className="text-lg text-slate-900 group-hover:text-blue-700 transition-colors">
+                      <CardTitle className="text-lg text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">
                         {survey.title}
                       </CardTitle>
-                      <CardDescription className="flex items-center gap-1.5">
+                      <CardDescription className="flex items-center gap-1.5 dark:text-slate-300">
                         <Users className="w-3.5 h-3.5" />
                         {survey.respondents?.[0]?.count || 0} Respondents
                       </CardDescription>
                     </CardHeader>
                     <CardFooter className="pt-0">
-                      <div className="text-sm font-medium text-blue-600 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="text-sm font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         Open Dashboard <ArrowRight className="w-4 h-4" />
                       </div>
                     </CardFooter>
@@ -166,16 +166,16 @@ export default async function HomePage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-20 bg-white rounded-xl border-2 border-dashed border-slate-200">
-              <div className="mx-auto w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                <Upload className="w-8 h-8 text-slate-400" />
+            <div className="text-center py-20 bg-white dark:bg-slate-900 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+              <div className="mx-auto w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                <Upload className="w-8 h-8 text-slate-400 dark:text-slate-400" />
               </div>
-              <h3 className="text-lg font-semibold text-slate-900">No surveys yet</h3>
-              <p className="text-slate-500 mb-6 max-w-md mx-auto">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">No surveys yet</h3>
+              <p className="text-slate-500 dark:text-slate-300 mb-6 max-w-md mx-auto">
                 Import your first CSV file to begin analyzing student feedback with AI.
               </p>
               <Link href="/import">
-                <Button className="bg-blue-600 hover:bg-blue-700 shadow-sm gap-2">
+                <Button className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 shadow-sm gap-2">
                   <Upload className="w-4 h-4" /> Start Your First Import
                 </Button>
               </Link>

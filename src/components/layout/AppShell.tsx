@@ -46,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden">
+        <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden print:overflow-visible transition-colors duration-300">
             {/* Desktop Sidebar */}
             {!isMobile && (
                 <Sidebar
@@ -60,7 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="fixed top-4 left-4 z-50">
                     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
                         <SheetTrigger asChild>
-                            <Button variant="outline" size="icon" className="bg-slate-900 border-slate-700 text-white hover:bg-slate-800">
+                            <Button variant="outline" size="icon" className="bg-slate-900 border-slate-700 text-white hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700">
                                 <Menu className="w-5 h-5" />
                             </Button>
                         </SheetTrigger>
@@ -78,12 +78,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
 
             {/* Main Content Area */}
-            <main className="flex-1 overflow-auto relative w-full h-full flex flex-col">
+            <main className="flex-1 overflow-auto print:overflow-visible relative w-full h-full flex flex-col">
                 <div className="flex-1">
                     {children}
                 </div>
-                <footer className="border-t border-slate-200 bg-white shrink-0">
-                    <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between text-xs text-slate-400">
+                <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/50 backdrop-blur-md shrink-0 transition-colors">
+                    <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between text-xs text-slate-400 dark:text-slate-400">
                         <span>Student Voice Analytics</span>
                         <span>Next.js • Supabase • Gemini AI</span>
                     </div>

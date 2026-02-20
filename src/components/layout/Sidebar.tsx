@@ -12,8 +12,11 @@ import {
     ChevronLeft,
     ChevronRight,
     Menu,
-    Activity
+    Activity,
+    Sun,
+    Moon
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +37,7 @@ export function Sidebar({
     onCloseMobile
 }: SidebarProps) {
     const pathname = usePathname();
+    const { theme, setTheme } = useTheme();
 
     const NavItem = ({ href, icon: Icon, label, active = false, className }: any) => (
         <Link
@@ -57,7 +61,7 @@ export function Sidebar({
 
     return (
         <div className={cn(
-            "flex flex-col h-full bg-slate-950 border-r border-slate-800 transition-all duration-300 relative group/sidebar",
+            "flex flex-col h-full bg-slate-950 border-r border-slate-800 transition-all duration-300 relative group/sidebar print:hidden",
             isCollapsed && !isMobile ? "w-[70px]" : "w-64",
             className
         )}>
@@ -108,8 +112,26 @@ export function Sidebar({
                 </div>
 
                 {/* Settings / Footer */}
-                <div className="px-3 mt-auto">
+                <div className="px-3 mt-auto space-y-1">
                     <NavItem href="/settings" icon={Settings} label="Settings" active={pathname === "/settings"} />
+
+                    {/* Theme Toggle */}
+                    <button
+                        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                        className={cn(
+                            "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-200 group text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/50"
+                        )}
+                        title={isCollapsed && !isMobile ? "Toggle Theme" : undefined}
+                    >
+                        {theme === "dark" ? (
+                            <Sun className="w-5 h-5 min-w-[20px] text-slate-500 group-hover:text-amber-300" />
+                        ) : (
+                            <Moon className="w-5 h-5 min-w-[20px] text-slate-500 group-hover:text-blue-300" />
+                        )}
+                        {(!isCollapsed || isMobile) && (
+                            <span className="truncate">Theme</span>
+                        )}
+                    </button>
                 </div>
             </div>
         </div>

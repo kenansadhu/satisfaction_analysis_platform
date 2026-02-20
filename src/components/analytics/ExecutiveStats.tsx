@@ -3,7 +3,7 @@ import { ArrowUpRight, ArrowDownRight, Minus, TrendingUp } from "lucide-react";
 
 interface MetricCardProps {
     title: string;
-    value: string | number;
+    value: React.ReactNode;
     description: string;
     trend?: "up" | "down" | "flat";
     trendValue?: string;

@@ -88,16 +88,19 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             // The unanalyzed count might be smaller than approxTotal.
 
             let hasMore = true;
-            let page = 0;
-            const PAGE_SIZE = 500;
             const BATCH_SIZE = 50;
 
-            let actualPendingCount = 0; // Will accumulate this as we discover unanalyzed items
+            // To ensure we don't count rows we've already processed in this session, we keep track of their IDs
+            const processedRowIds = new Set<number>();
+
             setProcessedCount(0);
+            setTotalPending(approxTotal || 0);
 
             addLog("Beginning continuous analysis stream...");
 
             while (hasMore && !stopRef.current) {
+                // Because we are continually adding to `feedback_segments`, we can just keep fetching 
+                // the "Top 50" unanalyzed inputs over and over until none are left. 
                 let query = supabase
                     .from('raw_feedback_inputs')
                     .select('id, raw_text, respondents!inner(survey_id)')
@@ -107,91 +110,93 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
                 if (surveyId) query = query.eq('respondents.survey_id', surveyId);
 
-                const { data } = await query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+                // We fetch a block of rows. But since Postgres might return rows that are 
+                // currently being processed (or failed), we exclude the ones we've already tried this session.
+                if (processedRowIds.size > 0) {
+                    query = query.not('id', 'in', `(${Array.from(processedRowIds).join(',')})`);
+                }
+
+                // Fetch exactly one batch size
+                const { data } = await query.limit(BATCH_SIZE).order('id', { ascending: true });
 
                 if (!data || data.length === 0) {
                     hasMore = false;
+                    addLog("✅ No more pending comments found.");
                     break;
                 }
 
-                // Filter already analyzed from this specific page
+                // Filter out any that actually DO have segments already (just in case)
                 const { data: existingSegments } = await supabase
                     .from('feedback_segments')
                     .select('raw_input_id')
                     .in('raw_input_id', data.map(r => r.id));
 
                 const analyzedSet = new Set(existingSegments?.map((s: any) => s.raw_input_id) || []);
-                const queue = data.filter(r => !analyzedSet.has(r.id));
+                const batch = data.filter(r => !analyzedSet.has(r.id));
 
-                // If it's the very first page and we found NO queue items, and we know there are no more pages
-                if (page === 0 && queue.length === 0 && data.length < PAGE_SIZE) {
-                    addLog("✅ No pending comments found.");
-                    setIsAnalyzing(false);
-                    return;
+                // Mark all fetched rows as processed for this session loop so we don't infinitely re-fetch them if they fail
+                data.forEach(r => processedRowIds.add(r.id));
+
+                if (batch.length === 0) {
+                    continue; // Skip to next fetch if this entire batch was already analyzed
                 }
 
-                actualPendingCount += queue.length;
+                addLog(`Processing next batch (${batch.length} items)...`);
 
-                // Update progress bar dynamically
-                setTotalPending((prevTotal) => Math.max(prevTotal, actualPendingCount));
+                try {
+                    const response = await fetch('/api/ai/run-analysis', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            comments: batch,
+                            taxonomy: categories,
+                            allUnits: allUnits,
+                            unitContext: { name: unit?.name, instructions }
+                        })
+                    });
 
-                // Process the valid items in this page
-                for (let i = 0; i < queue.length; i += BATCH_SIZE) {
-                    if (stopRef.current) { addLog("🛑 Process Paused."); break; }
+                    if (!response.ok) throw new Error(`Server Error ${response.status}`);
 
-                    const batch = queue.slice(i, i + BATCH_SIZE);
-                    addLog(`Processing next batch (${batch.length} items)...`);
+                    const responseData = await response.json();
 
-                    try {
-                        const response = await fetch('/api/ai/run-analysis', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                comments: batch,
-                                taxonomy: categories,
-                                allUnits: allUnits,
-                                unitContext: { name: unit?.name, instructions }
-                            })
-                        });
+                    if (Array.isArray(responseData)) {
+                        const inserts: any[] = [];
+                        responseData.forEach((item: any) => {
+                            item.segments.forEach((seg: any) => {
+                                const catId = categories.find((c: any) => c.name === seg.category_name)?.id;
+                                const relatedId = allUnits?.find((u: any) => u.name === seg.related_unit_name)?.id;
 
-                        if (!response.ok) throw new Error(`Server Error ${response.status}`);
-
-                        const data = await response.json();
-
-                        if (Array.isArray(data)) {
-                            const inserts: any[] = [];
-                            data.forEach((item: any) => {
-                                item.segments.forEach((seg: any) => {
-                                    const catId = categories.find((c: any) => c.name === seg.category_name)?.id;
-                                    const relatedId = allUnits?.find((u: any) => u.name === seg.related_unit_name)?.id;
-
-                                    inserts.push({
-                                        raw_input_id: item.raw_input_id,
-                                        segment_text: seg.text,
-                                        sentiment: seg.sentiment,
-                                        category_id: catId || null,
-                                        related_unit_ids: relatedId ? [relatedId] : [],
-                                        is_suggestion: seg.is_suggestion || false
-                                    });
+                                inserts.push({
+                                    raw_input_id: item.raw_input_id,
+                                    segment_text: seg.text,
+                                    sentiment: seg.sentiment,
+                                    category_id: catId || null,
+                                    related_unit_ids: relatedId ? [relatedId] : [],
+                                    is_suggestion: seg.is_suggestion || false
                                 });
                             });
+                        });
 
-                            if (inserts.length > 0) {
-                                const { error } = await supabase.from('feedback_segments').insert(inserts);
-                                if (error) addLog(`❌ DB Save Error: ${error.message}`);
-                                else setProcessedCount(prev => prev + batch.length);
+                        if (inserts.length > 0) {
+                            const { error } = await supabase.from('feedback_segments').insert(inserts);
+                            if (error) {
+                                addLog(`❌ DB Save Error: ${error.message}`);
+                            } else {
+                                setProcessedCount(prev => prev + batch.length);
                             }
                         }
-                    } catch (err: any) {
-                        addLog(`⚠️ Batch Failed: ${err.message}`);
                     }
-                } // End of Queue chunk logic
+                } catch (err: any) {
+                    addLog(`⚠️ Batch Failed: ${err.message}`);
+                }
 
-                if (data.length < PAGE_SIZE) hasMore = false;
-                page++;
+                // Small delay to prevent hammering the database too hard in a tight loop
+                await new Promise(resolve => setTimeout(resolve, 500));
             } // End of Pagination loop
 
-            if (!stopRef.current) addLog("🏁 Analysis Complete.");
+            if (!stopRef.current && !hasMore) {
+                addLog("🏁 Analysis Complete.");
+            }
 
         } catch (e: any) {
             addLog(`❌ Error: ${e.message}`);

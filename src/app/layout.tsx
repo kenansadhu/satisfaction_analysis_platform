@@ -21,22 +21,31 @@ export const metadata: Metadata = {
 
 import { AnalysisProvider } from "@/context/AnalysisContext";
 
+import { ThemeProvider } from "@/components/ThemeProvider";
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AnalysisProvider>
-          <AppShell>
-            {children}
-          </AppShell>
-        </AnalysisProvider>
-        <Toaster richColors position="top-right" closeButton />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <AnalysisProvider>
+            <AppShell>
+              {children}
+            </AppShell>
+          </AnalysisProvider>
+        </ThemeProvider>
+        <Toaster richColors position="top-right" closeButton toastOptions={{ className: 'print:hidden' }} />
       </body>
     </html>
   );
