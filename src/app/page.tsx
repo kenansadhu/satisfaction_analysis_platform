@@ -46,7 +46,7 @@ export default async function HomePage() {
                 </span>
               </h1>
               <p className="text-slate-400 text-lg max-w-md">
-                Helping LP2MU by transforming raw student feedback into actionable intelligence.
+                For LP2MU UPH
               </p>
             </div>
             <div className="flex gap-3">
