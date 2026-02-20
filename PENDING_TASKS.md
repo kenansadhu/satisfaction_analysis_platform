@@ -55,7 +55,6 @@ This document lists all pending tasks consolidated from previous audits.
 ## 🚀 Phase 5: Future Features
 
 ### 5.1 Advanced Analysis
-- [ ] **Suggestions Triage Desk:** Kanban board for items with `is_suggestion: true`.
 - [ ] **Cross-Unit Network Graph:** Visualize dependencies between units.
 - [ ] **Taxonomy "Dirty State":** Flag comments that need re-analysis when categories change.
 - [ ] **Trend Alerting:** Email notifications for sentiment drops.
