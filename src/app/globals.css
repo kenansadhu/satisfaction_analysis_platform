@@ -137,3 +137,34 @@
     animation-play-state: paused;
   }
 }
+
+@media print {
+  /* Hide unnecessary UI elements */
+  header, nav, aside, button {
+    display: none !important;
+  }
+  
+  /* Reset margins for printing */
+  body, main {
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Force background colors and charts to render */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Avoid cutting cards in half */
+  .card, .recharts-wrapper, .pie-chart, .bar-chart {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Ensure text is dark and legible */
+  .text-white {
+    color: #1e293b !important;
+  }
+}

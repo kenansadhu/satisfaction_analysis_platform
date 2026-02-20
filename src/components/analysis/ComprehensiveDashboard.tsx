@@ -329,33 +329,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         if (showRawData) loadRawData(rawDataTab, rawDataPage, rawDataSearch);
     }, [showRawData, rawDataTab, rawDataPage, rawDataSearch, loadRawData]);
 
-    const exportToPdf = async () => {
-        if (!dashboardRef.current) return;
-        setExportingPdf(true);
-        toast.info("Generating PDF... please wait.");
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const jsPDF = (await import('jspdf')).default;
-            const canvas = await html2canvas(dashboardRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
-            const imgData = canvas.toDataURL('image/png');
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = pdf.internal.pageSize.getHeight();
-            const imgWidth = pdfWidth - 20;
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-            let heightLeft = imgHeight;
-            let position = 10;
-            pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
-            heightLeft -= (pdfHeight - 20);
-            while (heightLeft > 0) {
-                position = position - (pdfHeight - 20);
-                pdf.addPage();
-                pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
-                heightLeft -= (pdfHeight - 20);
-            }
-            pdf.save(`${unitName || 'unit'}_comprehensive_report.pdf`);
-            toast.success("PDF downloaded!");
-        } catch (e: any) { toast.error("Export failed: " + e.message); } finally { setExportingPdf(false); }
+    const exportToPdf = () => {
+        toast.info("Preparing PDF... Please follow the browser print dialog.");
+        setTimeout(() => {
+            window.print();
+        }, 500);
     };
 
     if (loading) return <div className="flex justify-center py-20 text-slate-400"><Loader2 className="w-8 h-8 animate-spin mr-2" /> Loading Analysis...</div>;
