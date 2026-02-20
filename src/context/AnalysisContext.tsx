@@ -72,7 +72,8 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            // 2. Determine Total Candidates
+            // 2. Determine Total Workload (Approximation for Progress Bar)
+            // Just for the Progress Bar. If zero, we still proceed to chunking just in case.
             let countQuery = supabase
                 .from('raw_feedback_inputs')
                 .select('*', { count: 'exact', head: true })
@@ -81,21 +82,18 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                 .eq('requires_analysis', true);
             if (surveyId) countQuery = countQuery.eq('respondents.survey_id', surveyId);
 
-            const { count: totalCandidates } = await countQuery;
-            setTotalPending(totalCandidates || 0);
-            setProcessedCount(0);
+            const { count: approxTotal } = await countQuery;
 
-            if (!totalCandidates) {
-                addLog("✅ No pending comments found.");
-                setIsAnalyzing(false);
-                return;
-            }
+            // We do NOT abort here. We let the chunking process discover the exact pending amount.
+            // The unanalyzed count might be smaller than approxTotal.
 
-            // 3. Process in Chunks to prevent memory bloat
             let hasMore = true;
             let page = 0;
             const PAGE_SIZE = 500;
             const BATCH_SIZE = 50;
+
+            let actualPendingCount = 0; // Will accumulate this as we discover unanalyzed items
+            setProcessedCount(0);
 
             addLog("Beginning continuous analysis stream...");
 
@@ -124,6 +122,18 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
                 const analyzedSet = new Set(existingSegments?.map((s: any) => s.raw_input_id) || []);
                 const queue = data.filter(r => !analyzedSet.has(r.id));
+
+                // If it's the very first page and we found NO queue items, and we know there are no more pages
+                if (page === 0 && queue.length === 0 && data.length < PAGE_SIZE) {
+                    addLog("✅ No pending comments found.");
+                    setIsAnalyzing(false);
+                    return;
+                }
+
+                actualPendingCount += queue.length;
+
+                // Update progress bar dynamically
+                setTotalPending((prevTotal) => Math.max(prevTotal, actualPendingCount));
 
                 // Process the valid items in this page
                 for (let i = 0; i < queue.length; i += BATCH_SIZE) {
