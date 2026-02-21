@@ -29,7 +29,7 @@ export const discoverCategoriesSchema = z.object({
 });
 
 export const generateDashboardSchema = z.object({
-    unitId: z.union([z.string(), z.number()]),
+    unitId: z.union([z.string(), z.number()]).optional(),
     surveyId: z.union([z.string(), z.number()]).optional(),
 });
 
@@ -68,6 +68,7 @@ export const runAnalysisSchema = z.object({
     })),
     unitContext: z.object({
         name: z.string(),
+        description: z.string().optional(),
         instructions: z.array(z.string()),
     }),
 });

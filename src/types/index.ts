@@ -8,6 +8,7 @@
 export interface OrganizationUnit {
     id: number;
     name: string;
+    short_name?: string;
     description?: string;
     analysis_context?: string;
     analysis_status?: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
@@ -110,11 +111,12 @@ export interface BatchResult {
 
 export interface ChartBlueprint {
     id: string;
-    type: "BAR" | "PIE" | "LINE" | "SCATTER";
+    type: "BAR" | "PIE" | "LINE" | "SCATTER" | "HORIZONTAL_BAR";
     title: string;
     description: string;
     xKey: string;
     yKey: string;
+    yKeys?: string[];
     aggregation: "COUNT" | "AVG" | "SUM";
 }
 

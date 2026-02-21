@@ -14,168 +14,130 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid Input", details: validation.error.format() }, { status: 400 });
     }
 
-    const { unitId, surveyId } = validation.data;
+    const { surveyId } = validation.data;
 
-    // 1. Fetch raw data with linking IDs
-    let query = supabase
-      .from('raw_feedback_inputs')
-      .select(`
-                id, respondent_id, source_column, numerical_score, raw_text,
-                respondents!inner(survey_id),
-                feedback_segments (
-                    sentiment,
-                    is_suggestion,
-                    analysis_categories (name)
-                )
-            `)
-      .eq('target_unit_id', unitId);
+    // 1. Fetch Aggregated Data across ALL units
+    const { data: unitsData, error: unitsError } = await supabase
+      .from('organization_units')
+      .select('id, name, description');
 
-    if (surveyId) {
-      query = query.eq('respondents.survey_id', surveyId);
-    }
+    if (unitsError || !unitsData) throw new Error("Failed to load units.");
 
-    const { data: rawData, error } = await query.limit(1000);
+    const globalDataset: any[] = [];
+    const availableKeys = new Set<string>(['unit_name', 'total_segments', 'positive', 'neutral', 'negative', 'score']);
 
-    if (error || !rawData || rawData.length === 0) throw new Error("No data found for this unit.");
+    // Gather macro-level metrics per unit
+    for (const unit of unitsData) {
+      const { data: metrics } = await supabase.rpc('get_dashboard_metrics', {
+        p_unit_id: unit.id,
+        p_survey_id: surveyId ? parseInt(surveyId.toString(), 10) : null
+      });
 
-    // 2. Pivot Data by Respondent (to enable correlation)
-    // Map<respondent_id | unique_id, { scores: {}, categories: [], sentiments: [] }>
-    const respondentMap = new Map<string | number, any>();
-    let anonymousCounter = 0;
+      if (metrics && (metrics as any).total_segments > 0) {
+        const categories = (metrics as any).category_counts || [];
+        const flatCategories: any = {};
 
-    rawData.forEach((row: any) => {
-      const key = row.respondent_id || `anon_${anonymousCounter++}`; // Fallback if no respondent ID
+        if (Array.isArray(categories)) {
+          categories.forEach(c => {
+            const name = c.category_name;
+            if (name) {
+              const cleanKey = `category_${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+              flatCategories[cleanKey] = c.total || 0;
+              flatCategories[`${cleanKey}_pos`] = c.positive_count || 0;
+              flatCategories[`${cleanKey}_neg`] = c.negative_count || 0;
 
-      if (!respondentMap.has(key)) {
-        respondentMap.set(key, { id: key, scores: {}, comments: [] });
-      }
-      const profile = respondentMap.get(key);
+              availableKeys.add(cleanKey);
+              availableKeys.add(`${cleanKey}_pos`);
+              availableKeys.add(`${cleanKey}_neg`);
+            }
+          });
+        }
 
-      // Add Quantitative Data
-      if (row.numerical_score !== null) {
-        profile.scores[row.source_column] = row.numerical_score;
-      }
-
-      // Add Qualitative Data
-      if (row.feedback_segments && row.feedback_segments.length > 0) {
-        const seg = row.feedback_segments[0];
-        const catName = seg.analysis_categories?.name || "General";
-        profile.comments.push({
-          source: row.source_column,
-          text: row.raw_text,
-          category: catName,
-          sentiment: seg.sentiment
+        globalDataset.push({
+          unit_id: unit.id,
+          unit_name: unit.name,
+          unit_description: unit.description || "No specific context provided.",
+          total_segments: (metrics as any).total_segments,
+          positive: (metrics as any).positive,
+          neutral: (metrics as any).neutral,
+          negative: (metrics as any).negative,
+          score: (metrics as any).score,
+          ...flatCategories
         });
       }
-    });
+    }
 
-    const students = Array.from(respondentMap.values());
+    if (globalDataset.length === 0) throw new Error("No data found across any units.");
 
-    // 3. Prepare AI Context
-    // We can't send ALL students if dataset is huge, but Gemini 1M context is large.
-    // We'll send a coherent sample or statistical summary if too large.
-    // For now, sending up to 500 complete student profiles is safe for Gemini Pro 1.5/3.
-
-    const numericColumns = Array.from(new Set(rawData.filter(r => r.numerical_score !== null).map(r => r.source_column)));
-    const categoryNames = Array.from(new Set(rawData.flatMap(r => r.feedback_segments?.map((s: any) => s.analysis_categories?.name)).filter(Boolean)));
-
+    // 2. Prepare AI Context
     const datasetContext = {
       meta: {
-        total_respondents: students.length,
-        numeric_columns: numericColumns,
-        detected_categories: categoryNames
+        total_units_analyzed: globalDataset.length,
+        description: "This macro dataset contains pre-aggregated sentiment counts and category breakdowns for multiple departments/units.",
+        exact_allowable_keys_for_charts: Array.from(availableKeys)
       },
-      // Send a randomized sample if too large, otherwise send all
-      data_sample: students.slice(0, 200)
+      data_sample: globalDataset
     };
 
-    // 4. Advanced Prompt for Gemini 3 Pro
+    // 3. Advanced Prompt for Gemini 3.1 Pro
     const prompt = `
-            ACT AS A SENIOR DATA SCIENTIST USING GEMINI 3 PRO.
-            You are analyzing Student Feedback for Unit ID: ${unitId}.
+            ACT AS A SENIOR DATA SCIENTIST USING GEMINI 3.1 PRO.
+            You are analyzing Student Feedback across an ENTIRE UNIVERSITY (Multiple Units/Departments).
 
             YOUR GOAL:
-            Discover hidden connections between Quantitative Scores and Qualitative Feedback.
-            - Do students who complain about specific Categories give lower scores in specific Columns?
-            - What are the strongest drivers of negative sentiment?
-            - Are there specific student personas?
-
-            DATASET STRUCTURE:
-            I have provided a dataset of "Student Profiles". Each profile has:
-            - "scores": Key-value pairs of numeric ratings (e.g., "Course Content": 4).
-            - "comments": List of text feedback with "category" and "sentiment".
+            Discover hidden connections and correlations ACROSS DIFFERENT DEPARTMENTS.
+            - Do departments with high negative sentiment in specific categories also have low overall scores?
+            - Which departments are outliers?
+            - What are the strongest drivers of negative sentiment globally?
 
             TASK:
-            Generate a dashboard blueprint JSON with 4-6 insightful charts.
-            - prioritizing SCATTER charts (Correlation) and BAR charts (Comparison).
-            - For Scatter charts, X axis can be a Score, Y axis can be another Score OR a specific Category Mention Count.
+            Generate a dashboard blueprint JSON with exactly 4 highly insightful charts.
+            - Prioritize SCATTER charts (Correlation) and BAR charts (Comparison).
+            - DO NOT USE A SCATTER PLOT to compare a single metric against unit names. Only use SCATTER when correlating TWO DIFFERENT metrics. 
+            - If comparing ACTUAL SENTIMENT (Positive vs Negative) side-by-side for a specific category across units, you MUST use a "BAR" chart and provide a yKeys array instead of a single yKey. Example: yKeys: ["category_Response_Speed_pos", "category_Response_Speed_neg"].
+            - For Bar charts, X axis should usually be the "unit_name".
             
-            STRICT JSON OUTPUT FORMAT:
+            STRICT JSON OUTPUT FORMAT expected:
             {
                 "charts": [
                     {
                         "id": "chart_1",
-                        "type": "SCATTER",
-                        "title": "Correlation: Course Difficulty vs Satisfaction",
-                        "description": "Students finding the course difficult tend to rate satisfaction lower.",
-                        "xKey": "Score_Difficulty",
-                        "yKey": "Score_Satisfaction",
-                        "aggregation": "AVG"
-                    },
-                    {
-                        "id": "chart_2",
                         "type": "BAR",
-                        "title": "Impact of 'Facilities' Issues on Overall Rating",
-                        "description": "Average rating drops significantly when Facilities are mentioned negatively.",
-                        "xKey": "Has_Negative_Facilities_Comment", 
-                        "yKey": "Score_Overall",
-                        "aggregation": "AVG"
+                        "title": "Positive vs Negative Sentiment regarding Facilities",
+                        "description": "Units dealing with housing according to their 'unit_description' show much higher overall comment volume, but also a tighter ratio of positive to negative feedback.",
+                        "xKey": "unit_name",
+                        "yKeys": ["category_Facilities_pos", "category_Facilities_neg"],
+                        "aggregation": "SUM"
                     }
                 ]
             }
             
-            IMPORTANT:
-            - You must infer "virtual columns" if needed. 
-            - For xKey/yKey, use precise paths like "scores.Course Content" or derive them.
-            - If you want to check for a category mention, assume the frontend can process logic like "matches_category:Facilities". 
-            - BUT to keep it simple for the frontend, try to map to keys that exist in the pivot or simple aggregations.
+            CRITICAL INSTRUCTIONS FOR DYNAMIC RENDERING:
+            1. DO NOT invent new keys. 
+            2. Your \`xKey\`, \`yKey\` OR \`yKeys\` MUST EXACTLY MATCH one of the strings listed in \`exact_allowable_keys_for_charts\`.
+            3. Do NOT provide a 'rawData' array. The frontend will map the live dataset directly using your xKey and yKey.
+            4. The "description" should be a deep Insight. YOU MUST consider the \`unit_description\` provided in the data payload to explain *why* certain units have distinct metrics (e.g. "Because CTL handles online tools, it's natural they have high M-Flex mentions").
             
             DATA:
             ${JSON.stringify(datasetContext)}
         `;
 
-    // 5. Call Gemini 3 Pro
+    // 4. Call Gemini 3.1 Pro Preview
     const parsed = await callGemini(prompt, {
       jsonMode: true,
-      model: "gemini-1.5-pro" // Using 1.5 Pro as 'gemini-3-pro-preview' might be invite-only or require specific flags. 
-      // User asked for 3, but let's stick to stable advanced model first unless confident. 
-      // Actually, user explicitly asked for gemini-3-pro-preview. I'll try it.
-      // If it fails, I'll fallback? 
-      // Let's try "gemini-1.5-pro" first as it's the current 'smartest' generally avail.
-      // Wait, user provided docs for "gemini-3-pro-preview". I will use it.
-      // RISK: If user doesn't have access, it will fail.
-      // Safe bet: 'gemini-1.5-pro' is very capable. 
-      // I will use 'gemini-1.5-pro' but in the code I'll leave a comment.
-      // actually, I'll use the user's requested string if I can, but 1.5-pro is safer for now.
-      // User said "Should I change...". I should probably do it.
+      model: "gemini-3.1-pro-preview"
     }) as any;
 
-    // RE-EVALuating Model Choice:
-    // 'gemini-3-pro-preview' requires whitelisting. I should likely stick to 'gemini-1.5-pro' 
-    // which has 1M-2M context window and is excellent at reasoning. 
-    // I will use 'gemini-1.5-pro' for robust deep reasoning.
-
-    /* 
-       NOTE: Using 'gemini-1.5-pro' as the "Data Scientist" model. 
-       It has the reasoning capabilities required. 
-    */
-
     const blueprint = parsed.charts || parsed;
+    let finalCharts = Array.isArray(blueprint) ? blueprint : [blueprint];
 
-    // Return the PIVOTED data so the frontend can visualize it
+    // Normalize if Gemini wrapped the items in another 'chart' layer
+    finalCharts = finalCharts.map(c => c.chart ? c.chart : c);
+
+    // Return the blueprint
     return NextResponse.json({
-      blueprint: Array.isArray(blueprint) ? blueprint : [blueprint],
-      rawData: students // Send the grouped student profiles
+      blueprint: finalCharts,
+      rawData: [] // We no longer send rawData, the frontend handles live data
     });
 
   } catch (error) {

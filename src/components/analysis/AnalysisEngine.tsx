@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Play, Pause, Database, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
+import { Loader2, Play, Pause, Database, CheckCircle2, AlertCircle, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAnalysis } from "@/context/AnalysisContext";
@@ -107,7 +107,7 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
             setPendingCount(total ?? 0);
 
         } catch (e: any) {
-            // console.error("Error fetching pending count:", JSON.stringify(e, null, 2) || e);
+            console.error("Error fetching pending count:", e);
             setPendingCount(0);
         }
     };
@@ -118,9 +118,9 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
                 <CardHeader>
                     <div className="flex justify-between items-center">
                         <div>
-                            <CardTitle className="text-xl flex items-center gap-2"><Database className="w-5 h-5 text-blue-600" /> Deep Analysis</CardTitle>
+                            <CardTitle className="text-xl flex items-center gap-2"><Sparkles className="w-5 h-5 text-blue-600" /> Deep Analysis</CardTitle>
                             <CardDescription>
-                                Sentiment • Categorization • Cross-Unit Tagging (Turbo Mode: 50/batch)
+                                Sentiment • Categorization • Cross-Unit Tagging
                             </CardDescription>
                         </div>
                         <div className="text-right">
@@ -135,14 +135,10 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
                 <CardContent className="space-y-6">
 
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
                         <div className="bg-white p-3 rounded border text-center">
                             <div className="text-sm text-slate-500">Categories Loaded</div>
                             <div className="font-bold text-lg">{categories.length}</div>
-                        </div>
-                        <div className="bg-white p-3 rounded border text-center">
-                            <div className="text-sm text-slate-500">Other Units</div>
-                            <div className="font-bold text-lg">{allUnits.length}</div>
                         </div>
                         <div className="bg-white p-3 rounded border text-center">
                             <div className="text-sm text-slate-500">Custom Rules</div>

@@ -41,6 +41,8 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         return {};
     };
 
+    const [jobId, setJobId] = useState<string | null>(null);
+
     const startAnalysis = async (unitId: string, surveyId?: string) => {
         if (isAnalyzing && currentUnitId !== unitId) {
             toast.error("Another analysis is already running. Please wait.");
@@ -55,160 +57,141 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         // Only clear logs if starting fresh
         if (!isAnalyzing) setLogs([]);
 
-        addLog(`🚀 Starting Analysis ...`);
+        addLog(`🚀 Triggering Background Analysis Job for Unit ${unitId} ...`);
 
         try {
-            // 1. Fetch Resources
-            const { data: unit } = await supabase.from('organization_units').select('*').eq('id', unitId).single();
-            const { data: inst } = await supabase.from('unit_analysis_instructions').select('instruction').eq('unit_id', unitId);
-            const instructions = unit ? [unit.analysis_context, ...inst?.map((i: any) => i.instruction) || []].filter(Boolean) : [];
+            // 1. Check if there's already a running job
+            const { data: existingJob } = await supabase
+                .from('analysis_jobs')
+                .select('id, status')
+                .eq('unit_id', unitId)
+                .in('status', ['PROCESSING', 'PENDING'])
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
 
-            const { data: categories } = await supabase.from('analysis_categories').select('id, name, description').eq('unit_id', unitId);
-            const { data: allUnits } = await supabase.from('organization_units').select('id, name');
+            let activeJobId = existingJob?.id;
 
-            if (!categories || categories.length === 0) {
-                toast.warning("No categories found! Please build them in Tab 1.");
-                setIsAnalyzing(false);
-                return;
+            // 2. Start a new job if none exists
+            if (!activeJobId) {
+                const { data: newJob, error: jobErr } = await supabase
+                    .from('analysis_jobs')
+                    .insert({ unit_id: unitId, survey_id: surveyId || null, status: 'PENDING' })
+                    .select('id')
+                    .single();
+
+                if (jobErr) throw jobErr;
+                activeJobId = newJob.id;
+
+                // Trigger Background Worker
+                await fetch('/api/ai/process-queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobId: activeJobId, unitId, surveyId })
+                });
             }
 
-            // 2. Determine Total Workload (Approximation for Progress Bar)
-            // Just for the Progress Bar. If zero, we still proceed to chunking just in case.
+            setJobId(activeJobId);
+            addLog("Job initialized. Starting batch processing...");
+
+            // 3. Batch Processing Loop (Client Driven)
+            let hasMore = true;
+            let loopProcessed = 0;
+            const sessionProcessedIds: number[] = [];
+
+            // Optional: Fetch initial total workload to set the progress bar max
             let countQuery = supabase
                 .from('raw_feedback_inputs')
-                .select('*', { count: 'exact', head: true })
+                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
                 .eq('target_unit_id', unitId)
                 .eq('is_quantitative', false)
                 .eq('requires_analysis', true);
-            if (surveyId) countQuery = countQuery.eq('respondents.survey_id', surveyId);
 
-            const { count: approxTotal } = await countQuery;
+            if (surveyId) {
+                countQuery = countQuery.eq('respondents.survey_id', surveyId);
+            }
 
-            // We do NOT abort here. We let the chunking process discover the exact pending amount.
-            // The unanalyzed count might be smaller than approxTotal.
+            const { count: initialTotal, error: countErr } = await countQuery;
 
-            let hasMore = true;
-            const BATCH_SIZE = 50;
+            if (countErr) {
+                addLog(`⚠️ Warning: Could not fetch initial total items.`);
+            }
 
-            // To ensure we don't count rows we've already processed in this session, we keep track of their IDs
-            const processedRowIds = new Set<number>();
-
-            setProcessedCount(0);
-            setTotalPending(approxTotal || 0);
-
-            addLog("Beginning continuous analysis stream...");
+            setTotalPending(initialTotal || 0);
 
             while (hasMore && !stopRef.current) {
-                // Because we are continually adding to `feedback_segments`, we can just keep fetching 
-                // the "Top 50" unanalyzed inputs over and over until none are left. 
-                let query = supabase
-                    .from('raw_feedback_inputs')
-                    .select('id, raw_text, respondents!inner(survey_id)')
-                    .eq('target_unit_id', unitId)
-                    .eq('is_quantitative', false)
-                    .eq('requires_analysis', true);
-
-                if (surveyId) query = query.eq('respondents.survey_id', surveyId);
-
-                // We fetch a block of rows. But since Postgres might return rows that are 
-                // currently being processed (or failed), we exclude the ones we've already tried this session.
-                if (processedRowIds.size > 0) {
-                    query = query.not('id', 'in', `(${Array.from(processedRowIds).join(',')})`);
-                }
-
-                // Fetch exactly one batch size
-                const { data } = await query.limit(BATCH_SIZE).order('id', { ascending: true });
-
-                if (!data || data.length === 0) {
-                    hasMore = false;
-                    addLog("✅ No more pending comments found.");
-                    break;
-                }
-
-                // Filter out any that actually DO have segments already (just in case)
-                const { data: existingSegments } = await supabase
-                    .from('feedback_segments')
-                    .select('raw_input_id')
-                    .in('raw_input_id', data.map(r => r.id));
-
-                const analyzedSet = new Set(existingSegments?.map((s: any) => s.raw_input_id) || []);
-                const batch = data.filter(r => !analyzedSet.has(r.id));
-
-                // Mark all fetched rows as processed for this session loop so we don't infinitely re-fetch them if they fail
-                data.forEach(r => processedRowIds.add(r.id));
-
-                if (batch.length === 0) {
-                    continue; // Skip to next fetch if this entire batch was already analyzed
-                }
-
-                addLog(`Processing next batch (${batch.length} items)...`);
-
                 try {
-                    const response = await fetch('/api/ai/run-analysis', {
+                    addLog(`⏳ Processing next batch...`);
+                    const res = await fetch('/api/ai/process-queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            comments: batch,
-                            taxonomy: categories,
-                            allUnits: allUnits,
-                            unitContext: { name: unit?.name, instructions }
-                        })
+                        body: JSON.stringify({ jobId: activeJobId, unitId, surveyId, skipIds: sessionProcessedIds })
                     });
 
-                    if (!response.ok) throw new Error(`Server Error ${response.status}`);
-
-                    const responseData = await response.json();
-
-                    if (Array.isArray(responseData)) {
-                        const inserts: any[] = [];
-                        responseData.forEach((item: any) => {
-                            item.segments.forEach((seg: any) => {
-                                const catId = categories.find((c: any) => c.name === seg.category_name)?.id;
-                                const relatedId = allUnits?.find((u: any) => u.name === seg.related_unit_name)?.id;
-
-                                inserts.push({
-                                    raw_input_id: item.raw_input_id,
-                                    segment_text: seg.text,
-                                    sentiment: seg.sentiment,
-                                    category_id: catId || null,
-                                    related_unit_ids: relatedId ? [relatedId] : [],
-                                    is_suggestion: seg.is_suggestion || false
-                                });
-                            });
-                        });
-
-                        if (inserts.length > 0) {
-                            const { error } = await supabase.from('feedback_segments').insert(inserts);
-                            if (error) {
-                                addLog(`❌ DB Save Error: ${error.message}`);
-                            } else {
-                                setProcessedCount(prev => prev + batch.length);
-                            }
-                        }
+                    if (!res.ok) {
+                        throw new Error(`Batch processing returned ${res.status}`);
                     }
-                } catch (err: any) {
-                    addLog(`⚠️ Batch Failed: ${err.message}`);
+
+                    const data = await res.json();
+
+                    if (data.error) throw new Error(data.error);
+
+                    hasMore = data.hasMore;
+                    if (data.processedIds && Array.isArray(data.processedIds)) {
+                        sessionProcessedIds.push(...data.processedIds);
+                    }
+
+                    // We need to re-fetch the job strictly for the most accurate total processed,
+                    // but we can also rely on data.processedCount + existing count
+                    const { data: jobInfo } = await supabase.from('analysis_jobs').select('processed_items, total_items, status').eq('id', activeJobId).single();
+                    if (jobInfo) {
+                        setProcessedCount(jobInfo.processed_items || 0);
+                        if (jobInfo.total_items && jobInfo.total_items > totalPending) {
+                            setTotalPending(jobInfo.total_items);
+                        }
+                        if (jobInfo.status === 'STOPPED') {
+                            addLog(`🛑 Job Stopped by system.`);
+                            break;
+                        }
+                    } else {
+                        // Fallback
+                        loopProcessed += data.processedCount || 0;
+                        setProcessedCount(prev => prev + (data.processedCount || 0));
+                    }
+
+                    if (hasMore) {
+                        addLog(`✅ Batch complete. Pausing briefly...`);
+                        await new Promise(r => setTimeout(r, 1500)); // Sleep between batches to prevent spamming
+                    }
+                } catch (batchErr: any) {
+                    addLog(`❌ Batch Error: ${batchErr.message}`);
+                    addLog("Retrying in 5 seconds...");
+                    await new Promise(r => setTimeout(r, 5000));
                 }
+            }
 
-                // Small delay to prevent hammering the database too hard in a tight loop
-                await new Promise(resolve => setTimeout(resolve, 500));
-            } // End of Pagination loop
-
-            if (!stopRef.current && !hasMore) {
-                addLog("🏁 Analysis Complete.");
+            if (!stopRef.current) {
+                addLog("✅ All batches complete!");
+                setIsAnalyzing(false);
+                setJobId(null);
             }
 
         } catch (e: any) {
-            addLog(`❌ Error: ${e.message}`);
-            toast.error(e.message);
-        } finally {
+            addLog(`❌ Fatal Error: ${e.message}`);
+            toast.error("Failed to start analysis job.");
             setIsAnalyzing(false);
         }
     };
 
-    const stopAnalysis = () => {
+    const stopAnalysis = async () => {
         stopRef.current = true;
-        addLog("🛑 Stopping analysis...");
+        setIsAnalyzing(false);
+        addLog("🛑 Sending stop signal to background worker...");
+
+        if (jobId) {
+            await supabase.from('analysis_jobs').update({ status: 'STOPPED' }).eq('id', jobId);
+            setJobId(null);
+        }
     };
 
     const resetAnalysis = async (unitId: string, surveyId?: string) => {
@@ -233,12 +216,17 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             await supabase.from('feedback_segments').delete().in('id', ids);
             if (segments.length < 1000) clearing = false;
         }
+
+        // Clean up Jobs
+        await supabase.from('analysis_jobs').delete().eq('unit_id', unitId);
+
         addLog("✅ Reset Complete.");
         setTotalPending(0);
         setProcessedCount(0);
+        setJobId(null);
     };
 
-    const pct = totalPending > 0 ? Math.round((processedCount / totalPending) * 100) : 0;
+    const pct = totalPending > 0 ? Math.min(100, Math.round((processedCount / totalPending) * 100)) : 0;
 
     return (
         <AnalysisContext.Provider value={{

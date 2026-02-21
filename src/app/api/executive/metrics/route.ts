@@ -6,7 +6,7 @@ export async function GET(request: Request) {
         const { searchParams } = new URL(request.url);
         const surveyId = searchParams.get("surveyId");
 
-        // 1. Fetch all organization units
+        // 1. Fetch all organization units (we still need this to ensure units with 0 stats are returned)
         const { data: orgUnits, error: orgError } = await supabase
             .from('organization_units')
             .select('id, name');
@@ -16,19 +16,25 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: "Failed to fetch top-level units" }, { status: 500 });
         }
 
-        // 2. Compute metrics for each unit in parallel
-        // We use the same highly-optimized RPC function that the ComprehensiveDashboard uses.
-        const statsPromises = orgUnits.map(async (unit) => {
-            const { data: metricsData } = await supabase.rpc('get_dashboard_metrics', {
-                p_unit_id: unit.id,
-                p_survey_id: surveyId ? parseInt(surveyId) : null
-            });
+        // 2. Fetch all aggregated data in a single RPC round-trip
+        const { data: rawStats, error: rpcError } = await supabase.rpc('get_all_executive_metrics', {
+            p_survey_id: surveyId ? parseInt(surveyId) : null
+        });
 
-            if (metricsData) {
-                const total = metricsData.total_segments || 0;
-                const positive = metricsData.sentiment_counts?.Positive || 0;
-                const neutral = metricsData.sentiment_counts?.Neutral || 0;
-                const negative = metricsData.sentiment_counts?.Negative || 0;
+        if (rpcError) {
+            console.error("RPC Error:", rpcError);
+            return NextResponse.json({ error: "Failed to fetch aggregated metrics" }, { status: 500 });
+        }
+
+        // 3. Merge raw units with the aggregated data and calculate final score
+        const stats = orgUnits.map(unit => {
+            const unitStats = rawStats?.find((r: any) => r.unit_id === unit.id);
+
+            if (unitStats) {
+                const total = unitStats.total_segments || 0;
+                const positive = unitStats.positive || 0;
+                const neutral = unitStats.neutral || 0;
+                const negative = unitStats.negative || 0;
 
                 // Weighted Score: (Pos * 100 + Neu * 50) / Total
                 let score = 0;
@@ -47,7 +53,7 @@ export async function GET(request: Request) {
                 };
             }
 
-            // Fallback for errors or missing data
+            // Fallback for units with no data
             return {
                 id: unit.id,
                 name: unit.name,
@@ -58,8 +64,6 @@ export async function GET(request: Request) {
                 score: 0
             };
         });
-
-        const stats = await Promise.all(statsPromises);
 
         return NextResponse.json({ stats });
 

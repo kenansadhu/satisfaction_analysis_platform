@@ -41,10 +41,36 @@ export async function callGemini(
         generationConfig.responseMimeType = "application/json";
     }
 
-    const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig,
-    });
+    const maxRetries = 3;
+    let attempt = 0;
+    let delay = 1000; // 1s initial delay
+    let result;
+
+    while (attempt < maxRetries) {
+        try {
+            result = await model.generateContent({
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
+                generationConfig,
+            });
+            break; // If successful, exit retry loop
+        } catch (error: any) {
+            attempt++;
+            const isRetryable = error?.status === 429 || error?.status >= 500 || error?.message?.includes("fetch failed") || error?.message?.includes("429");
+
+            if (isRetryable && attempt < maxRetries) {
+                console.warn(`[Gemini API] Retrying attempt ${attempt}... waiting ${delay}ms`);
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2; // Exponential backoff
+            } else {
+                console.error(`[Gemini API] Failed after ${attempt} attempts:`, error);
+                throw new AIError(`Gemini Generation Failed: ${error.message || 'Unknown error'}`, error?.status || 500);
+            }
+        }
+    }
+
+    if (!result) {
+        throw new AIError("Failed to get generation result after retries.", 500);
+    }
 
     let text = result.response.text();
 

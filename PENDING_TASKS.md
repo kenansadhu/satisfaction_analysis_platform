@@ -62,3 +62,4 @@ This document lists all pending tasks consolidated from previous audits.
 ### 5.2 Enterprise
 - [ ] **Audit Logs:** Track who changed what.
 - [ ] **RBAC:** Roles for Rector vs. Dean vs. Student Rep.
+    - *Critical:* Strictly restrict adding/removing Surveys and Organization Units to the Super Admin. Deletion cascades across the entire database, preventing regular admins from making irreversible destructive actions.

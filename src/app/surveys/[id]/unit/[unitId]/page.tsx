@@ -13,7 +13,7 @@ import CategorizationEngine from "@/components/analysis/CategorizationEngine";
 import AnalysisEngine from "@/components/analysis/AnalysisEngine";
 import DataBrowser from "@/components/analysis/DataBrowser";
 import ComprehensiveDashboard from "@/components/analysis/ComprehensiveDashboard";
-import DynamicAnalytics from "@/components/analysis/DynamicAnalytics";
+
 
 export default function ScopedUnitWorkspace() {
     const params = useParams();
@@ -57,7 +57,7 @@ export default function ScopedUnitWorkspace() {
 
                 {/* Main Workspace Tabs */}
                 <Tabs defaultValue="categorization" className="w-full">
-                    <TabsList className="grid w-full grid-cols-5 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
+                    <TabsList className="grid w-full grid-cols-4 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
 
                         <TabsTrigger value="categorization" className="gap-2 data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
                             <BrainCircuit className="w-4 h-4" /> 1. Build Categories
@@ -75,9 +75,6 @@ export default function ScopedUnitWorkspace() {
                             <PieChart className="w-4 h-4" /> 4. Comprehensive Insights
                         </TabsTrigger>
 
-                        <TabsTrigger value="datascience" className="gap-2 data-[state=active]:bg-pink-50 data-[state=active]:text-pink-700">
-                            <Sparkles className="w-4 h-4" /> 5. AI Data Scientist
-                        </TabsTrigger>
 
                     </TabsList>
 
@@ -109,12 +106,6 @@ export default function ScopedUnitWorkspace() {
                         </ErrorBoundary>
                     </TabsContent>
 
-                    {/* TAB 5: DYNAMIC AI ANALYTICS */}
-                    <TabsContent value="datascience" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                        <ErrorBoundary fallbackTitle="AI Analytics crashed">
-                            <DynamicAnalytics unitId={unitId} surveyId={surveyId} />
-                        </ErrorBoundary>
-                    </TabsContent>
 
                 </Tabs>
 

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Loader2, Maximize2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Dynamic import for client-side rendering only since ForceGraph uses Canvas/Window
 import dynamic from 'next/dynamic';
@@ -166,28 +167,30 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
                         <Badge variant="outline" className="mt-4 opacity-50 font-normal">Requires 'Related Units' AI tagging</Badge>
                     </div>
                 ) : (
-                    <div className="w-full h-full rounded-md overflow-hidden bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800">
-                        <ForceGraph2D
-                            width={dimensions.width}
-                            height={300}
-                            graphData={graphData}
-                            nodeCanvasObject={paintNode}
-                            nodePointerAreaPaint={(node: any, color, ctx) => {
-                                ctx.fillStyle = color;
-                                const bckgDimensions = node.__bckgDimensions;
-                                if (bckgDimensions) {
-                                    ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
-                                }
-                            }}
-                            linkColor={() => '#94a3b8'}
-                            linkWidth={(link: any) => Math.min(link.value, 5)} // Thicker lines for more mentions
-                            linkDirectionalParticles={(link: any) => link.value} // Animated particles
-                            linkDirectionalParticleSpeed={0.005}
-                            d3VelocityDecay={0.6}
-                            cooldownTicks={100}
-                            onEngineStop={() => console.log('Graph rendering complete')}
-                        />
-                    </div>
+                    <ErrorBoundary fallbackTitle="Failed to render graph. Please refresh.">
+                        <div className="w-full h-full rounded-md overflow-hidden bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800">
+                            <ForceGraph2D
+                                width={dimensions.width}
+                                height={300}
+                                graphData={graphData}
+                                nodeCanvasObject={paintNode}
+                                nodePointerAreaPaint={(node: any, color, ctx) => {
+                                    ctx.fillStyle = color;
+                                    const bckgDimensions = node.__bckgDimensions;
+                                    if (bckgDimensions) {
+                                        ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
+                                    }
+                                }}
+                                linkColor={() => '#94a3b8'}
+                                linkWidth={(link: any) => Math.min(link.value, 5)} // Thicker lines for more mentions
+                                linkDirectionalParticles={(link: any) => link.value} // Animated particles
+                                linkDirectionalParticleSpeed={0.005}
+                                d3VelocityDecay={0.6}
+                                cooldownTicks={100}
+                                onEngineStop={() => console.log('Graph rendering complete')}
+                            />
+                        </div>
+                    </ErrorBoundary>
                 )}
             </CardContent>
         </Card>

@@ -8,10 +8,13 @@ import { SentimentHeatmap, LeaderBoard } from "@/components/analytics/SentimentH
 import { IssuesRadar } from "@/components/analytics/IssuesRadar";
 import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2 } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, Sparkles, BarChart2, Lightbulb } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
+import GlobalDataScientist from "@/components/analysis/GlobalDataScientist";
+import SuggestionHub from "@/components/executive/SuggestionHub";
 
 type UnitPerformance = {
     id: number;
@@ -134,82 +137,103 @@ export default function ExecutiveDashboard() {
                 }
             />
 
-            <div className="max-w-7xl mx-auto px-8 py-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="max-w-7xl mx-auto px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <Tabs defaultValue="overview" className="w-full">
+                    <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden">
+                        <TabsTrigger value="overview" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <BarChart2 className="w-4 h-4" /> Overview
+                        </TabsTrigger>
+                        <TabsTrigger value="datascience" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Sparkles className="w-4 h-4 text-purple-500" /> AI Data Scientist
+                        </TabsTrigger>
+                        <TabsTrigger value="suggestions" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Lightbulb className="w-4 h-4 text-amber-500" /> Suggestions Hub
+                        </TabsTrigger>
+                    </TabsList>
 
-                {/* 1. KEY METRICS ROW */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <MetricCard
-                        title="Overall Sentiment Score"
-                        value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : overallScore}
-                        description={overallScore >= 70 ? "Healthy Institution" : overallScore >= 50 ? "Needs Attention" : "Critical Condition"}
-                        trend={overallScore >= 70 ? "up" : overallScore >= 50 ? "flat" : "down"}
-                        trendValue="Global Avg"
-                        icon={Activity}
-                        colorClass="text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30"
-                    />
-                    <MetricCard
-                        title="Total Feedback Volume"
-                        value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : totalComments.toLocaleString()}
-                        description="Analyzed comments"
-                        icon={MessageSquareQuote}
-                        colorClass="text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30"
-                    />
-                    <MetricCard
-                        title="Issues Detected"
-                        value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : criticalIssues.toLocaleString()}
-                        description="Negative sentiments"
-                        trend="down"
-                        trendValue="Action Req."
-                        icon={AlertTriangle}
-                        colorClass="text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30"
-                    />
-                    <MetricCard
-                        title="Active Units"
-                        value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : units.filter(u => u.total > 0).length}
-                        description={`out of ${units.length} total units`}
-                        icon={Users}
-                        colorClass="text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/30"
-                    />
-                </div>
+                    <TabsContent value="overview" className="space-y-8 mt-0 focus-visible:ring-0">
 
-                {/* 2. STRATEGIC INSIGHTS (NEW VISUALS) */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div>
-                        <PraisesRadar
-                            surveyId={selectedSurvey}
-                            maxDomain={maxRadarDomain}
-                            onMaxCalculated={setPraisesMax}
-                        />
-                    </div>
-                    <div>
-                        <IssuesRadar
-                            surveyId={selectedSurvey}
-                            maxDomain={maxRadarDomain}
-                            onMaxCalculated={setIssuesMax}
-                        />
-                    </div>
-                </div>
-
-                {/* 3. LEADERBOARDS, HEATMAP, & DEPENDENCIES */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Left Col: Leaderboards */}
-                    <div className="space-y-6">
-                        <LeaderBoard title="🏆 Top Performing Units" units={units} type="top" loading={loading} />
-                        <LeaderBoard title="⚠️ Units Needing Attention" units={units} type="bottom" loading={loading} />
-                    </div>
-
-                    {/* Right Col: Heatmap & Graph (Span 2) */}
-                    <div className="lg:col-span-2 space-y-8">
-                        {loading ? (
-                            <div className="h-96 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-xl animate-pulse backdrop-blur-sm border border-white/20" />
-                        ) : (
-                            <SentimentHeatmap units={units} />
-                        )}
-                        <div className="h-[400px]">
-                            <DependencyGraph surveyId={selectedSurvey} />
+                        {/* 1. KEY METRICS ROW */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <MetricCard
+                                title="Overall Sentiment Score"
+                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : overallScore}
+                                description={overallScore >= 70 ? "Healthy Institution" : overallScore >= 50 ? "Needs Attention" : "Critical Condition"}
+                                trend={overallScore >= 70 ? "up" : overallScore >= 50 ? "flat" : "down"}
+                                trendValue="Global Avg"
+                                icon={Activity}
+                                colorClass="text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30"
+                            />
+                            <MetricCard
+                                title="Total Feedback Volume"
+                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : totalComments.toLocaleString()}
+                                description="Analyzed comments"
+                                icon={MessageSquareQuote}
+                                colorClass="text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30"
+                            />
+                            <MetricCard
+                                title="Issues Detected"
+                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : criticalIssues.toLocaleString()}
+                                description="Negative sentiments"
+                                trend="down"
+                                trendValue="Action Req."
+                                icon={AlertTriangle}
+                                colorClass="text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30"
+                            />
+                            <MetricCard
+                                title="Active Units"
+                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : units.filter(u => u.total > 0).length}
+                                description={`out of ${units.length} total units`}
+                                icon={Users}
+                                colorClass="text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/30"
+                            />
                         </div>
-                    </div>
-                </div>
+
+                        {/* 2. STRATEGIC INSIGHTS (NEW VISUALS) */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div>
+                                <PraisesRadar
+                                    surveyId={selectedSurvey}
+                                    maxDomain={maxRadarDomain}
+                                    onMaxCalculated={setPraisesMax}
+                                />
+                            </div>
+                            <div>
+                                <IssuesRadar
+                                    surveyId={selectedSurvey}
+                                    maxDomain={maxRadarDomain}
+                                    onMaxCalculated={setIssuesMax}
+                                />
+                            </div>
+                        </div>
+
+                        {/* 3. LEADERBOARDS, HEATMAP */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            {/* Left Col: Leaderboards */}
+                            <div className="space-y-6">
+                                <LeaderBoard title="🏆 Top Performing Units" units={units} type="top" loading={loading} />
+                                <LeaderBoard title="⚠️ Units Needing Attention" units={units} type="bottom" loading={loading} />
+                            </div>
+
+                            {/* Right Col: Heatmap & Graph (Span 2) */}
+                            <div className="lg:col-span-2 space-y-8">
+                                {loading ? (
+                                    <div className="h-96 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-xl animate-pulse backdrop-blur-sm border border-white/20" />
+                                ) : (
+                                    <SentimentHeatmap units={units} />
+                                )}
+                            </div>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="datascience" className="mt-6 focus-visible:ring-0">
+                        <GlobalDataScientist surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    </TabsContent>
+
+                    <TabsContent value="suggestions" className="mt-6 focus-visible:ring-0">
+                        <SuggestionHub surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    </TabsContent>
+                </Tabs>
             </div>
         </div>
     );

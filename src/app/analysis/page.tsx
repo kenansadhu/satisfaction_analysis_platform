@@ -24,42 +24,31 @@ export default function AnalysisDashboard() {
         const { data: orgUnits } = await supabase.from('organization_units').select('*').order('name');
 
         if (orgUnits) {
-            const statsPromises = orgUnits.map(async (u) => {
-                const { count: textCount } = await supabase.from('raw_feedback_inputs')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('target_unit_id', u.id)
-                    .eq('requires_analysis', true);
+            // 1. Fetch aggregated stats for ALL units in one single RPC request
+            const { data: rawStats, error } = await supabase.rpc('get_analysis_status_stats');
 
-                const { count: scoreCount } = await supabase.from('raw_feedback_inputs')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('target_unit_id', u.id)
-                    .eq('is_quantitative', true);
+            if (error) {
+                console.error("Failed to load dashboard stats", error);
+            }
 
-                const { count: catCount } = await supabase.from('raw_feedback_inputs')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('target_unit_id', u.id)
-                    .eq('is_quantitative', false)
-                    .eq('requires_analysis', false);
-
-                const { count: analyzed } = await supabase.from('feedback_segments')
-                    .select('*, raw_feedback_inputs!inner(target_unit_id)', { count: 'exact', head: true })
-                    .eq('raw_feedback_inputs.target_unit_id', u.id);
+            // 2. Map stats back into the format the UI expects
+            const results = orgUnits.map(u => {
+                const uStats = rawStats?.find((r: any) => r.unit_id === u.id);
 
                 return {
                     unit_id: u.id,
                     unit_name: u.name,
                     analysis_status: u.analysis_status || "NOT_STARTED",
                     stats: {
-                        total_rows: (textCount || 0) + (scoreCount || 0) + (catCount || 0),
-                        text_cols: (textCount ?? 0) > 0 ? 1 : 0,
-                        score_cols: (scoreCount ?? 0) > 0 ? 1 : 0,
-                        category_cols: (catCount ?? 0) > 0 ? 1 : 0,
-                        analyzed_segments: analyzed || 0
+                        total_rows: (uStats?.text_cols || 0) + (uStats?.score_cols || 0) + (uStats?.category_cols || 0),
+                        text_cols: (uStats?.text_cols || 0) > 0 ? 1 : 0,
+                        score_cols: (uStats?.score_cols || 0) > 0 ? 1 : 0,
+                        category_cols: (uStats?.category_cols || 0) > 0 ? 1 : 0,
+                        analyzed_segments: uStats?.analyzed_segments || 0
                     }
                 };
             });
 
-            const results = await Promise.all(statsPromises);
             setUnits(results);
         }
         setIsLoading(false);

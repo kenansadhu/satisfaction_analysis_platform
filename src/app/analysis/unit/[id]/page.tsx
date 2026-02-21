@@ -18,7 +18,6 @@ import AnalysisEngine from "@/components/analysis/AnalysisEngine";
 import DataBrowser from "@/components/analysis/DataBrowser";
 import QualitativeDashboard from "@/components/analysis/QualitativeDashboard";
 import ComprehensiveDashboard from "@/components/analysis/ComprehensiveDashboard";
-import DynamicAnalytics from "@/components/analysis/DynamicAnalytics";
 
 export default function UnitWorkspace() {
     const params = useParams();
@@ -56,8 +55,7 @@ export default function UnitWorkspace() {
 
                 {/* Main Workspace Tabs */}
                 <Tabs defaultValue="categorization" className="w-full">
-                    {/* Update grid-cols to 5 (Combined 4+5) */}
-                    <TabsList className="grid w-full grid-cols-5 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
+                    <TabsList className="grid w-full grid-cols-4 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
 
                         <TabsTrigger value="categorization" className="gap-2 data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
                             <BrainCircuit className="w-4 h-4" /> 1. Build Categories
@@ -73,10 +71,6 @@ export default function UnitWorkspace() {
 
                         <TabsTrigger value="insights" className="gap-2 data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
                             <PieChart className="w-4 h-4" /> 4. Comprehensive Insights
-                        </TabsTrigger>
-
-                        <TabsTrigger value="datascience" className="gap-2 data-[state=active]:bg-pink-50 data-[state=active]:text-pink-700">
-                            <Sparkles className="w-4 h-4" /> 5. AI Data Scientist
                         </TabsTrigger>
 
                     </TabsList>
@@ -106,13 +100,6 @@ export default function UnitWorkspace() {
                     <TabsContent value="insights" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
                         <ErrorBoundary fallbackTitle="Insights Dashboard crashed">
                             <ComprehensiveDashboard key={refreshKey} unitId={unitId} />
-                        </ErrorBoundary>
-                    </TabsContent>
-
-                    {/* TAB 5: DYNAMIC AI ANALYTICS */}
-                    <TabsContent value="datascience" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                        <ErrorBoundary fallbackTitle="AI Analytics crashed">
-                            <DynamicAnalytics key={refreshKey} unitId={unitId} />
                         </ErrorBoundary>
                     </TabsContent>
 
