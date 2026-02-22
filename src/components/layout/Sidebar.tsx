@@ -93,10 +93,10 @@ export function Sidebar({
             <div className="h-20 flex items-center px-4 border-b border-slate-800/50 shrink-0">
                 {!isCollapsed || isMobile ? (
                     <Link href="/" className="flex items-center gap-3 text-white font-extrabold tracking-tight hover:opacity-90 transition-opacity">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
-                            <span className="text-xl">S</span>
+                        <div className="px-3 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
+                            <span className="text-xl">UPH</span>
                         </div>
-                        <span className="bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent text-lg">SSI UPH</span>
+                        <span className="bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent text-lg">UPH Survey Platform</span>
                     </Link>
                 ) : (
                     <Link
@@ -104,7 +104,7 @@ export function Sidebar({
                         className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/20 mx-auto cursor-pointer hover:from-blue-400 hover:to-indigo-500 transition-colors"
                         title="Go to Home"
                     >
-                        <span className="text-xl font-bold text-white">S</span>
+                        <span className="text-xl font-bold text-white">U</span>
                     </Link>
                 )}
             </div>

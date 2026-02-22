@@ -40,9 +40,9 @@ export default async function HomePage() {
                 AI-Powered Analytics Platform
               </div>
               <h1 className="text-4xl font-bold text-white tracking-tight">
-                SSI UPH<br />
+                UPH Survey Platform<br />
                 <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
-                  Analytics
+                  AI Analytics and Insights
                 </span>
               </h1>
               <p className="text-slate-400 text-lg max-w-md">
