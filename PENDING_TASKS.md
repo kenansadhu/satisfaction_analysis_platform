@@ -1,7 +1,7 @@
 # Student Voice Platform — Pending Tasks
 
 > **Status:** Active
-> **Last Updated:** February 19, 2026
+> **Last Updated:** February 25, 2026
 
 This document lists all pending tasks consolidated from previous audits.
 
@@ -17,8 +17,12 @@ This document lists all pending tasks consolidated from previous audits.
 - [ ] **Improved AI Data Scientist:** In here, we have to think revolutionary stuff. In the 'Discover Connection' part, I want the AI to be able to have a back and forth conversation about the user in building each graph, in finding connections, etc. The data used must be able to be shown clearly to the user (highly verifiable), and all the data must be sourced from the data, none should be hardcoded in the code. I also want this feature for the AI Data Scientist: There should be a button that finds the correlation of all the qualitative and quantitative variables within each unit OR between all units, and then show it to the user. Then, there's another button for the AI to find meaningful connections, and suggest it to the user. Again, back and forth process, including when the graph is made, the user can also suggest an improvement to the graph and the AI will implement the changes and confirm it to the user. Then, we can save the chart we liked in the 'saved charts'. Again, the chart needs to be online so when there's a change in the data, it can automatically refresh.
 ---
 
-### Phase 2: Maintainability
-- [ ] **TypeScript Strictness:** Import and use the types defined in `src/types/index.ts`.
+### Phase 2: Maintainability & Code Quality
+- [ ] **TypeScript Strictness:** Import and use the types defined in `src/types/index.ts`. Replace all `any` types in component states, API responses, and Zod schemas (`z.any()`) with proper interfaces.
+- [ ] **Split `ComprehensiveDashboard.tsx`:** At 1,131 lines (83KB), this mega-component should be decomposed into 5+ focused sub-components (e.g., SentimentOverview, QuantitativeMetrics, QualitativeBreakdown, ExecutiveReport, DrillDownDialog).
+- [ ] **Move Client-Side Aggregation to Database:** Several dashboards fetch all rows and aggregate in JavaScript. Create Supabase Database Views or RPC functions (e.g., `get_sentiment_counts(unit_id)`) to let Postgres do the heavy lifting and only return aggregated numbers to the UI.
+- [ ] **Fix AnalysisContext Re-render Bloat:** Every log/progress update in `AnalysisContext.tsx` re-renders all subscribed components. Consider splitting into separate contexts (progress vs. controls) or using a more granular state manager like Zustand.
+- [ ] **Automated Testing:** Add unit tests for critical paths — API route validation, AI response parsing, data transformation logic, and component rendering.
 - [ ] **Database Documentation:** Generate an ERD or schema documentation.
 
 ---

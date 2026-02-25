@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, BrainCircuit, MessageSquare, Users, BarChart3, ChevronRight, Loader2, Trash2, Archive, FileSpreadsheet, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, BrainCircuit, MessageSquare, Users, BarChart3, ChevronRight, Loader2, Trash2, Archive, FileSpreadsheet, CheckCircle2, Settings } from "lucide-react";
 import Link from "next/link";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -27,6 +27,7 @@ export default function SurveyDetailPage() {
     const surveyId = params.id as string;
 
     const [surveyTitle, setSurveyTitle] = useState("");
+    const [surveyYear, setSurveyYear] = useState<number | null>(null);
     const [totalRespondents, setTotalRespondents] = useState(0);
     const [totalDataPoints, setTotalDataPoints] = useState(0);
     const [unitStats, setUnitStats] = useState<UnitStat[]>([]);
@@ -51,105 +52,65 @@ export default function SurveyDetailPage() {
 
     async function loadSurveyData() {
         setIsLoading(true);
-        // 1. Survey Details
-        const { data: survey } = await supabase.from('surveys').select('title').eq('id', surveyId).single();
-        if (survey) setSurveyTitle(survey.title);
 
-        // 2. Respondent Count
-        const { count: respCount } = await supabase.from('respondents').select('*', { count: 'exact', head: true }).eq('survey_id', surveyId);
-        setTotalRespondents(respCount || 0);
+        // === PHASE 1: Parallel metadata queries (all independent, use COUNT not row fetch) ===
+        const [surveyRes, respCountRes, invalidRes, scoresRes, unitsRes] = await Promise.all([
+            supabase.from('surveys').select('title, year').eq('id', surveyId).single(),
+            supabase.from('respondents').select('*', { count: 'exact', head: true }).eq('survey_id', surveyId),
+            supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId).or('raw_text.eq.-,raw_text.eq.N/A,raw_text.eq.nan,raw_text.eq.Nilai,raw_text.is.null'),
+            supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId).eq('is_quantitative', false).or('raw_text.like._ = %,raw_text.like.NA = %,raw_text.eq.Ya,raw_text.eq.Tidak'),
+            supabase.from('organization_units').select('id, name, description').order('name'),
+        ]);
 
-        // 3. Real Total Data Points
-        const { count: totalInputs } = await supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId);
-        setTotalDataPoints(totalInputs || 0);
+        if (surveyRes.data) {
+            setSurveyTitle(surveyRes.data.title);
+            setSurveyYear(surveyRes.data.year || null);
+        }
+        setTotalRespondents(respCountRes.count || 0);
+        setInvalidCount(invalidRes.count || 0);
+        setScoreCount(scoresRes.count || 0);
 
-        // 4. SCAN: Invalid & Scores
-        const { count: invalid } = await supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId).or('raw_text.eq.-,raw_text.eq.N/A,raw_text.eq.nan,raw_text.eq.Nilai,raw_text.is.null');
-        setInvalidCount(invalid || 0);
+        // Total data points: run as a separate query to avoid contention
+        const { count: dataPointCount } = await supabase
+            .from('raw_feedback_inputs')
+            .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
+            .eq('respondents.survey_id', surveyId);
+        setTotalDataPoints(dataPointCount || 0);
 
-        const { count: scores } = await supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId).eq('is_quantitative', false).or('raw_text.like._ = %,raw_text.like.NA = %,raw_text.eq.Ya,raw_text.eq.Tidak');
-        setScoreCount(scores || 0);
-
-        // 5. Unit Stats (Optimized: No N+1 Queries)
-        const { data: units } = await supabase.from('organization_units').select('id, name, description').order('name');
-
+        const units = unitsRes.data;
         if (units) {
-            // Optimized: Use Parallel COUNT queries to avoid 1000-row limit truncation
-            // Fetch stats for all units in parallel
+            // === PHASE 2: Per-unit parallel COUNT queries ===
+            // Uses head:true (no row limit issue) — fast and accurate
             const stats = await Promise.all(units.map(async (unit) => {
-                // 1. Total Qualitative Items for this Unit & Survey
-                const { count: cCount } = await supabase
-                    .from('raw_feedback_inputs')
-                    .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-                    .eq('target_unit_id', unit.id)
-                    .eq('respondents.survey_id', surveyId)
-                    .eq('requires_analysis', true);
+                const [commentRes, segmentRes] = await Promise.all([
+                    // Count qualitative items for this unit
+                    supabase
+                        .from('raw_feedback_inputs')
+                        .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
+                        .eq('target_unit_id', unit.id)
+                        .eq('respondents.survey_id', surveyId)
+                        .eq('requires_analysis', true),
+                    // Count segments for this unit (approximates analysis progress)
+                    supabase
+                        .from('feedback_segments')
+                        .select('id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))', { count: 'exact', head: true })
+                        .eq('raw_feedback_inputs.target_unit_id', unit.id)
+                        .eq('raw_feedback_inputs.respondents.survey_id', surveyId),
+                ]);
 
-                // 2. Analyzed Items (Segments) for this Unit & Survey
-                // We count DISTINCT raw_input_ids that have segments
-                // Since Supabase doesn't support verify distinct count easily on join without RPC,
-                // and we can't fetch all IDs, we will use a slightly approximate but usually correct metric:
-                // Count raw_inputs that HAVE segments. 
-                // We can do this by filtering raw_feedback_inputs with !inner join on segments?
-                // No, that puts load on DB. 
-                // Alternatively, we can assume analysis is tracked by `analyzed_at` flag if we had one? We don't.
-                // Best approach for now: Count distinct raw_input_ids in feedback_segments linked to this survey/unit.
-                // But `feedback_segments` grows large. 
-                // Let's use the same query as AnalysisEngine: 
-                /*
-                 let analyzedQuery = supabase
-                    .from('feedback_segments')
-                    .select('*, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))', { count: 'exact', head: true })
-                    .eq('raw_feedback_inputs.target_unit_id', unitId)
-                    .eq('raw_feedback_inputs.respondents.survey_id', surveyId);
-                */
-                // Note: This counts SEGMENTS, not Inputs. One input can have multiple segments.
-                // Dashboard needs "Progress". Progress = Unique Analyzed Inputs / Total Inputs.
-                // If we count segments, we might get > 100% (fixed previously).
-                // Without RPC, counting distinct inputs via join is hard.
-                // BUT, checking `AnalysisEngine.tsx`... it calculates specific progress.
-                // Compromise: We fetch Analyzed Inputs Count by filtering raw_inputs that exist in segments?
-                // Not easy without `exists`.
-                // We will fetch the count of segments for now and cap at 100% visually, OR...
-                // Wait, the discrepancy was >100%.
-                // Let's try to query `raw_feedback_inputs` and filter where `feedback_segments` is not null?
-                // Supabase: .not('feedback_segments', 'is', null) -- requires relationship setup.
-
-                // Better: Count ALL segments for this unit/survey.
-                // AND explicitly check how many inputs have > 0 segments.
-                // Actually, `AnalysisEngine` does `alreadyAnalyzed` via `feedback_segments` count (Total Segments).
-                // This explains why progress was > 100%.
-
-                // CORRECT LOGIC:
-                // We want: Number of raw_feedback_inputs that have at least 1 segment.
-                // Query: select count of raw_feedback_inputs where ID is in (select raw_input_id from feedback_segments...).
-                // Supabase doesn't support subquery `in` easily.
-
-                // Workaround:
-                // Fetch ALL analyzed IDs for this unit? If < 1000, fine. If > 1000, truncated.
-                // CTL has 892 items.
-                // Fetching 1000 ints is cheap.
-                // We will fetch `raw_input_id` from segments for this unit+survey.
-                // Then count unique in JS.
-
-                const { data: segData } = await supabase
-                    .from('feedback_segments')
-                    .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))')
-                    .eq('raw_feedback_inputs.target_unit_id', unit.id)
-                    .eq('raw_feedback_inputs.respondents.survey_id', surveyId);
-
-                const uniqueAnalyzed = new Set(segData?.map(s => s.raw_input_id)).size;
+                const commentCount = commentRes.count || 0;
+                // Segments can be > inputs (1 input = multiple segments), so cap at commentCount
+                const analyzedCount = Math.min(segmentRes.count || 0, commentCount);
 
                 return {
                     unit_id: unit.id,
                     unit_name: unit.name,
                     unit_desc: unit.description,
-                    comment_count: cCount || 0,
-                    analyzed_count: uniqueAnalyzed // Accurate unique count
+                    comment_count: commentCount,
+                    analyzed_count: analyzedCount,
                 };
             }));
 
-            // Filter out empty units and sort
             const validStats = stats.filter(s => s.comment_count > 0).sort((a, b) => b.comment_count - a.comment_count);
             setUnitStats(validStats);
         }
@@ -349,10 +310,26 @@ export default function SurveyDetailPage() {
     return (
         <PageShell>
             <PageHeader
-                title={surveyTitle || "Survey Detail"}
+                title={
+                    <span className="flex items-center gap-3">
+                        {surveyTitle || "Survey Detail"}
+                        {surveyYear && (
+                            <Badge variant="secondary" className="text-sm font-normal bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300">
+                                {surveyYear}
+                            </Badge>
+                        )}
+                    </span>
+                }
                 description={`${totalRespondents.toLocaleString()} respondents • ${totalDataPoints.toLocaleString()} data points`}
                 backHref="/surveys"
                 backLabel="Surveys"
+                actions={
+                    <Link href={`/surveys/${surveyId}/manage`}>
+                        <Button variant="outline" size="sm" className="gap-2 border-slate-300 hover:border-blue-300 hover:text-blue-600">
+                            <Settings className="w-4 h-4" /> Manage Survey
+                        </Button>
+                    </Link>
+                }
             />
 
             <div className="max-w-7xl mx-auto px-8 py-10 space-y-8">

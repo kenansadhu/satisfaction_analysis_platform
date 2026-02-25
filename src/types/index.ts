@@ -18,7 +18,16 @@ export interface Survey {
     id: number;
     title: string;
     created_at: string;
+    year?: number;
+    description?: string;
     respondents?: { count: number }[];
+}
+
+export interface FacultyEnrollment {
+    id: number;
+    unit_id: number;
+    survey_id: number;
+    student_count: number;
 }
 
 export interface Category {

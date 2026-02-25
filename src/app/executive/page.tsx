@@ -8,13 +8,14 @@ import { SentimentHeatmap, LeaderBoard } from "@/components/analytics/SentimentH
 import { IssuesRadar } from "@/components/analytics/IssuesRadar";
 import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, Sparkles, BarChart2, Lightbulb } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, Sparkles, BarChart2, Lightbulb, GitCompareArrows } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
 import GlobalDataScientist from "@/components/analysis/GlobalDataScientist";
 import SuggestionHub from "@/components/executive/SuggestionHub";
+import YearComparison from "@/components/executive/YearComparison";
 
 type UnitPerformance = {
     id: number;
@@ -143,6 +144,9 @@ export default function ExecutiveDashboard() {
                         <TabsTrigger value="overview" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <BarChart2 className="w-4 h-4" /> Overview
                         </TabsTrigger>
+                        <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
+                        </TabsTrigger>
                         <TabsTrigger value="datascience" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <Sparkles className="w-4 h-4 text-purple-500" /> AI Data Scientist
                         </TabsTrigger>
@@ -224,6 +228,10 @@ export default function ExecutiveDashboard() {
                                 )}
                             </div>
                         </div>
+                    </TabsContent>
+
+                    <TabsContent value="comparison" className="mt-6 focus-visible:ring-0">
+                        <YearComparison surveys={surveys} />
                     </TabsContent>
 
                     <TabsContent value="datascience" className="mt-6 focus-visible:ring-0">

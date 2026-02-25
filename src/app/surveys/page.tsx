@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Trash2, ArrowRight, BarChart3, Calendar, Plus, Users, FolderOpen } from "lucide-react";
+import { Trash2, ArrowRight, BarChart3, Calendar, Plus, Users, FolderOpen, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -46,6 +46,7 @@ export default function SurveysPage() {
         id: s.id,
         title: s.title,
         created_at: s.created_at,
+        year: s.year,
         respondents: [{ count: count || 0 }] // Match the type definition
       };
     }));
@@ -109,9 +110,14 @@ export default function SurveysPage() {
                       <CardTitle className="text-lg font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
                         {survey.title}
                       </CardTitle>
-                      <CardDescription className="flex items-center gap-1 text-xs">
+                      <CardDescription className="flex items-center gap-2 text-xs">
                         <Calendar className="w-3 h-3" />
                         {format(new Date(survey.created_at), "MMM d, yyyy")}
+                        {survey.year && (
+                          <Badge variant="secondary" className="text-xs font-normal bg-blue-50 text-blue-700 border-blue-200">
+                            {survey.year}
+                          </Badge>
+                        )}
                       </CardDescription>
                     </div>
                     <Badge variant="secondary" className="bg-slate-50 text-slate-600">
@@ -132,11 +138,18 @@ export default function SurveysPage() {
                   <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleteTarget(survey.id)}>
                     <Trash2 className="w-4 h-4" />
                   </Button>
-                  <Link href={`/surveys/${survey.id}`}>
-                    <Button size="sm" variant="outline" className="gap-2 group-hover:border-blue-300 group-hover:text-blue-600">
-                      Analyze Project <ArrowRight className="w-4 h-4" />
-                    </Button>
-                  </Link>
+                  <div className="flex gap-2">
+                    <Link href={`/surveys/${survey.id}/manage`}>
+                      <Button size="sm" variant="ghost" className="gap-1.5 text-slate-500 hover:text-blue-600">
+                        <Settings className="w-3.5 h-3.5" /> Manage
+                      </Button>
+                    </Link>
+                    <Link href={`/surveys/${survey.id}`}>
+                      <Button size="sm" variant="outline" className="gap-2 group-hover:border-blue-300 group-hover:text-blue-600">
+                        Analyze Project <ArrowRight className="w-4 h-4" />
+                      </Button>
+                    </Link>
+                  </div>
                 </CardFooter>
               </Card>
             ))}
