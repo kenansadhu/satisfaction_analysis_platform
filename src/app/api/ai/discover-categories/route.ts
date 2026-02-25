@@ -44,7 +44,9 @@ export async function POST(req: Request) {
       ${wrapUserData(comments.slice(0, 100))}
 
       OUTPUT:
-      Return the COMPLETE updated list of categories as a JSON object:
+      Return the COMPLETE updated list of categories as a JSON object. 
+      IMPORTANT: Every category object MUST have exactly these fields: "name", "description", and "keywords" (an array of strings).
+      
       {
         "categories": [
           { "name": "Category Name", "description": "Definition", "keywords": ["keyword1", "keyword2"] }

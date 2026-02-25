@@ -57,24 +57,23 @@ export default function ScopedUnitWorkspace() {
 
                 {/* Main Workspace Tabs */}
                 <Tabs defaultValue="categorization" className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 mb-8 bg-white border border-slate-200 p-1 h-12 shadow-sm rounded-lg">
+                    <TabsList className="grid w-full grid-cols-4 mb-8 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden">
 
-                        <TabsTrigger value="categorization" className="gap-2 data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
+                        <TabsTrigger value="categorization" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-purple-700 data-[state=active]:shadow-sm">
                             <BrainCircuit className="w-4 h-4" /> 1. Build Categories
                         </TabsTrigger>
 
-                        <TabsTrigger value="analysis" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+                        <TabsTrigger value="analysis" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-green-700 data-[state=active]:shadow-sm">
                             <Database className="w-4 h-4" /> 2. Run Analysis
                         </TabsTrigger>
 
-                        <TabsTrigger value="results" className="gap-2 data-[state=active]:bg-amber-50 data-[state=active]:text-amber-700">
+                        <TabsTrigger value="results" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-amber-700 data-[state=active]:shadow-sm">
                             <ListChecks className="w-4 h-4" /> 3. Audit Results
                         </TabsTrigger>
 
-                        <TabsTrigger value="insights" className="gap-2 data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
+                        <TabsTrigger value="insights" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">
                             <PieChart className="w-4 h-4" /> 4. Comprehensive Insights
                         </TabsTrigger>
-
 
                     </TabsList>
 

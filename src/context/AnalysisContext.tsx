@@ -119,13 +119,50 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
             setTotalPending(initialTotal || 0);
 
+            // Fetch Watermark and Historical Progress (Survey Aware)
+            let watermarkQuery = supabase
+                .from('feedback_segments')
+                .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id, is_quantitative, respondents!inner(survey_id))')
+                .eq('raw_feedback_inputs.target_unit_id', unitId)
+                .eq('raw_feedback_inputs.is_quantitative', false);
+
+            if (surveyId) {
+                watermarkQuery = watermarkQuery.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+            }
+
+            const { data: lastSegment } = await watermarkQuery
+                .order('raw_input_id', { ascending: false })
+                .limit(1)
+                .single();
+
+            const watermarkId = lastSegment?.raw_input_id || 0;
+
+            let analyzedCountQuery = supabase
+                .from('raw_feedback_inputs')
+                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
+                .eq('target_unit_id', unitId)
+                .eq('is_quantitative', false) // CRITICAL SYNC
+                .eq('requires_analysis', true)
+                .lte('id', watermarkId);
+
+            if (surveyId) analyzedCountQuery = analyzedCountQuery.eq('respondents.survey_id', surveyId);
+            const { count: analyzedCount } = await analyzedCountQuery;
+
+            const historicalOffset = analyzedCount || 0;
+            setProcessedCount(historicalOffset);
+
             while (hasMore && !stopRef.current) {
                 try {
                     addLog(`⏳ Processing next batch...`);
                     const res = await fetch('/api/ai/process-queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ jobId: activeJobId, unitId, surveyId, skipIds: sessionProcessedIds })
+                        body: JSON.stringify({
+                            jobId: activeJobId,
+                            unitId,
+                            surveyId,
+                            skipIds: sessionProcessedIds.slice(-50) // Only skip the absolute latest to prevent duplicates in edge cases
+                        })
                     });
 
                     if (!res.ok) {
@@ -133,7 +170,6 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                     }
 
                     const data = await res.json();
-
                     if (data.error) throw new Error(data.error);
 
                     hasMore = data.hasMore;
@@ -145,7 +181,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                     // but we can also rely on data.processedCount + existing count
                     const { data: jobInfo } = await supabase.from('analysis_jobs').select('processed_items, total_items, status').eq('id', activeJobId).single();
                     if (jobInfo) {
-                        setProcessedCount(jobInfo.processed_items || 0);
+                        setProcessedCount(historicalOffset + (jobInfo.processed_items || 0));
                         if (jobInfo.total_items && jobInfo.total_items > totalPending) {
                             setTotalPending(jobInfo.total_items);
                         }
@@ -195,29 +231,44 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     };
 
     const resetAnalysis = async (unitId: string, surveyId?: string) => {
-        addLog("🗑️ Starting Full Reset...");
-        let clearing = true;
-        while (clearing) {
-            let query = supabase
-                .from('feedback_segments')
-                .select('id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))')
-                .eq('raw_feedback_inputs.target_unit_id', unitId)
-                .limit(1000);
+        addLog("🗑️ Starting Optimized Reset...");
 
-            if (surveyId) query = query.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+        // 1. Get ALL relevant raw feedback input IDs first (Clean & Efficient)
+        let inputIdsQuery = supabase
+            .from('raw_feedback_inputs')
+            .select('id, respondents!inner(survey_id)')
+            .eq('target_unit_id', unitId);
 
-            const { data: segments, error } = await query;
-            if (error || !segments || segments.length === 0) {
-                clearing = false;
-                break;
-            }
-
-            const ids = segments.map((s: any) => s.id);
-            await supabase.from('feedback_segments').delete().in('id', ids);
-            if (segments.length < 1000) clearing = false;
+        if (surveyId) {
+            inputIdsQuery = inputIdsQuery.eq('respondents.survey_id', surveyId);
         }
 
-        // Clean up Jobs
+        const { data: inputs, error: inputError } = await inputIdsQuery;
+        if (inputError) {
+            toast.error("Failed to fetch inputs for reset: " + inputError.message);
+            return;
+        }
+
+        const inputIds = inputs?.map(i => i.id) || [];
+
+        // 2. Clear existing segments in batches by Input ID
+        if (inputIds.length > 0) {
+            const SEGMENT_BATCH = 1000;
+            for (let i = 0; i < inputIds.length; i += SEGMENT_BATCH) {
+                const batchIds = inputIds.slice(i, i + SEGMENT_BATCH);
+                const { error: delError } = await supabase
+                    .from('feedback_segments')
+                    .delete()
+                    .in('raw_input_id', batchIds);
+
+                if (delError) {
+                    toast.error("Partial reset failed: " + delError.message);
+                    return;
+                }
+            }
+        }
+
+        // 3. Clean up Jobs
         await supabase.from('analysis_jobs').delete().eq('unit_id', unitId);
 
         addLog("✅ Reset Complete.");

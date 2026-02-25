@@ -175,17 +175,81 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
                         className="pl-9"
                     />
                 </div>
-                <div className="flex items-center gap-4">
-                    <span className="text-sm text-slate-500">
-                        Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, totalCount)} of <strong>{totalCount}</strong>
-                    </span>
-                    <div className="flex gap-1">
-                        <Button variant="outline" size="icon" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
-                            <ChevronLeft className="w-4 h-4" />
-                        </Button>
-                        <Button variant="outline" size="icon" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
-                            <ChevronRight className="w-4 h-4" />
-                        </Button>
+                <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-400">Jump to</span>
+                        <Input
+                            type="number"
+                            min={1}
+                            max={totalPages}
+                            className="w-16 h-8 text-xs p-1 px-2"
+                            placeholder="Page"
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    const val = parseInt((e.target as HTMLInputElement).value);
+                                    if (!isNaN(val) && val >= 1 && val <= totalPages) {
+                                        setPage(val - 1);
+                                    }
+                                }
+                            }}
+                        />
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <span className="text-sm text-slate-500 whitespace-nowrap">
+                            Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, totalCount)} of <strong>{totalCount}</strong>
+                        </span>
+
+                        <div className="flex items-center gap-1">
+                            {/* First Page */}
+                            <Button
+                                variant="outline" size="icon" className="h-8 w-8"
+                                onClick={() => setPage(0)} disabled={page === 0}
+                            >
+                                <ChevronLeft className="w-4 h-4 mr-[-2px]" /><ChevronLeft className="w-4 h-4 ml-[-2px]" />
+                            </Button>
+
+                            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
+                                <ChevronLeft className="w-4 h-4" />
+                            </Button>
+
+                            {/* Page Bubbles */}
+                            <div className="flex items-center gap-1 mx-1">
+                                {Array.from({ length: totalPages }, (_, i) => i)
+                                    .filter(p => {
+                                        // Show first, last, and 2 around current
+                                        return p === 0 || p === totalPages - 1 || Math.abs(p - page) <= 2;
+                                    })
+                                    .map((p, idx, arr) => (
+                                        <div key={p} className="flex items-center gap-1">
+                                            {idx > 0 && arr[idx] !== arr[idx - 1] + 1 && (
+                                                <span className="text-slate-300 px-1">...</span>
+                                            )}
+                                            <Button
+                                                variant={page === p ? "default" : "outline"}
+                                                size="sm"
+                                                className={`h-8 w-8 p-0 text-xs ${page === p ? "bg-blue-600 hover:bg-blue-700" : ""}`}
+                                                onClick={() => setPage(p)}
+                                            >
+                                                {p + 1}
+                                            </Button>
+                                        </div>
+                                    ))
+                                }
+                            </div>
+
+                            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
+                                <ChevronRight className="w-4 h-4" />
+                            </Button>
+
+                            {/* Last Page */}
+                            <Button
+                                variant="outline" size="icon" className="h-8 w-8"
+                                onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}
+                            >
+                                <ChevronRight className="w-4 h-4 mr-[-2px]" /><ChevronRight className="w-4 h-4 ml-[-2px]" />
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div >

@@ -20,8 +20,13 @@ export function PraisesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyI
                     p_sentiment: 'Positive'
                 });
 
-                if (error || !aggregatedPraises || aggregatedPraises.length === 0) {
-                    console.error("Failed to fetch radar aggregation:", error);
+                if (error) {
+                    console.error("Failed to fetch radar aggregation:", error.message || error);
+                    setData([]);
+                    return;
+                }
+
+                if (!aggregatedPraises || aggregatedPraises.length === 0) {
                     setData([]);
                     return;
                 }

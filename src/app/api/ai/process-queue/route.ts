@@ -77,13 +77,23 @@ async function processBatch(jobId: string, unitId: string, surveyId?: string, sk
         return { hasMore: false, processedCount: 0, processedIds: [] };
     }
 
-    // 2. Fetch actually processed IDs so we can skip them in the database query
-    const { data: analyzedData } = await supabase
+    // 2. Fetch the "Watermark" (Survey Aware)
+    let watermarkQuery = supabase
         .from('feedback_segments')
-        .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id)')
+        .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))')
         .eq('raw_feedback_inputs.target_unit_id', unitId);
 
-    const analyzedIds = Array.from(new Set(analyzedData?.map(r => r.raw_input_id) || []));
+    if (surveyId) {
+        watermarkQuery = watermarkQuery.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+    }
+
+    const { data: lastSegment, error: lastSegError } = await watermarkQuery
+        .order('raw_input_id', { ascending: false })
+        .limit(1)
+        .single();
+
+    // We don't throw on error here because "no rows found" is a valid 406 error in single()
+    let watermarkId = lastSegment?.raw_input_id || 0;
 
     // Fetch Next Batch (Candidates)
     let query = supabase
@@ -91,18 +101,20 @@ async function processBatch(jobId: string, unitId: string, surveyId?: string, sk
         .select('id, raw_text, respondents!inner(survey_id)')
         .eq('target_unit_id', unitId)
         .eq('is_quantitative', false)
-        .eq('requires_analysis', true);
+        .eq('requires_analysis', true)
+        .gt('id', watermarkId); // RESUME FROM WATERMARK
 
     if (surveyId) query = query.eq('respondents.survey_id', surveyId);
 
-    // Skip already analyzed IDs AND session skipIds
-    const allSkipIds = Array.from(new Set([...analyzedIds, ...skipIds]));
-    if (allSkipIds.length > 0) {
-        query = query.not('id', 'in', `(${allSkipIds.join(',')})`);
+    // Skip session-specific skipIds (rarely needed now but good for safety)
+    if (skipIds.length > 0 && skipIds.length < 100) { // Limit length to prevent URI error
+        query = query.not('id', 'in', `(${skipIds.join(',')})`);
     }
 
-    // Since we've filtered out already analyzed ones, we can just grab the exact BATCH_SIZE
-    const { data } = await query.limit(BATCH_SIZE).order('id', { ascending: true });
+    // Since we've filtered out already analyzed ones via watermark, we can just grab the exact BATCH_SIZE
+    const { data, error: fetchError } = await query.limit(BATCH_SIZE).order('id', { ascending: true });
+
+    if (fetchError) throw fetchError;
 
     if (!data || data.length === 0) {
         await finishJob(jobId);

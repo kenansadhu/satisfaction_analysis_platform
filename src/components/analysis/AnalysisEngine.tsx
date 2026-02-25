@@ -87,24 +87,40 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
             const { count: total, error: totalError } = await totalQuery;
             if (totalError) throw totalError;
 
-            // 2. Get Originally Analyzed Count (Distinct Raw Inputs in Segments)
-            // Note: Since we can't easily do distinct count with head:true on joined tables efficiently in one go without RPC,
-            // we will approximate by counting segments that match the survey.
-            // A better way for "Pending" is simply Total - (Count of inputs that have segments).
-            // For now, let's just show TOTAL candidates as "Pending" if analysis hasn't started, 
-            // OR strictly: Total - Analyzed.
+            // 2. Get Watermark and Count analyzed
+            let watermarkQuery = supabase
+                .from('feedback_segments')
+                .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id, is_quantitative, respondents!inner(survey_id))')
+                .eq('raw_feedback_inputs.target_unit_id', unitId)
+                .eq('raw_feedback_inputs.is_quantitative', false);
 
-            // Let's try to get the analyzed count.
-            // Since one input can have multiple segments, we can't just count segments.
-            // We need count of unique raw_input_id in feedback_segments.
-            // Supabase API doesn't support "count distinct" easily.
+            if (surveyId && surveyId.trim() !== '') {
+                watermarkQuery = watermarkQuery.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+            }
 
-            // COMPROMISE: For this UI view, showing the TOTAL relevant comments 
-            // as the "workload" is acceptable and matching user expectation ("892 comments").
-            // If partial analysis exists, the Context progress bar handles the "Total - Processed" view.
-            // This "Pending" number is primarily for the "Ready" state.
+            const { data: lastSegment } = await watermarkQuery
+                .order('raw_input_id', { ascending: false })
+                .limit(1)
+                .single();
 
-            setPendingCount(total ?? 0);
+            const watermarkId = lastSegment?.raw_input_id || 0;
+
+            let analyzedCountQuery = supabase
+                .from('raw_feedback_inputs')
+                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
+                .eq('target_unit_id', unitId)
+                .eq('is_quantitative', false)
+                .eq('requires_analysis', true)
+                .lte('id', watermarkId);
+
+            if (surveyId && surveyId.trim() !== '') {
+                analyzedCountQuery = analyzedCountQuery.eq('respondents.survey_id', surveyId);
+            }
+
+            const { count: analyzed } = await analyzedCountQuery;
+
+            // COMPROMISE: Show "Remaining" as Pending
+            setPendingCount((total ?? 0) - (analyzed ?? 0));
 
         } catch (e: any) {
             console.error("Error fetching pending count:", e);

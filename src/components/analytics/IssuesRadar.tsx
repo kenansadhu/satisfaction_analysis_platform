@@ -20,8 +20,13 @@ export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyId
                     p_sentiment: 'Negative'
                 });
 
-                if (error || !aggregatedIssues || aggregatedIssues.length === 0) {
-                    console.error("Failed to fetch radar aggregation:", error);
+                if (error) {
+                    console.error("Failed to fetch radar aggregation:", error.message || error);
+                    setData([]);
+                    return;
+                }
+
+                if (!aggregatedIssues || aggregatedIssues.length === 0) {
                     setData([]);
                     return;
                 }

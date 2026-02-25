@@ -162,8 +162,14 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                 });
 
                 const result = await response.json();
-                if (result.categories) {
-                    currentCats = result.categories;
+                if (result.categories && Array.isArray(result.categories)) {
+                    // Normalize categories to ensure all fields exist
+                    const sanitized = result.categories.map((c: any) => ({
+                        name: typeof c.name === 'string' ? c.name : "Unnamed Category",
+                        description: typeof c.description === 'string' ? c.description : "",
+                        keywords: Array.isArray(c.keywords) ? c.keywords : []
+                    }));
+                    currentCats = sanitized;
                     setCategories(currentCats);
                 }
             }
@@ -177,49 +183,39 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     };
 
     const saveTaxonomy = async () => {
-        // 1. Clear existing analysis (segments) to prevent orphans & force re-analysis
-        // Robust "Drain" Strategy: Query segments directly and delete them until none remain.
+        // 1. Get ALL relevant raw feedback input IDs first (Clean & Efficient)
+        let inputIdsQuery = supabase
+            .from('raw_feedback_inputs')
+            .select('id, respondents!inner(survey_id)')
+            .eq('target_unit_id', unitId);
 
-        let clearing = true;
-        while (clearing) {
-            // Find segments linked to this unit
-            let query = supabase
-                .from('feedback_segments')
-                .select('id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))')
-                .eq('raw_feedback_inputs.target_unit_id', unitId)
-                .limit(1000); // Fetch in batches
+        if (surveyId) {
+            inputIdsQuery = inputIdsQuery.eq('respondents.survey_id', surveyId);
+        }
 
-            if (surveyId) {
-                query = query.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+        const { data: inputs, error: inputError } = await inputIdsQuery;
+        if (inputError) {
+            toast.error("Failed to fetch inputs for cleanup: " + inputError.message);
+            return;
+        }
+
+        const inputIds = inputs?.map(i => i.id) || [];
+
+        // 2. Clear existing segments in batches by Input ID
+        if (inputIds.length > 0) {
+            const SEGMENT_BATCH = 1000;
+            for (let i = 0; i < inputIds.length; i += SEGMENT_BATCH) {
+                const batchIds = inputIds.slice(i, i + SEGMENT_BATCH);
+                const { error: delError } = await supabase
+                    .from('feedback_segments')
+                    .delete()
+                    .in('raw_input_id', batchIds);
+
+                if (delError) {
+                    toast.error("Partial cleanup failed: " + delError.message);
+                    return;
+                }
             }
-
-            const { data: segments, error } = await query;
-
-            if (error) {
-                toast.error("Cleanup failed: " + error.message);
-                return; // Stop if error to avoid infinite loop
-            }
-
-            if (!segments || segments.length === 0) {
-                clearing = false;
-                break;
-            }
-
-            const segmentIds = segments.map(s => s.id);
-
-            // Delete this batch
-            const { error: delError } = await supabase
-                .from('feedback_segments')
-                .delete()
-                .in('id', segmentIds);
-
-            if (delError) {
-                toast.error("Segment deletion failed: " + delError.message);
-                return;
-            }
-
-            // If we fetched fewer than limit, we are likely done, but safe to loop once more to confirm 0
-            if (segments.length < 1000) clearing = false;
         }
 
         // 2. Clear old categories
@@ -333,7 +329,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                                     className="text-sm text-slate-500 border-none p-0 resize-none focus-visible:ring-0 min-h-[40px]"
                                 />
                                 <div className="flex flex-wrap gap-1 mt-2">
-                                    {cat.keywords.map(k => <Badge key={k} variant="outline" className="text-xs text-slate-500">{k}</Badge>)}
+                                    {cat.keywords?.map(k => <Badge key={k} variant="outline" className="text-xs text-slate-500">{k}</Badge>)}
                                 </div>
                             </div>
                         ))}

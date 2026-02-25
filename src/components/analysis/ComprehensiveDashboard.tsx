@@ -131,36 +131,81 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             setCategories(catRes.data || []);
             setAllUnits(orgRes.data || []);
 
-            // 2. Raw Qual
-            let qualQuery = supabase
-                .from('raw_feedback_inputs')
-                .select(`id, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion, related_unit_ids), respondents!inner(survey_id, location, faculty, study_program)`)
-                .eq('target_unit_id', unitId)
-                .eq('requires_analysis', true);
+            // Helper to fetch EVERYTHING in batches of 1000 using Keyset Pagination (Standard Best Practice)
+            const fetchAllBatched = async (tableName: string, select: string, filterFn: (q: any) => any) => {
+                let allData: any[] = [];
+                let lastId = 0;
+                const BATCH_SIZE = 1000;
 
-            if (surveyId) qualQuery = qualQuery.eq('respondents.survey_id', surveyId);
+                while (true) {
+                    let query = supabase
+                        .from(tableName)
+                        .select(select)
+                        .gt('id', lastId) // Keyset: fetch strictly after the last ID we received
+                        .order('id', { ascending: true })
+                        .limit(BATCH_SIZE);
 
-            const { data: qData, error: metricsError } = await qualQuery;
-            if (metricsError) {
-                console.error("Fetch Error:", metricsError);
-                toast.error("Failed to load metrics.");
-            }
-            setBaseRawInputs(qData || []);
+                    query = filterFn(query);
 
-            // 3. Raw Scores
-            let scoresQuery = supabase.from('raw_feedback_inputs').select('source_column, numerical_score, respondents!inner(survey_id, location, faculty, study_program)').eq('target_unit_id', unitId).eq('is_quantitative', true).not('numerical_score', 'is', null);
-            if (surveyId) scoresQuery = scoresQuery.eq('respondents.survey_id', surveyId);
-            const { data: rawScores } = await scoresQuery;
-            setBaseScores(rawScores || []);
+                    const { data, error } = await query;
 
-            let catScoresQuery = supabase.from('raw_feedback_inputs').select('source_column, raw_text, respondents!inner(survey_id, location, faculty, study_program)').eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', false);
-            if (surveyId) catScoresQuery = catScoresQuery.eq('respondents.survey_id', surveyId);
-            const { data: rawCatScores } = await catScoresQuery;
-            setBaseCatScores(rawCatScores || []);
+                    if (error) {
+                        console.error(`🔴 Supabase Error in ${tableName}:`, {
+                            code: error.code,
+                            message: error.message,
+                            details: error.details,
+                            hint: error.hint
+                        });
+                        throw error;
+                    }
+                    if (!data || data.length === 0) break;
+
+                    allData = [...allData, ...data];
+                    lastId = data[data.length - 1].id;
+
+                    if (data.length < BATCH_SIZE) break;
+                }
+                return allData;
+            };
+
+            // 2. Fetch Large Datasets using Keyset Pagination
+            const qData = await fetchAllBatched(
+                'raw_feedback_inputs',
+                `id, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion, related_unit_ids), respondents!inner(survey_id, location, faculty, study_program)`,
+                (q) => {
+                    let filtered = q.eq('target_unit_id', unitId).eq('requires_analysis', true);
+                    if (surveyId) filtered = filtered.eq('respondents.survey_id', surveyId);
+                    return filtered;
+                }
+            );
+
+            const sData = await fetchAllBatched(
+                'raw_feedback_inputs',
+                'id, source_column, numerical_score, respondents!inner(survey_id, location, faculty, study_program)',
+                (q) => {
+                    let filtered = q.eq('target_unit_id', unitId).eq('is_quantitative', true).not('numerical_score', 'is', null);
+                    if (surveyId) filtered = filtered.eq('respondents.survey_id', surveyId);
+                    return filtered;
+                }
+            );
+
+            const csData = await fetchAllBatched(
+                'raw_feedback_inputs',
+                'id, source_column, raw_text, respondents!inner(survey_id, location, faculty, study_program)',
+                (q) => {
+                    let filtered = q.eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', false);
+                    if (surveyId) filtered = filtered.eq('respondents.survey_id', surveyId);
+                    return filtered;
+                }
+            );
+
+            setBaseRawInputs(qData);
+            setBaseScores(sData);
+            setBaseCatScores(csData);
 
         } catch (error) {
             console.error(error);
-            toast.error("Failed to fetch raw data");
+            toast.error("Failed to load full dataset. Metrics may be truncated.");
         } finally {
             setLoading(false);
         }
@@ -626,8 +671,13 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
 
                 {/* Volume */}
                 <Card className="border-slate-200 dark:border-slate-800 shadow-md bg-white dark:bg-slate-900 hover:shadow-lg transition-shadow print:break-inside-avoid">
-                    <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Analyzed Voices</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{totalSegments.toLocaleString()}</CardTitle></CardHeader>
-                    <CardContent><div className="text-xs text-green-600 dark:text-green-500 flex items-center gap-1"><MessageSquare className="w-3 h-3" /> {quantGroups.reduce((a, b) => a + b.totalResponses, 0).toLocaleString()} quant data points</div></CardContent>
+                    <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Analyzed Voices</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{baseRawInputs.length.toLocaleString()}</CardTitle></CardHeader>
+                    <CardContent>
+                        <div className="flex flex-col gap-1">
+                            <div className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 font-medium italic"><MessageSquare className="w-3 h-3" /> {totalSegments.toLocaleString()} Qualitative Insights</div>
+                            <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium"><BarChart2 className="w-3 h-3" /> {quantGroups.reduce((a, b) => a + b.totalResponses, 0).toLocaleString()} Quantitative Data Points</div>
+                        </div>
+                    </CardContent>
                 </Card>
 
                 {/* Hot Spot */}
