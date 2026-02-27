@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, BrainCircuit, MessageSquare, Users, BarChart3, ChevronRight, Loader2, Trash2, Archive, FileSpreadsheet, CheckCircle2, Settings } from "lucide-react";
+import { ArrowLeft, BrainCircuit, MessageSquare, Users, BarChart3, ChevronRight, Loader2, Trash2, Archive, FileSpreadsheet, CheckCircle2, Settings, PieChart } from "lucide-react";
 import Link from "next/link";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -53,12 +53,10 @@ export default function SurveyDetailPage() {
     async function loadSurveyData() {
         setIsLoading(true);
 
-        // === PHASE 1: Parallel metadata queries (all independent, use COUNT not row fetch) ===
-        const [surveyRes, respCountRes, invalidRes, scoresRes, unitsRes] = await Promise.all([
+        // === PHASE 1: Get survey info, respondent count, and units (all fast) ===
+        const [surveyRes, respCountRes, unitsRes] = await Promise.all([
             supabase.from('surveys').select('title, year').eq('id', surveyId).single(),
             supabase.from('respondents').select('*', { count: 'exact', head: true }).eq('survey_id', surveyId),
-            supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId).or('raw_text.eq.-,raw_text.eq.N/A,raw_text.eq.nan,raw_text.eq.Nilai,raw_text.is.null'),
-            supabase.from('raw_feedback_inputs').select('id, respondents!inner(survey_id)', { count: 'exact', head: true }).eq('respondents.survey_id', surveyId).eq('is_quantitative', false).or('raw_text.like._ = %,raw_text.like.NA = %,raw_text.eq.Ya,raw_text.eq.Tidak'),
             supabase.from('organization_units').select('id, name, description').order('name'),
         ]);
 
@@ -67,41 +65,35 @@ export default function SurveyDetailPage() {
             setSurveyYear(surveyRes.data.year || null);
         }
         setTotalRespondents(respCountRes.count || 0);
-        setInvalidCount(invalidRes.count || 0);
-        setScoreCount(scoresRes.count || 0);
 
-        // Total data points: run as a separate query to avoid contention
-        const { count: dataPointCount } = await supabase
-            .from('raw_feedback_inputs')
-            .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-            .eq('respondents.survey_id', surveyId);
-        setTotalDataPoints(dataPointCount || 0);
+        // === PHASE 2: Single RPC — one scan of raw_feedback_inputs ===
+        const { data: rows, error: countErr } = await supabase.rpc('get_survey_detail_counts_v2', {
+            p_survey_id: parseInt(surveyId),
+        });
+        if (countErr) console.error('[survey detail counts] error:', countErr.message);
+
+        // Aggregate: per-unit rows → global totals + per-unit maps
+        let totalDP = 0, invalidTotal = 0, scoreTotal = 0;
+        const commentsByUnit = new Map<number, number>();
+        const analyzedByUnit = new Map<number, number>();
+
+        for (const row of (rows || [])) {
+            totalDP += parseInt(row.total_count) || 0;
+            invalidTotal += parseInt(row.invalid_count) || 0;
+            scoreTotal += parseInt(row.scorelike_count) || 0;
+            commentsByUnit.set(row.out_unit_id, parseInt(row.comment_count) || 0);
+            analyzedByUnit.set(row.out_unit_id, parseInt(row.analyzed_count) || 0);
+        }
+
+        setTotalDataPoints(totalDP);
+        setInvalidCount(invalidTotal);
+        setScoreCount(scoreTotal);
 
         const units = unitsRes.data;
         if (units) {
-            // === PHASE 2: Per-unit parallel COUNT queries ===
-            // Uses head:true (no row limit issue) — fast and accurate
-            const stats = await Promise.all(units.map(async (unit) => {
-                const [commentRes, segmentRes] = await Promise.all([
-                    // Count qualitative items for this unit
-                    supabase
-                        .from('raw_feedback_inputs')
-                        .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-                        .eq('target_unit_id', unit.id)
-                        .eq('respondents.survey_id', surveyId)
-                        .eq('requires_analysis', true),
-                    // Count segments for this unit (approximates analysis progress)
-                    supabase
-                        .from('feedback_segments')
-                        .select('id, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))', { count: 'exact', head: true })
-                        .eq('raw_feedback_inputs.target_unit_id', unit.id)
-                        .eq('raw_feedback_inputs.respondents.survey_id', surveyId),
-                ]);
-
-                const commentCount = commentRes.count || 0;
-                // Segments can be > inputs (1 input = multiple segments), so cap at commentCount
-                const analyzedCount = Math.min(segmentRes.count || 0, commentCount);
-
+            const stats = units.map(unit => {
+                const commentCount = commentsByUnit.get(unit.id) || 0;
+                const analyzedCount = Math.min(analyzedByUnit.get(unit.id) || 0, commentCount);
                 return {
                     unit_id: unit.id,
                     unit_name: unit.name,
@@ -109,9 +101,9 @@ export default function SurveyDetailPage() {
                     comment_count: commentCount,
                     analyzed_count: analyzedCount,
                 };
-            }));
+            });
 
-            const validStats = stats.filter(s => s.comment_count > 0).sort((a, b) => b.comment_count - a.comment_count);
+            const validStats = stats.filter(s => s.comment_count > 0).sort((a, b) => a.unit_name.localeCompare(b.unit_name));
             setUnitStats(validStats);
         }
         setIsLoading(false);
@@ -125,40 +117,38 @@ export default function SurveyDetailPage() {
         setIsProcessing(true);
         try {
             let processed = 0;
-            const BATCH = 1000;
-            let hasMore = true;
+            const CHUNK_SIZE = 400;
 
-            while (hasMore) {
-                // 1. Fetch a batch of INVALID IDs scoped to this survey
+            // Pre-fetch respondent IDs for this survey (fast)
+            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
+            const respIds = (resps || []).map((r: any) => r.id);
+
+            for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
+                const chunk = respIds.slice(i, i + CHUNK_SIZE);
+
+                // 1. Fetch a batch of INVALID IDs scoped to this chunk
                 const { data: invalidItems, error: fetchError } = await supabase
                     .from('raw_feedback_inputs')
-                    .select('id, respondents!inner(survey_id)')
-                    .eq('respondents.survey_id', surveyId)
-                    .or('raw_text.eq.-,raw_text.eq.N/A,raw_text.eq.nan,raw_text.eq.Nilai,raw_text.is.null')
-                    .limit(BATCH);
+                    .select('id')
+                    .in('respondent_id', chunk)
+                    .or('raw_text.eq.-,raw_text.eq.N/A,raw_text.eq.nan,raw_text.eq.Nilai,raw_text.is.null');
 
                 if (fetchError) throw fetchError;
 
-                if (!invalidItems || invalidItems.length === 0) {
-                    hasMore = false;
-                    break;
+                if (invalidItems && invalidItems.length > 0) {
+                    // 2. Delete this batch
+                    const idsToDelete = invalidItems.map(i => i.id);
+                    setProcessStatus(`Deleting batch of ${idsToDelete.length} (Total: ${processed.toLocaleString()})...`);
+
+                    const { error: deleteError } = await supabase
+                        .from('raw_feedback_inputs')
+                        .delete()
+                        .in('id', idsToDelete);
+
+                    if (deleteError) throw deleteError;
+
+                    processed += idsToDelete.length;
                 }
-
-                // 2. Delete this batch
-                const idsToDelete = invalidItems.map(i => i.id);
-                setProcessStatus(`Deleting batch of ${idsToDelete.length} (Total: ${processed.toLocaleString()})...`);
-
-                const { error: deleteError } = await supabase
-                    .from('raw_feedback_inputs')
-                    .delete()
-                    .in('id', idsToDelete);
-
-                if (deleteError) throw deleteError;
-
-                processed += idsToDelete.length;
-
-                // If we fetched less than batch size, we are done
-                if (invalidItems.length < BATCH) hasMore = false;
             }
 
             toast.success(`Cleanup Complete! Removed ${processed.toLocaleString()} invalid entries.`);
@@ -176,40 +166,39 @@ export default function SurveyDetailPage() {
         setIsProcessing(true);
         try {
             let processed = 0;
-            const BATCH = 1000;
-            let hasMore = true;
+            const CHUNK_SIZE = 400;
 
-            while (hasMore) {
-                // 1. Fetch a batch of SCORE-LIKE IDs
+            // Pre-fetch respondent IDs for this survey (fast)
+            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
+            const respIds = (resps || []).map((r: any) => r.id);
+
+            for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
+                const chunk = respIds.slice(i, i + CHUNK_SIZE);
+
+                // 1. Fetch a batch of SCORE-LIKE IDs in chunk
                 const { data: scoreItems, error: fetchError } = await supabase
                     .from('raw_feedback_inputs')
-                    .select('id, respondents!inner(survey_id)')
-                    .eq('respondents.survey_id', surveyId)
+                    .select('id')
+                    .in('respondent_id', chunk)
                     .eq('is_quantitative', false)
-                    .or('raw_text.like._ = %,raw_text.like.NA = %,raw_text.eq.Ya,raw_text.eq.Tidak')
-                    .limit(BATCH);
+                    .or('raw_text.like._ = %,raw_text.like.NA = %,raw_text.eq.Ya,raw_text.eq.Tidak');
 
                 if (fetchError) throw fetchError;
 
-                if (!scoreItems || scoreItems.length === 0) {
-                    hasMore = false;
-                    break;
+                if (scoreItems && scoreItems.length > 0) {
+                    // 2. Update this batch
+                    const idsToUpdate = scoreItems.map(i => i.id);
+                    setProcessStatus(`Reclassifying batch of ${idsToUpdate.length} (Total: ${processed.toLocaleString()})...`);
+
+                    const { error: updateError } = await supabase
+                        .from('raw_feedback_inputs')
+                        .update({ is_quantitative: true })
+                        .in('id', idsToUpdate);
+
+                    if (updateError) throw updateError;
+
+                    processed += idsToUpdate.length;
                 }
-
-                // 2. Update this batch
-                const idsToUpdate = scoreItems.map(i => i.id);
-                setProcessStatus(`Reclassifying batch of ${idsToUpdate.length} (Total: ${processed.toLocaleString()})...`);
-
-                const { error: updateError } = await supabase
-                    .from('raw_feedback_inputs')
-                    .update({ is_quantitative: true })
-                    .in('id', idsToUpdate);
-
-                if (updateError) throw updateError;
-
-                processed += idsToUpdate.length;
-
-                if (scoreItems.length < BATCH) hasMore = false;
             }
 
             toast.success(`Success! Reclassified ${processed.toLocaleString()} entries.`);
@@ -243,6 +232,10 @@ export default function SurveyDetailPage() {
         }
 
         try {
+            // Pre-fetch respondent IDs once for the global analysis
+            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
+            const respIds = (resps || []).map((r: any) => r.id);
+
             // Iterate through each unit
             for (const unit of unitStats) {
                 if (stopGlobalRef.current) break;
@@ -253,12 +246,20 @@ export default function SurveyDetailPage() {
                 addGlobalLog(`📂 Switching to Unit: ${unit.unit_name}...`);
 
                 // Fetch Taxonomy for this unit (CRITICAL)
-                // Note: If no taxonomy exists, the AI will use "General" defaults or fail gracefully
                 const { data: categories } = await supabase.from('analysis_categories').select('*').eq('unit_id', unit.unit_id);
                 const { data: subcategories } = await supabase.from('analysis_subcategories').select('*, analysis_categories!inner(unit_id)').eq('analysis_categories.unit_id', unit.unit_id);
 
-                // Fetch Batch
-                const { data: allRaw } = await supabase.from('raw_feedback_inputs').select('id, raw_text, respondents!inner(survey_id)').eq('target_unit_id', unit.unit_id).eq('respondents.survey_id', surveyId).eq('is_quantitative', false);
+                let allRaw: any[] = [];
+                const CHUNK_SIZE = 400;
+                for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
+                    const chunk = respIds.slice(i, i + CHUNK_SIZE);
+                    const { data } = await supabase.from('raw_feedback_inputs')
+                        .select('id, raw_text')
+                        .eq('target_unit_id', unit.unit_id)
+                        .in('respondent_id', chunk)
+                        .eq('is_quantitative', false);
+                    if (data) allRaw.push(...data);
+                }
                 const { data: existing } = await supabase.from('feedback_segments').select('raw_input_id');
                 const existingIds = new Set(existing?.map(e => e.raw_input_id));
                 const queue = allRaw?.filter(r => !existingIds.has(r.id)) || [];
@@ -443,15 +444,44 @@ export default function SurveyDetailPage() {
                             <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-slate-500" /> Qualitative Feedback by Unit</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {unitStats.map((unit) => {
-                                    const progress = unit.comment_count > 0 ? Math.round((unit.analyzed_count / unit.comment_count) * 100) : 0;
+                                    const progress = unit.comment_count > 0 ? Math.min(100, Math.round((unit.analyzed_count / unit.comment_count) * 100)) : 0;
+                                    const isComplete = progress === 100;
                                     return (
-                                        <Link key={unit.unit_id} href={`/surveys/${surveyId}/unit/${unit.unit_id}`}>
-                                            <Card className="hover:shadow-lg transition-all duration-200 cursor-pointer group border-slate-200 h-full overflow-hidden hover:-translate-y-0.5">
-                                                <div className="h-1 bg-gradient-to-r from-purple-500 to-indigo-500" />
-                                                <CardHeader className="pb-3"><div className="flex justify-between items-start"><CardTitle className="text-lg font-semibold text-slate-800 group-hover:text-blue-600 transition-colors">{unit.unit_name}</CardTitle><ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500" /></div><CardDescription className="text-xs">{unit.comment_count.toLocaleString()} qualitative items</CardDescription></CardHeader>
-                                                <CardContent><div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>Analysis Progress</span><span>{progress}%</span></div><Progress value={progress} className="h-1.5" />{progress === 100 ? <span className="inline-flex items-center text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full mt-2">Complete</span> : <span className="inline-flex items-center text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full mt-2">{progress === 0 ? "Not Started" : "In Progress"}</span>}</div></CardContent>
-                                            </Card>
-                                        </Link>
+                                        <Card key={unit.unit_id} className="hover:shadow-lg transition-all duration-200 border-slate-200 h-full overflow-hidden hover:-translate-y-0.5">
+                                            <div className="h-1 bg-gradient-to-r from-purple-500 to-indigo-500" />
+                                            <CardHeader className="pb-3">
+                                                <div className="flex justify-between items-start">
+                                                    <div>
+                                                        <CardTitle className="text-lg font-semibold text-slate-800">{unit.unit_name}</CardTitle>
+                                                        <CardDescription className="text-xs">{unit.comment_count.toLocaleString()} qualitative items</CardDescription>
+                                                    </div>
+                                                </div>
+                                            </CardHeader>
+                                            <CardContent className="space-y-3">
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between text-xs text-slate-500"><span>Analysis Progress</span><span>{progress}%</span></div>
+                                                    <Progress value={progress} className="h-1.5" />
+                                                    {isComplete
+                                                        ? <span className="inline-flex items-center text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Complete</span>
+                                                        : <span className="inline-flex items-center text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{progress === 0 ? "Not Started" : "In Progress"}</span>
+                                                    }
+                                                </div>
+                                                <div className="flex gap-2 pt-1">
+                                                    <Link href={`/surveys/${surveyId}/unit/${unit.unit_id}`} className="flex-1">
+                                                        <Button variant="outline" size="sm" className="w-full text-xs gap-1.5 border-slate-200 hover:border-blue-300 hover:text-blue-600">
+                                                            <BrainCircuit className="w-3.5 h-3.5" /> Analysis Workspace
+                                                        </Button>
+                                                    </Link>
+                                                    {unit.analyzed_count > 0 && (
+                                                        <Link href={`/surveys/${surveyId}/unit/${unit.unit_id}?tab=insights`}>
+                                                            <Button variant="outline" size="sm" className="text-xs gap-1.5 border-indigo-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300">
+                                                                <PieChart className="w-3.5 h-3.5" /> Insights
+                                                            </Button>
+                                                        </Link>
+                                                    )}
+                                                </div>
+                                            </CardContent>
+                                        </Card>
                                     );
                                 })}
                             </div>

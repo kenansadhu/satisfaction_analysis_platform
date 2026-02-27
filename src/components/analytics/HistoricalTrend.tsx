@@ -39,10 +39,32 @@ export function HistoricalTrend() {
                         // If RPC doesn't support null p_unit_id out of the box, we might just calculate it roughly
                         // But let's assume get_dashboard_metrics supports null to mean "all units" or we handle it gracefully.
                         // Actually, our get_dashboard_metrics takes p_unit_id. Let's just fetch all segments for the survey.
-                        const { data: segs } = await supabase
-                            .from('feedback_segments')
-                            .select('sentiment, raw_feedback_inputs!inner(respondents!inner(survey_id))')
-                            .eq('raw_feedback_inputs.respondents.survey_id', survey.id);
+                        let segs: any[] = [];
+
+                        // Pre-fetch respondent IDs
+                        let respIds: number[] = [];
+                        let rPage = 0;
+                        while (true) {
+                            const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', survey.id).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                            if (!rBat || rBat.length === 0) break;
+                            respIds.push(...rBat.map((r: any) => r.id));
+                            if (rBat.length < 1000) break;
+                            rPage++;
+                        }
+
+                        if (respIds.length > 0) {
+                            // Fetch raw_input_ids for these respondents
+                            const { data: inputs } = await supabase.from('raw_feedback_inputs').select('id').in('respondent_id', respIds.slice(0, 500));
+                            const inputIds = (inputs || []).map(i => i.id);
+
+                            if (inputIds.length > 0) {
+                                const { data: foundSegs } = await supabase
+                                    .from('feedback_segments')
+                                    .select('sentiment')
+                                    .in('raw_input_id', inputIds.slice(0, 500));
+                                segs = foundSegs || [];
+                            }
+                        }
 
                         if (segs && segs.length > 0) {
                             const p = segs.filter(s => s.sentiment === 'Positive').length;

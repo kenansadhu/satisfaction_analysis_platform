@@ -72,55 +72,54 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
         if (!unitId) return;
 
         try {
-            // 1. Get Total Candidates (Raw Inputs)
-            let totalQuery = supabase
-                .from('raw_feedback_inputs')
-                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', false)
-                .eq('requires_analysis', true);
-
+            // Pre-fetch respondent IDs (avoids slow inner join)
+            let respIds: number[] = [];
             if (surveyId && surveyId.trim() !== '') {
-                totalQuery = totalQuery.eq('respondents.survey_id', surveyId);
+                let rPage = 0;
+                while (true) {
+                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                    if (!rBat || rBat.length === 0) break;
+                    respIds.push(...rBat.map((r: any) => r.id));
+                    if (rBat.length < 1000) break;
+                    rPage++;
+                }
             }
 
-            const { count: total, error: totalError } = await totalQuery;
-            if (totalError) throw totalError;
+            // 1. & 2. Get Total Candidates and Analyzed Candidates
+            let total = 0;
+            let analyzed = 0;
 
-            // 2. Get Watermark and Count analyzed
-            let watermarkQuery = supabase
-                .from('feedback_segments')
-                .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id, is_quantitative, respondents!inner(survey_id))')
-                .eq('raw_feedback_inputs.target_unit_id', unitId)
-                .eq('raw_feedback_inputs.is_quantitative', false);
+            if (respIds.length > 0) {
+                const CHUNK_SIZE = 400;
 
-            if (surveyId && surveyId.trim() !== '') {
-                watermarkQuery = watermarkQuery.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
+                // Get Total Candidates (Raw Inputs)
+                let totalPromises = [];
+                for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
+                    const chunk = respIds.slice(i, i + CHUNK_SIZE);
+                    totalPromises.push(
+                        supabase.from('raw_feedback_inputs')
+                            .select('*', { count: 'exact', head: true })
+                            .eq('target_unit_id', unitId)
+                            .eq('is_quantitative', false)
+                            .eq('requires_analysis', true)
+                            .in('respondent_id', chunk)
+                    );
+                }
+                const totalResults = await Promise.all(totalPromises);
+                for (const res of totalResults) total += (res.count || 0);
+
+            } else if (!surveyId || surveyId.trim() === '') {
+                // Fallback for when no survey ID is selected (all surveys for unit)
+                const { count: t } = await supabase.from('raw_feedback_inputs')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('target_unit_id', unitId)
+                    .eq('is_quantitative', false)
+                    .eq('requires_analysis', true);
+                total = t || 0;
             }
 
-            const { data: lastSegment } = await watermarkQuery
-                .order('raw_input_id', { ascending: false })
-                .limit(1)
-                .single();
-
-            const watermarkId = lastSegment?.raw_input_id || 0;
-
-            let analyzedCountQuery = supabase
-                .from('raw_feedback_inputs')
-                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', false)
-                .eq('requires_analysis', true)
-                .lte('id', watermarkId);
-
-            if (surveyId && surveyId.trim() !== '') {
-                analyzedCountQuery = analyzedCountQuery.eq('respondents.survey_id', surveyId);
-            }
-
-            const { count: analyzed } = await analyzedCountQuery;
-
-            // COMPROMISE: Show "Remaining" as Pending
-            setPendingCount((total ?? 0) - (analyzed ?? 0));
+            // 'total' perfectly reflects the current queue size
+            setPendingCount(total || 0);
 
         } catch (e: any) {
             console.error("Error fetching pending count:", e);
@@ -134,15 +133,15 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
                 <CardHeader>
                     <div className="flex justify-between items-center">
                         <div>
-                            <CardTitle className="text-xl flex items-center gap-2"><Sparkles className="w-5 h-5 text-blue-600" /> Deep Analysis</CardTitle>
+                            <CardTitle className="text-xl flex items-center gap-2"><Sparkles className="w-5 h-5 text-blue-600" /> Sentiment & Categorization Engine</CardTitle>
                             <CardDescription>
-                                Sentiment • Categorization • Cross-Unit Tagging
+                                Sentiment Tagging • Category Assignment • Idea Segmentation • Cross-Unit Routing
                             </CardDescription>
                         </div>
                         <div className="text-right">
                             {/* Show Context Progress if active, else Local/Static */}
                             <div className="text-2xl font-bold text-slate-700">
-                                {isActive ? (progress.total - progress.processed) : (pendingCount !== null ? pendingCount : "Loading...")}
+                                {isActive ? Math.max(0, progress.total - progress.processed) : (pendingCount !== null ? pendingCount : "Loading...")}
                             </div>
                             <div className="text-xs text-slate-500">Pending Comments</div>
                         </div>

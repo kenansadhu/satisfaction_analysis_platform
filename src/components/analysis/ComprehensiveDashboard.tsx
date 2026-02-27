@@ -51,6 +51,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     const [crossUnitSegments, setCrossUnitSegments] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
     const [unitName, setUnitName] = useState("");
+    const [verifiedCount, setVerifiedCount] = useState(0);
+    const [totalSegmentCount, setTotalSegmentCount] = useState(0);
 
     // Aggregated Metrics from RPC
     const [dashboardMetrics, setDashboardMetrics] = useState<{
@@ -131,77 +133,115 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             setCategories(catRes.data || []);
             setAllUnits(orgRes.data || []);
 
-            // Helper to fetch EVERYTHING in batches of 1000 using Keyset Pagination (Standard Best Practice)
-            const fetchAllBatched = async (tableName: string, select: string, filterFn: (q: any) => any) => {
-                let allData: any[] = [];
-                let lastId = 0;
-                const BATCH_SIZE = 1000;
-
+            // 2. Pre-fetch respondent IDs for this survey (uses idx_respondents_survey_id)
+            let respMap = new Map<number, any>();
+            if (surveyId) {
+                let rPage = 0;
                 while (true) {
-                    let query = supabase
-                        .from(tableName)
-                        .select(select)
-                        .gt('id', lastId) // Keyset: fetch strictly after the last ID we received
-                        .order('id', { ascending: true })
-                        .limit(BATCH_SIZE);
+                    const { data: rBat } = await supabase
+                        .from('respondents')
+                        .select('id, location, faculty, study_program')
+                        .eq('survey_id', surveyId)
+                        .range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                    if (!rBat || rBat.length === 0) break;
+                    rBat.forEach((r: any) => respMap.set(r.id, r));
+                    if (rBat.length < 1000) break;
+                    rPage++;
+                }
+            }
+            const respIds = Array.from(respMap.keys());
 
-                    query = filterFn(query);
+            // 3. Chunked fetch helper — uses respondent IDs to leverage composite index
+            // Chunk size 50: keeps URL under Supabase REST API length limit 
+            // (300 IDs × URL encoding = too long, causes 500 errors)
+            const CHUNK = 50;
+            const fetchByRespondentChunks = async (
+                select: string,
+                filterFn: (q: any) => any
+            ): Promise<any[]> => {
+                let allData: any[] = [];
 
-                    const { data, error } = await query;
-
-                    if (error) {
-                        console.error(`🔴 Supabase Error in ${tableName}:`, {
-                            code: error.code,
-                            message: error.message,
-                            details: error.details,
-                            hint: error.hint
-                        });
-                        throw error;
+                if (respIds.length > 0) {
+                    // With survey: chunk by respondent IDs (fast, uses idx_rfi_respondent_unit_analysis)
+                    for (let i = 0; i < respIds.length; i += CHUNK) {
+                        const chunk = respIds.slice(i, i + CHUNK);
+                        let q = supabase.from('raw_feedback_inputs')
+                            .select(select)
+                            .eq('target_unit_id', unitId)
+                            .in('respondent_id', chunk);
+                        q = filterFn(q);
+                        const { data, error } = await q;
+                        if (error) {
+                            console.error(`🔴 Supabase chunk error:`, error);
+                            toast.error(`Data fetch warning: ${error.message}`);
+                            continue;
+                        }
+                        if (data) allData.push(...data);
                     }
-                    if (!data || data.length === 0) break;
-
-                    allData = [...allData, ...data];
-                    lastId = data[data.length - 1].id;
-
-                    if (data.length < BATCH_SIZE) break;
+                } else {
+                    // No survey: keyset pagination fallback
+                    let lastId = 0;
+                    while (true) {
+                        let q = supabase.from('raw_feedback_inputs')
+                            .select(select)
+                            .eq('target_unit_id', unitId)
+                            .gt('id', lastId)
+                            .order('id', { ascending: true })
+                            .limit(100);
+                        q = filterFn(q);
+                        const { data, error } = await q;
+                        if (error) {
+                            console.error(`🔴 Supabase fallback error:`, error);
+                            break;
+                        }
+                        if (!data || data.length === 0) break;
+                        allData.push(...data);
+                        lastId = data[data.length - 1].id;
+                        if (data.length < 100) break;
+                    }
                 }
                 return allData;
             };
 
-            // 2. Fetch Large Datasets using Keyset Pagination
-            const qData = await fetchAllBatched(
-                'raw_feedback_inputs',
-                `id, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion, related_unit_ids), respondents!inner(survey_id, location, faculty, study_program)`,
-                (q) => {
-                    let filtered = q.eq('target_unit_id', unitId).eq('requires_analysis', true);
-                    if (surveyId) filtered = filtered.eq('respondents.survey_id', surveyId);
-                    return filtered;
-                }
-            );
+            // 4. Fetch qualitative data (with segments) and quantitative data in parallel
+            const [qData, sData] = await Promise.all([
+                fetchByRespondentChunks(
+                    `id, respondent_id, source_column, raw_text, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion, related_unit_ids)`,
+                    (q) => q.eq('is_quantitative', false).eq('requires_analysis', false)
+                ),
+                fetchByRespondentChunks(
+                    'id, respondent_id, source_column, numerical_score, raw_text',
+                    (q) => q.eq('is_quantitative', true).not('numerical_score', 'is', null)
+                )
+            ]);
 
-            const sData = await fetchAllBatched(
-                'raw_feedback_inputs',
-                'id, source_column, numerical_score, respondents!inner(survey_id, location, faculty, study_program)',
-                (q) => {
-                    let filtered = q.eq('target_unit_id', unitId).eq('is_quantitative', true).not('numerical_score', 'is', null);
-                    if (surveyId) filtered = filtered.eq('respondents.survey_id', surveyId);
-                    return filtered;
-                }
-            );
+            // Attach respondent info
+            qData.forEach((r: any) => { r.respondents = respMap.get(r.respondent_id) || null; });
+            sData.forEach((r: any) => { r.respondents = respMap.get(r.respondent_id) || null; });
 
-            const csData = await fetchAllBatched(
-                'raw_feedback_inputs',
-                'id, source_column, raw_text, respondents!inner(survey_id, location, faculty, study_program)',
-                (q) => {
-                    let filtered = q.eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', false);
-                    if (surveyId) filtered = filtered.eq('respondents.survey_id', surveyId);
-                    return filtered;
-                }
-            );
+            console.log(`✅ Loaded: ${qData.length} qualitative, ${sData.length} quantitative`);
 
+            // 5. Fetch verification stats
+            const allInputIds = qData.map((r: any) => r.id);
+            let vCount = 0;
+            let tSegCount = 0;
+            for (let i = 0; i < allInputIds.length; i += 200) {
+                const chunk = allInputIds.slice(i, i + 200);
+                const [vRes, tRes] = await Promise.all([
+                    supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).eq('is_verified', true).in('raw_input_id', chunk),
+                    supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk)
+                ]);
+                vCount += (vRes.count || 0);
+                tSegCount += (tRes.count || 0);
+            }
+            setVerifiedCount(vCount);
+            setTotalSegmentCount(tSegCount);
+
+            // csData is the same rows as qData (qualitative non-quant), just used for categorical score grouping
+            // No need for a separate fetch — reuse qData
             setBaseRawInputs(qData);
             setBaseScores(sData);
-            setBaseCatScores(csData);
+            setBaseCatScores(qData);
 
         } catch (error) {
             console.error(error);
@@ -442,15 +482,18 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
 
     const handleQuantDrillDown = async (question: string, type: "SCORE" | "CATEGORY", filterValue: string) => {
         setActiveQuantDrillDown({ question, filterValue, type, entries: [], loading: true });
-        let query = supabase.from('raw_feedback_inputs').select('id, raw_text, numerical_score, respondents!inner(survey_id)').eq('target_unit_id', unitId).eq('source_column', question);
 
-        if (surveyId) query = query.eq('respondents.survey_id', surveyId);
+        // Use the memory array baseScores instead of querying the DB
+        let filtered = baseScores.filter((r: any) => r.source_column === question);
 
-        if (type === "SCORE") query = query.eq('numerical_score', parseFloat(filterValue));
-        else query = query.eq('raw_text', filterValue);
+        if (type === "SCORE") {
+            const numVal = parseFloat(filterValue);
+            filtered = filtered.filter((r: any) => r.numerical_score === numVal);
+        } else {
+            filtered = filtered.filter((r: any) => r.raw_text === filterValue);
+        }
 
-        const { data } = await query.limit(50).order('id', { ascending: true });
-        setActiveQuantDrillDown(prev => prev ? { ...prev, entries: data || [], loading: false } : null);
+        setActiveQuantDrillDown(prev => prev ? { ...prev, entries: filtered.slice(0, 50), loading: false } : null);
     };
 
 
@@ -504,24 +547,24 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             setRawDataTotal(filtered.length);
             setRawDataEntries(filtered.slice(from, to + 1));
         } else {
-            let query = supabase
-                .from('raw_feedback_inputs')
-                .select('id, source_column, raw_text, numerical_score, respondents!inner(survey_id, location, faculty, study_program)', { count: 'exact' })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', true)
-                .not('numerical_score', 'is', null)
-                .order('id', { ascending: true });
+            // Local pagination memory for Quantitative Data
+            let filtered = baseScores.filter((r: any) => {
+                const resp = r.respondents;
+                if (!resp) return false;
 
-            if (surveyId) query = query.eq('respondents.survey_id', surveyId);
-            if (activeFilters.location.length) query = query.in('respondents.location', activeFilters.location);
-            if (activeFilters.faculty.length) query = query.in('respondents.faculty', activeFilters.faculty);
-            if (activeFilters.program.length) query = query.in('respondents.study_program', activeFilters.program);
+                const matchLoc = activeFilters.location.length === 0 || activeFilters.location.includes(resp.location);
+                const matchFac = activeFilters.faculty.length === 0 || activeFilters.faculty.includes(resp.faculty);
+                const matchProg = activeFilters.program.length === 0 || activeFilters.program.includes(resp.study_program);
 
-            if (search) query = query.ilike('source_column', `%${search}%`);
+                if (!matchLoc || !matchFac || !matchProg) return false;
 
-            const { data, count } = await query.range(from, to);
-            setRawDataEntries(data || []);
-            setRawDataTotal(count || 0);
+                if (search && !(r.source_column && r.source_column.toLowerCase().includes(search.toLowerCase())) && !(r.raw_text && r.raw_text.toLowerCase().includes(search.toLowerCase()))) return false;
+
+                return true;
+            });
+
+            setRawDataTotal(filtered.length);
+            setRawDataEntries(filtered.slice(from, to + 1));
         }
         setRawDataLoading(false);
     }, [unitId, surveyId, allSegments]);
@@ -671,11 +714,12 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
 
                 {/* Volume */}
                 <Card className="border-slate-200 dark:border-slate-800 shadow-md bg-white dark:bg-slate-900 hover:shadow-lg transition-shadow print:break-inside-avoid">
-                    <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Analyzed Voices</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{baseRawInputs.length.toLocaleString()}</CardTitle></CardHeader>
+                    <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Analyzed Comments</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{baseRawInputs.length.toLocaleString()}</CardTitle></CardHeader>
                     <CardContent>
                         <div className="flex flex-col gap-1">
-                            <div className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 font-medium italic"><MessageSquare className="w-3 h-3" /> {totalSegments.toLocaleString()} Qualitative Insights</div>
-                            <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium"><BarChart2 className="w-3 h-3" /> {quantGroups.reduce((a, b) => a + b.totalResponses, 0).toLocaleString()} Quantitative Data Points</div>
+                            <div className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 font-medium"><MessageSquare className="w-3 h-3" /> {totalSegmentCount.toLocaleString()} segments extracted</div>
+                            <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium"><CheckCircle2 className="w-3 h-3" /> {verifiedCount.toLocaleString()} / {totalSegmentCount.toLocaleString()} verified ({totalSegmentCount > 0 ? Math.round(verifiedCount / totalSegmentCount * 100) : 0}%)</div>
+                            <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium"><BarChart2 className="w-3 h-3" /> {quantGroups.reduce((a, b) => a + b.totalResponses, 0).toLocaleString()} quantitative data points</div>
                         </div>
                     </CardContent>
                 </Card>

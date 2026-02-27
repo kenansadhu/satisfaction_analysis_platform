@@ -99,57 +99,36 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             let loopProcessed = 0;
             const sessionProcessedIds: number[] = [];
 
-            // Optional: Fetch initial total workload to set the progress bar max
-            let countQuery = supabase
-                .from('raw_feedback_inputs')
-                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', false)
-                .eq('requires_analysis', true);
-
+            // Pre-fetch respondent IDs for survey filtering
+            let respIds: number[] = [];
             if (surveyId) {
-                countQuery = countQuery.eq('respondents.survey_id', surveyId);
+                let rPage = 0;
+                while (true) {
+                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                    if (!rBat || rBat.length === 0) break;
+                    respIds.push(...rBat.map((r: any) => r.id));
+                    if (rBat.length < 1000) break;
+                    rPage++;
+                }
             }
 
-            const { count: initialTotal, error: countErr } = await countQuery;
+            let initialTotal = 0;
+            let analyzedCount = 0;
+            const CHUNK = 400;
 
-            if (countErr) {
-                addLog(`⚠️ Warning: Could not fetch initial total items.`);
+            if (surveyId && respIds.length > 0) {
+                for (let i = 0; i < respIds.length; i += CHUNK) {
+                    const chunk = respIds.slice(i, i + CHUNK);
+                    const { count } = await supabase.from('raw_feedback_inputs').select('*', { count: 'exact', head: true }).eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', true).in('respondent_id', chunk);
+                    initialTotal += count || 0;
+                }
+            } else if (!surveyId) {
+                const { count } = await supabase.from('raw_feedback_inputs').select('*', { count: 'exact', head: true }).eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', true);
+                initialTotal = count || 0;
             }
+            setTotalPending(initialTotal);
 
-            setTotalPending(initialTotal || 0);
-
-            // Fetch Watermark and Historical Progress (Survey Aware)
-            let watermarkQuery = supabase
-                .from('feedback_segments')
-                .select('raw_input_id, raw_feedback_inputs!inner(target_unit_id, is_quantitative, respondents!inner(survey_id))')
-                .eq('raw_feedback_inputs.target_unit_id', unitId)
-                .eq('raw_feedback_inputs.is_quantitative', false);
-
-            if (surveyId) {
-                watermarkQuery = watermarkQuery.eq('raw_feedback_inputs.respondents.survey_id', surveyId);
-            }
-
-            const { data: lastSegment } = await watermarkQuery
-                .order('raw_input_id', { ascending: false })
-                .limit(1)
-                .single();
-
-            const watermarkId = lastSegment?.raw_input_id || 0;
-
-            let analyzedCountQuery = supabase
-                .from('raw_feedback_inputs')
-                .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', false) // CRITICAL SYNC
-                .eq('requires_analysis', true)
-                .lte('id', watermarkId);
-
-            if (surveyId) analyzedCountQuery = analyzedCountQuery.eq('respondents.survey_id', surveyId);
-            const { count: analyzedCount } = await analyzedCountQuery;
-
-            const historicalOffset = analyzedCount || 0;
-            setProcessedCount(historicalOffset);
+            setProcessedCount(0);
 
             while (hasMore && !stopRef.current) {
                 try {
@@ -177,11 +156,9 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                         sessionProcessedIds.push(...data.processedIds);
                     }
 
-                    // We need to re-fetch the job strictly for the most accurate total processed,
-                    // but we can also rely on data.processedCount + existing count
                     const { data: jobInfo } = await supabase.from('analysis_jobs').select('processed_items, total_items, status').eq('id', activeJobId).single();
                     if (jobInfo) {
-                        setProcessedCount(historicalOffset + (jobInfo.processed_items || 0));
+                        setProcessedCount(jobInfo.processed_items || 0);
                         if (jobInfo.total_items && jobInfo.total_items > totalPending) {
                             setTotalPending(jobInfo.total_items);
                         }
@@ -197,7 +174,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
                     if (hasMore) {
                         addLog(`✅ Batch complete. Pausing briefly...`);
-                        await new Promise(r => setTimeout(r, 1500)); // Sleep between batches to prevent spamming
+                        await new Promise(r => setTimeout(r, 1000)); // Sleep between batches
                     }
                 } catch (batchErr: any) {
                     addLog(`❌ Batch Error: ${batchErr.message}`);
@@ -233,14 +210,20 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     const resetAnalysis = async (unitId: string, surveyId?: string) => {
         addLog("🗑️ Starting Optimized Reset...");
 
-        // 1. Get ALL relevant raw feedback input IDs first (Clean & Efficient)
+        // 1. Get ALL relevant raw feedback input IDs first (avoid slow inner join)
+        let respIds: number[] = [];
+        if (surveyId) {
+            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
+            respIds = (resps || []).map((r: any) => r.id);
+        }
+
         let inputIdsQuery = supabase
             .from('raw_feedback_inputs')
-            .select('id, respondents!inner(survey_id)')
+            .select('id')
             .eq('target_unit_id', unitId);
 
-        if (surveyId) {
-            inputIdsQuery = inputIdsQuery.eq('respondents.survey_id', surveyId);
+        if (surveyId && respIds.length > 0) {
+            inputIdsQuery = inputIdsQuery.in('respondent_id', respIds.slice(0, 500));
         }
 
         const { data: inputs, error: inputError } = await inputIdsQuery;

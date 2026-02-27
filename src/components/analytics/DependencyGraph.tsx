@@ -33,16 +33,56 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
                 // To build a nice graph, we want units to be Nodes, and edges to be created when
                 // a respondent from target_unit_id mentions a related_unit_id in their feedback.
                 // We'll fetch segments that have related_unit_ids.
-                let query = supabase
-                    .from('feedback_segments')
-                    .select('related_unit_ids, raw_feedback_inputs!inner(target_unit_id, respondents!inner(survey_id))')
-                    .not('related_unit_ids', 'is', null);
+                let segments: any[] = [];
 
-                if (surveyId !== "all") {
-                    query = query.eq('raw_feedback_inputs.respondents.survey_id', parseInt(surveyId));
+                if (surveyId === "all") {
+                    const { data } = await supabase
+                        .from('feedback_segments')
+                        .select('related_unit_ids, raw_feedback_inputs(target_unit_id)')
+                        .not('related_unit_ids', 'is', null);
+                    segments = data || [];
+                } else {
+                    let respIds: number[] = [];
+                    let rPage = 0;
+                    while (true) {
+                        const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', parseInt(surveyId)).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                        if (!rBat || rBat.length === 0) break;
+                        respIds.push(...rBat.map((r: any) => r.id));
+                        if (rBat.length < 1000) break;
+                        rPage++;
+                    }
+
+                    if (respIds.length > 0) {
+                        let inputs: any[] = [];
+                        const CHUNK = 400;
+                        for (let i = 0; i < respIds.length; i += CHUNK) {
+                            const chunk = respIds.slice(i, i + CHUNK);
+                            const { data: iBat } = await supabase.from('raw_feedback_inputs').select('id, target_unit_id').in('respondent_id', chunk);
+                            if (iBat) inputs.push(...iBat);
+                        }
+                        const inputIds = inputs.map((i: any) => i.id);
+
+                        if (inputIds.length > 0) {
+                            let foundSegs: any[] = [];
+                            for (let i = 0; i < inputIds.length; i += CHUNK) {
+                                const chunk = inputIds.slice(i, i + CHUNK);
+                                const { data } = await supabase
+                                    .from('feedback_segments')
+                                    .select('related_unit_ids, raw_input_id')
+                                    .not('related_unit_ids', 'is', null)
+                                    .in('raw_input_id', chunk);
+                                if (data) foundSegs.push(...data);
+                            }
+
+                            // Reconstruct the expected shape for the graph processing below
+                            const inputMap = new Map(inputs?.map((i: any) => [i.id, i]) || []);
+                            segments = foundSegs.map((d: any) => ({
+                                related_unit_ids: d.related_unit_ids,
+                                raw_feedback_inputs: inputMap.get(d.raw_input_id)
+                            }));
+                        }
+                    }
                 }
-
-                const { data: segments } = await query;
 
                 if (!segments || segments.length === 0) {
                     setGraphData({ nodes: [], links: [] });

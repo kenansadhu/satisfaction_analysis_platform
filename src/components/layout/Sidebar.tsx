@@ -13,6 +13,7 @@ import {
     ChevronRight,
     Menu,
     Activity,
+    Sparkles,
     Sun,
     Moon
 } from "lucide-react";
@@ -119,6 +120,7 @@ export function Sidebar({
                     )}
                     <NavItem href="/surveys" icon={LayoutDashboard} label="Surveys" active={pathname === "/surveys" || pathname.startsWith("/surveys/")} prominent={true} />
                     <NavItem href="/executive" icon={Activity} label="Executive View" active={pathname === "/executive"} prominent={true} />
+                    <NavItem href="/ai-scientist" icon={Sparkles} label="AI Data Scientist" active={pathname === "/ai-scientist"} prominent={true} />
                 </div>
 
                 {/* Settings / Footer -> Moved Building2 here */}

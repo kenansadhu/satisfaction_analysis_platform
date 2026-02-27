@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrainCircuit, Database, ListChecks, PieChart, Sparkles } from "lucide-react";
@@ -14,11 +14,23 @@ import AnalysisEngine from "@/components/analysis/AnalysisEngine";
 import DataBrowser from "@/components/analysis/DataBrowser";
 import ComprehensiveDashboard from "@/components/analysis/ComprehensiveDashboard";
 
+// Tab value mapping for URL shortcut
+const TAB_MAP: Record<string, string> = {
+    categories: "categorization",
+    analysis: "analysis",
+    audit: "results",
+    insights: "insights",
+};
 
 export default function ScopedUnitWorkspace() {
     const params = useParams();
+    const searchParams = useSearchParams();
     const surveyId = params.id as string;
     const unitId = params.unitId as string;
+
+    // Read ?tab= query param for direct navigation
+    const tabParam = searchParams.get("tab") || "";
+    const defaultTab = TAB_MAP[tabParam] || "categorization";
 
     const [unitName, setUnitName] = useState("Loading...");
     const [surveyTitle, setSurveyTitle] = useState("");
@@ -56,7 +68,7 @@ export default function ScopedUnitWorkspace() {
             <div className="max-w-7xl mx-auto px-8 py-10 space-y-6">
 
                 {/* Main Workspace Tabs */}
-                <Tabs defaultValue="categorization" className="w-full">
+                <Tabs defaultValue={defaultTab} className="w-full">
                     <TabsList className="grid w-full grid-cols-4 mb-8 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden">
 
                         <TabsTrigger value="categorization" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-purple-700 data-[state=active]:shadow-sm">

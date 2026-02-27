@@ -20,6 +20,7 @@ export const metadata: Metadata = {
 };
 
 import { AnalysisProvider } from "@/context/AnalysisContext";
+import { SurveyProvider } from "@/context/SurveyContext";
 
 import { ThemeProvider } from "@/components/ThemeProvider";
 
@@ -39,11 +40,13 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AnalysisProvider>
-            <AppShell>
-              {children}
-            </AppShell>
-          </AnalysisProvider>
+          <SurveyProvider>
+            <AnalysisProvider>
+              <AppShell>
+                {children}
+              </AppShell>
+            </AnalysisProvider>
+          </SurveyProvider>
         </ThemeProvider>
         <Toaster richColors position="top-right" closeButton toastOptions={{ className: 'print:hidden' }} />
       </body>

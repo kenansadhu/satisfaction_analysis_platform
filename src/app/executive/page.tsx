@@ -8,14 +8,13 @@ import { SentimentHeatmap, LeaderBoard } from "@/components/analytics/SentimentH
 import { IssuesRadar } from "@/components/analytics/IssuesRadar";
 import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, Sparkles, BarChart2, Lightbulb, GitCompareArrows } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
-import GlobalDataScientist from "@/components/analysis/GlobalDataScientist";
-import SuggestionHub from "@/components/executive/SuggestionHub";
 import YearComparison from "@/components/executive/YearComparison";
+import SSIReport from "@/components/executive/SSIReport";
+import { useActiveSurvey } from "@/context/SurveyContext";
 
 type UnitPerformance = {
     id: number;
@@ -28,8 +27,8 @@ type UnitPerformance = {
 };
 
 export default function ExecutiveDashboard() {
-    const [surveys, setSurveys] = useState<Survey[]>([]);
-    const [selectedSurvey, setSelectedSurvey] = useState<string>("all");
+    const { activeSurveyId, activeSurvey, surveys } = useActiveSurvey();
+    const selectedSurvey = activeSurveyId; // alias for compatibility
 
     const [units, setUnits] = useState<UnitPerformance[]>([]);
     const [loading, setLoading] = useState(true);
@@ -42,26 +41,7 @@ export default function ExecutiveDashboard() {
     const [issuesMax, setIssuesMax] = useState<number>(0);
     const maxRadarDomain = Math.max(praisesMax, issuesMax, 1);
 
-    // 1. Fetch available surveys on mount
-    useEffect(() => {
-        const fetchSurveys = async () => {
-            const { data, error } = await supabase
-                .from('surveys')
-                .select('id, title, created_at')
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                toast.error("Failed to load surveys");
-            } else if (data) {
-                setSurveys(data);
-                if (data.length > 0) {
-                    // Default to most recent survey
-                    setSelectedSurvey(data[0].id.toString());
-                }
-            }
-        };
-        fetchSurveys();
-    }, []);
+    // Survey loading is now handled by SurveyContext
 
     // 2. Fetch metrics whenever selected survey changes
     useEffect(() => {
@@ -121,41 +101,35 @@ export default function ExecutiveDashboard() {
                 title="Executive Overview"
                 description="High-level performance metrics across the institution."
                 actions={
-                    <div className="flex items-center gap-3">
-                        <span className="text-sm text-slate-500 font-medium hidden sm:inline-block">Data Scope:</span>
-                        <Select value={selectedSurvey} onValueChange={setSelectedSurvey}>
-                            <SelectTrigger className="w-[200px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm">
-                                <SelectValue placeholder="Select Survey" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Global (All Time)</SelectItem>
-                                {surveys.map(s => (
-                                    <SelectItem key={s.id} value={s.id.toString()}>{s.title}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    activeSurvey ? (
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-lg border border-indigo-200/50 dark:border-indigo-800/40">
+                            <Database className="w-4 h-4 text-indigo-400" />
+                            <span className="text-sm font-medium text-indigo-200">{activeSurvey.title}</span>
+                            {activeSurvey.year && <span className="text-xs text-slate-400">({activeSurvey.year})</span>}
+                        </div>
+                    ) : null
                 }
             />
 
             <div className="max-w-7xl mx-auto px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <Tabs defaultValue="overview" className="w-full">
+                <Tabs defaultValue="report" className="w-full">
                     <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden">
-                        <TabsTrigger value="overview" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <BarChart2 className="w-4 h-4" /> Overview
+                        <TabsTrigger value="report" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <FileText className="w-4 h-4 text-emerald-500" /> Report
+                        </TabsTrigger>
+                        <TabsTrigger value="insights" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <BarChart2 className="w-4 h-4 text-purple-500" /> Insights
                         </TabsTrigger>
                         <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
                         </TabsTrigger>
-                        <TabsTrigger value="datascience" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <Sparkles className="w-4 h-4 text-purple-500" /> AI Data Scientist
-                        </TabsTrigger>
-                        <TabsTrigger value="suggestions" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <Lightbulb className="w-4 h-4 text-amber-500" /> Suggestions Hub
-                        </TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="overview" className="space-y-8 mt-0 focus-visible:ring-0">
+                    <TabsContent value="report" className="mt-6 focus-visible:ring-0">
+                        <SSIReport surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    </TabsContent>
+
+                    <TabsContent value="insights" className="space-y-8 mt-0 focus-visible:ring-0">
 
                         {/* 1. KEY METRICS ROW */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -193,7 +167,7 @@ export default function ExecutiveDashboard() {
                             />
                         </div>
 
-                        {/* 2. STRATEGIC INSIGHTS (NEW VISUALS) */}
+                        {/* 2. STRATEGIC INSIGHTS */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div>
                                 <PraisesRadar
@@ -211,15 +185,12 @@ export default function ExecutiveDashboard() {
                             </div>
                         </div>
 
-                        {/* 3. LEADERBOARDS, HEATMAP */}
+                        {/* 3. LEADERBOARDS & HEATMAP */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            {/* Left Col: Leaderboards */}
                             <div className="space-y-6">
                                 <LeaderBoard title="🏆 Top Performing Units" units={units} type="top" loading={loading} />
                                 <LeaderBoard title="⚠️ Units Needing Attention" units={units} type="bottom" loading={loading} />
                             </div>
-
-                            {/* Right Col: Heatmap & Graph (Span 2) */}
                             <div className="lg:col-span-2 space-y-8">
                                 {loading ? (
                                     <div className="h-96 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-xl animate-pulse backdrop-blur-sm border border-white/20" />
@@ -231,15 +202,7 @@ export default function ExecutiveDashboard() {
                     </TabsContent>
 
                     <TabsContent value="comparison" className="mt-6 focus-visible:ring-0">
-                        <YearComparison surveys={surveys} />
-                    </TabsContent>
-
-                    <TabsContent value="datascience" className="mt-6 focus-visible:ring-0">
-                        <GlobalDataScientist surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
-                    </TabsContent>
-
-                    <TabsContent value="suggestions" className="mt-6 focus-visible:ring-0">
-                        <SuggestionHub surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                        <YearComparison surveys={surveys as any} />
                     </TabsContent>
                 </Tabs>
             </div>

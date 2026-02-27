@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,12 +30,12 @@ interface ColumnMapping {
     has_segments: number; // count of feedback_segments for this column
 }
 
-interface EnrollmentEntry {
+interface ProdiEnrollmentEntry {
     id?: number;
-    unit_id: number;
-    unit_name: string;
+    study_program: string;
+    faculty: string;
     student_count: number;
-    isNew?: boolean;
+    actual_respondents: number;
 }
 
 export default function SurveyManagePage() {
@@ -57,10 +58,13 @@ export default function SurveyManagePage() {
     const [reassignNewUnit, setReassignNewUnit] = useState<string>("");
     const [reassigning, setReassigning] = useState(false);
 
-    // Enrollment
-    const [enrollments, setEnrollments] = useState<EnrollmentEntry[]>([]);
-    const [loadingEnroll, setLoadingEnroll] = useState(true);
-    const [savingEnroll, setSavingEnroll] = useState(false);
+    // Prodi Enrollment
+    const [prodiEnrollments, setProdiEnrollments] = useState<ProdiEnrollmentEntry[]>([]);
+    const [loadingProdi, setLoadingProdi] = useState(true);
+    const [savingProdi, setSavingProdi] = useState(false);
+    const [newProdiName, setNewProdiName] = useState('');
+    const [newProdiFaculty, setNewProdiFaculty] = useState('');
+    const [showAddProdi, setShowAddProdi] = useState(false);
 
     const [loading, setLoading] = useState(true);
 
@@ -96,14 +100,36 @@ export default function SurveyManagePage() {
         setUnits(unitsData || []);
         const unitMap = new Map((unitsData || []).map(u => [u.id, u.name]));
 
-        // 2. Use inner join to directly scope to this survey's respondents (no ID list needed)
-        // Fetch ALL raw inputs for this survey with just the fields we need for grouping
-        const { data: rawInputs } = await supabase
-            .from('raw_feedback_inputs')
-            .select('id, source_column, target_unit_id, is_quantitative, respondents!inner(survey_id)')
-            .eq('respondents.survey_id', surveyId);
+        // 2. Extract Respondent IDs with pagination
+        let respIds: number[] = [];
+        let rPage = 0;
+        while (true) {
+            const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+            if (!rBat || rBat.length === 0) break;
+            respIds.push(...rBat.map((r: any) => r.id));
+            if (rBat.length < 1000) break;
+            rPage++;
+        }
 
-        if (!rawInputs || rawInputs.length === 0) {
+        let rawInputs: any[] = [];
+        if (respIds.length > 0) {
+            const CHUNK = 150; // Use small chunks to prevent Supabase 1000 maxRows clamping per request
+            const promises = [];
+            for (let i = 0; i < respIds.length; i += CHUNK) {
+                const chunk = respIds.slice(i, i + CHUNK);
+                promises.push(
+                    supabase.from('raw_feedback_inputs')
+                        .select('id, source_column, target_unit_id, is_quantitative')
+                        .in('respondent_id', chunk)
+                );
+            }
+            const results = await Promise.all(promises);
+            for (const res of results) {
+                if (res.data) rawInputs.push(...res.data);
+            }
+        }
+
+        if (rawInputs.length === 0) {
             setColumns([]);
             setLoadingCols(false);
             return;
@@ -169,41 +195,126 @@ export default function SurveyManagePage() {
         setLoadingCols(false);
     }, [surveyId]);
 
-    // --- Load Enrollment Data ---
-    const loadEnrollments = useCallback(async () => {
-        setLoadingEnroll(true);
+    // --- Load Prodi Enrollment Data ---
+    const loadProdiEnrollments = useCallback(async () => {
+        setLoadingProdi(true);
 
-        const { data: unitsData } = await supabase
-            .from('organization_units')
-            .select('id, name')
-            .order('name');
+        // Get study programs + faculties from respondents (to know the hierarchy)
+        const { data: respondents } = await supabase
+            .from('respondents')
+            .select('study_program, faculty')
+            .eq('survey_id', parseInt(surveyId));
 
-        const { data: existingEnroll } = await supabase
-            .from('faculty_enrollment')
+        const prodiCounts = new Map<string, { count: number; faculty: string }>();
+        (respondents || []).forEach((r: any) => {
+            const p = r.study_program || 'Unknown';
+            const f = r.faculty || 'Unknown';
+            if (!prodiCounts.has(p)) prodiCounts.set(p, { count: 0, faculty: f });
+            prodiCounts.get(p)!.count++;
+        });
+
+        // Get existing prodi enrollment data
+        const { data: existing } = await supabase
+            .from('prodi_enrollment')
             .select('*')
             .eq('survey_id', parseInt(surveyId));
 
-        const enrollMap = new Map((existingEnroll || []).map(e => [e.unit_id, e]));
+        const existingMap = new Map((existing || []).map(e => [e.study_program, e]));
 
-        const entries: EnrollmentEntry[] = (unitsData || []).map(u => {
-            const existing = enrollMap.get(u.id);
-            return {
-                id: existing?.id,
-                unit_id: u.id,
-                unit_name: u.name,
-                student_count: existing?.student_count || 0,
-                isNew: !existing,
-            };
-        });
+        // Merge: respondent data + saved enrollment + any saved entries not in respondent data
+        const seenPrograms = new Set<string>();
+        const entries: ProdiEnrollmentEntry[] = [];
 
-        setEnrollments(entries);
-        setLoadingEnroll(false);
+        // First, add all programs from respondent data
+        for (const [prodi, info] of prodiCounts.entries()) {
+            if (prodi === 'Unknown') continue;
+            seenPrograms.add(prodi);
+            const ex = existingMap.get(prodi);
+            entries.push({
+                id: ex?.id,
+                study_program: prodi,
+                faculty: ex?.faculty || info.faculty,
+                student_count: ex?.student_count || 0,
+                actual_respondents: info.count,
+            });
+        }
+
+        // Then, add any saved programs with 0 respondents (manually added)
+        for (const ex of (existing || [])) {
+            if (!seenPrograms.has(ex.study_program)) {
+                entries.push({
+                    id: ex.id,
+                    study_program: ex.study_program,
+                    faculty: ex.faculty || 'Unknown',
+                    student_count: ex.student_count,
+                    actual_respondents: 0,
+                });
+            }
+        }
+
+        // Sort by faculty then program name
+        entries.sort((a, b) => a.faculty.localeCompare(b.faculty) || a.study_program.localeCompare(b.study_program));
+
+        setProdiEnrollments(entries);
+        setLoadingProdi(false);
     }, [surveyId]);
+
+    // --- Save Prodi Enrollment ---
+    const handleSaveProdiEnrollment = async () => {
+        setSavingProdi(true);
+        try {
+            await supabase
+                .from('prodi_enrollment')
+                .delete()
+                .eq('survey_id', parseInt(surveyId));
+
+            const toInsert = prodiEnrollments
+                .filter(e => e.student_count > 0)
+                .map(e => ({
+                    survey_id: parseInt(surveyId),
+                    study_program: e.study_program,
+                    faculty: e.faculty,
+                    student_count: e.student_count,
+                }));
+
+            if (toInsert.length > 0) {
+                const { error } = await supabase
+                    .from('prodi_enrollment')
+                    .insert(toInsert);
+                if (error) throw error;
+            }
+
+            toast.success('Enrollment data saved!');
+            loadProdiEnrollments();
+        } catch (e: any) {
+            toast.error('Failed to save: ' + e.message);
+        } finally {
+            setSavingProdi(false);
+        }
+    };
+
+    // --- Add Study Program ---
+    const handleAddProdi = () => {
+        if (!newProdiName.trim() || !newProdiFaculty.trim()) return;
+        if (prodiEnrollments.some(e => e.study_program === newProdiName.trim())) {
+            toast.error('This study program already exists.');
+            return;
+        }
+        setProdiEnrollments(prev => [...prev, {
+            study_program: newProdiName.trim(),
+            faculty: newProdiFaculty.trim(),
+            student_count: 0,
+            actual_respondents: 0,
+        }]);
+        setNewProdiName('');
+        setNewProdiFaculty('');
+        setShowAddProdi(false);
+    };
 
     useEffect(() => {
         loadColumnMappings();
-        loadEnrollments();
-    }, [loadColumnMappings, loadEnrollments]);
+        loadProdiEnrollments();
+    }, [loadColumnMappings, loadProdiEnrollments]);
 
     // --- Save Survey Metadata ---
     const handleSaveMeta = async () => {
@@ -292,61 +403,6 @@ export default function SurveyManagePage() {
         }
     };
 
-    // --- Save Enrollment ---
-    const handleSaveEnrollment = async () => {
-        setSavingEnroll(true);
-        try {
-            const toUpsert = enrollments
-                .filter(e => e.student_count > 0)
-                .map(e => ({
-                    ...(e.id ? { id: e.id } : {}),
-                    unit_id: e.unit_id,
-                    survey_id: parseInt(surveyId),
-                    student_count: e.student_count,
-                }));
-
-            // Delete any existing entries for this survey first, then insert
-            await supabase
-                .from('faculty_enrollment')
-                .delete()
-                .eq('survey_id', parseInt(surveyId));
-
-            if (toUpsert.length > 0) {
-                const { error } = await supabase
-                    .from('faculty_enrollment')
-                    .insert(toUpsert.map(e => ({
-                        unit_id: e.unit_id,
-                        survey_id: e.survey_id,
-                        student_count: e.student_count,
-                    })));
-
-                if (error) throw error;
-            }
-
-            toast.success("Enrollment data saved!");
-            loadEnrollments();
-        } catch (e: any) {
-            toast.error("Failed to save enrollment: " + e.message);
-        } finally {
-            setSavingEnroll(false);
-        }
-    };
-
-    // --- Respondent count for response rate display ---
-    const [respondentCounts, setRespondentCounts] = useState<Map<number, number>>(new Map());
-    useEffect(() => {
-        const fetchCounts = async () => {
-            const { data } = await supabase
-                .from('respondents')
-                .select('faculty')
-                .eq('survey_id', surveyId);
-            if (!data) return;
-
-            // Group by... but we don't have a direct faculty -> unit mapping
-            // For now, just show total respondents
-        };
-        fetchCounts();
-    }, [surveyId]);
 
     const staleCol = columns.find(c => c.source_column === reassignCol);
 
@@ -496,62 +552,105 @@ export default function SurveyManagePage() {
                     </CardContent>
                 </Card>
 
-                {/* SECTION 3: Faculty Enrollment */}
+                {/* SECTION 3: Prodi Enrollment */}
                 <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2 text-lg">
-                            <GraduationCap className="w-5 h-5 text-emerald-600" /> Faculty Enrollment Data
+                            <GraduationCap className="w-5 h-5 text-emerald-600" /> Student Enrollment by Study Program
                         </CardTitle>
                         <CardDescription>
-                            Enter the number of students enrolled in each faculty for this survey period. Used to calculate response rates.
+                            Enter total enrolled students per study program. Faculty totals are auto-calculated. Used for response rate in reports.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {loadingEnroll ? (
+                        {loadingProdi ? (
                             <div className="space-y-3">
                                 {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                <div className="grid gap-3">
-                                    {enrollments.map((entry) => (
-                                        <div
-                                            key={entry.unit_id}
-                                            className="flex items-center gap-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800"
-                                        >
-                                            <div className="flex-1 min-w-0">
-                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate block">
-                                                    {entry.unit_name}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-2 shrink-0">
-                                                <Users className="w-4 h-4 text-slate-400" />
-                                                <Input
-                                                    type="number"
-                                                    value={entry.student_count || ""}
-                                                    onChange={(e) => {
-                                                        const val = parseInt(e.target.value) || 0;
-                                                        setEnrollments(prev =>
-                                                            prev.map(en =>
-                                                                en.unit_id === entry.unit_id
-                                                                    ? { ...en, student_count: val }
-                                                                    : en
-                                                            )
+                                {/* Group by Faculty */}
+                                {(() => {
+                                    const faculties = new Map<string, ProdiEnrollmentEntry[]>();
+                                    prodiEnrollments.forEach(e => {
+                                        if (!faculties.has(e.faculty)) faculties.set(e.faculty, []);
+                                        faculties.get(e.faculty)!.push(e);
+                                    });
+                                    return Array.from(faculties.entries()).map(([faculty, programs]) => {
+                                        const facTotal = programs.reduce((s, p) => s + p.student_count, 0);
+                                        const facResp = programs.reduce((s, p) => s + p.actual_respondents, 0);
+                                        const facRate = facTotal > 0 ? ((facResp / facTotal) * 100).toFixed(1) : null;
+                                        return (
+                                            <div key={faculty} className="space-y-2">
+                                                <div className="flex items-center justify-between px-1">
+                                                    <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">{faculty}</h4>
+                                                    <span className="text-xs text-slate-500">
+                                                        {facResp.toLocaleString()} respondents / {facTotal > 0 ? facTotal.toLocaleString() : '?'} enrolled
+                                                        {facRate && <span className="ml-1 font-semibold text-emerald-600">({facRate}%)</span>}
+                                                    </span>
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    {programs.map(entry => {
+                                                        const rate = entry.student_count > 0 ? ((entry.actual_respondents / entry.student_count) * 100).toFixed(1) : null;
+                                                        return (
+                                                            <div key={entry.study_program} className="flex items-center gap-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate block">{entry.study_program}</span>
+                                                                    <span className="text-xs text-slate-400">
+                                                                        {entry.actual_respondents} respondents
+                                                                        {rate ? ` \u2022 ${rate}% response rate` : ''}
+                                                                        {entry.actual_respondents === 0 && ' \u2022 Manually added'}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    <Users className="w-4 h-4 text-slate-400" />
+                                                                    <Input type="number" value={entry.student_count || ''} onChange={(e) => { const val = parseInt(e.target.value) || 0; setProdiEnrollments(prev => prev.map(pe => pe.study_program === entry.study_program ? { ...pe, student_count: val } : pe)); }} placeholder="Total" min={0} className="w-28 bg-white dark:bg-slate-900 text-right" />
+                                                                    <span className="text-xs text-slate-400 w-16">enrolled</span>
+                                                                    {entry.actual_respondents === 0 && (
+                                                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-400 hover:text-red-600" onClick={() => setProdiEnrollments(prev => prev.filter(pe => pe.study_program !== entry.study_program))}>
+                                                                            <Trash2 className="w-3 h-3" />
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
                                                         );
-                                                    }}
-                                                    placeholder="0"
-                                                    min={0}
-                                                    className="w-28 bg-white dark:bg-slate-900 text-right"
-                                                />
-                                                <span className="text-xs text-slate-400 w-16">students</span>
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    });
+                                })()}
+
+                                {/* Add Study Program */}
+                                {showAddProdi ? (
+                                    <div className="p-4 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 space-y-3">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs font-medium text-slate-500 mb-1 block">Study Program Name</label>
+                                                <Input value={newProdiName} onChange={(e) => setNewProdiName(e.target.value)} placeholder="e.g. S1 Pendidikan Kimia" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs font-medium text-slate-500 mb-1 block">Faculty</label>
+                                                <Input value={newProdiFaculty} onChange={(e) => setNewProdiFaculty(e.target.value)} placeholder="e.g. Fakultas Ilmu Pendidikan" />
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+                                        <div className="flex justify-end gap-2">
+                                            <Button variant="ghost" size="sm" onClick={() => { setShowAddProdi(false); setNewProdiName(''); setNewProdiFaculty(''); }}>Cancel</Button>
+                                            <Button size="sm" onClick={handleAddProdi} disabled={!newProdiName.trim() || !newProdiFaculty.trim()} className="bg-emerald-600 hover:bg-emerald-700 gap-1">
+                                                <Plus className="w-3 h-3" /> Add
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <Button variant="outline" className="w-full border-dashed gap-2 text-slate-500 hover:text-emerald-600 hover:border-emerald-300" onClick={() => setShowAddProdi(true)}>
+                                        <Plus className="w-4 h-4" /> Add Study Program (0% response)
+                                    </Button>
+                                )}
+
                                 <div className="flex justify-end">
-                                    <Button onClick={handleSaveEnrollment} disabled={savingEnroll} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
-                                        {savingEnroll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                    <Button onClick={handleSaveProdiEnrollment} disabled={savingProdi} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
+                                        {savingProdi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                         Save Enrollment Data
                                     </Button>
                                 </div>

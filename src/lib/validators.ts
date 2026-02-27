@@ -26,6 +26,7 @@ export const discoverCategoriesSchema = z.object({
     currentCategories: z.array(z.any()).optional().default([]),
     instructions: z.array(z.string()).optional().default([]),
     unitName: z.string(),
+    unitDescription: z.string().optional().default(""),
 });
 
 export const generateDashboardSchema = z.object({

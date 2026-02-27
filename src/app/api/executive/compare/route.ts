@@ -4,9 +4,12 @@ import { supabase } from "@/lib/supabase";
 /**
  * GET /api/executive/compare?surveyIdA=1&surveyIdB=2
  * 
- * Fetches side-by-side executive metrics for two surveys,
- * including sentiment scores, quantitative averages (1-4 scale),
- * and enrollment-based response rates.
+ * Fetches side-by-side executive metrics for two surveys, including:
+ * - Sentiment scores per unit
+ * - UPH Index (1-4 scale) per unit via RPC 
+ * - Enrollment-based response rates
+ * - Campus participation
+ * - Category-level segment counts per unit
  */
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
@@ -21,43 +24,53 @@ export async function GET(req: Request) {
     }
 
     try {
-        // 1. Fetch sentiment metrics for both surveys in parallel
-        const [metricsA, metricsB] = await Promise.all([
-            fetchSurveyMetrics(parseInt(surveyIdA)),
-            fetchSurveyMetrics(parseInt(surveyIdB)),
+        const idA = parseInt(surveyIdA);
+        const idB = parseInt(surveyIdB);
+
+        // Parallel fetches for both surveys
+        const [
+            surveyInfoA, surveyInfoB,
+            metricsA, metricsB,
+            rpcA, rpcB,
+            rateA, rateB,
+            campusA, campusB,
+            categoryData,
+        ] = await Promise.all([
+            supabase.from('surveys').select('id, title, year').eq('id', idA).single(),
+            supabase.from('surveys').select('id, title, year').eq('id', idB).single(),
+            fetchSurveyMetrics(idA),
+            fetchSurveyMetrics(idB),
+            supabase.rpc('get_report_aggregates', { p_survey_id: idA }),
+            supabase.rpc('get_report_aggregates', { p_survey_id: idB }),
+            fetchResponseRates(idA),
+            fetchResponseRates(idB),
+            fetchCampusParticipation(idA),
+            fetchCampusParticipation(idB),
+            fetchCategoryComparison(idA, idB),
         ]);
 
-        // 2. Fetch survey info (title, year)
-        const [surveyInfoA, surveyInfoB] = await Promise.all([
-            supabase.from('surveys').select('id, title, year').eq('id', surveyIdA).single(),
-            supabase.from('surveys').select('id, title, year').eq('id', surveyIdB).single(),
-        ]);
-
-        // 3. Fetch quantitative averages (1-4 scale) per unit for both surveys
-        const [quantA, quantB] = await Promise.all([
-            fetchQuantitativeAverages(parseInt(surveyIdA)),
-            fetchQuantitativeAverages(parseInt(surveyIdB)),
-        ]);
-
-        // 4. Fetch response rates (enrollment vs respondents)
-        const [rateA, rateB] = await Promise.all([
-            fetchResponseRates(parseInt(surveyIdA)),
-            fetchResponseRates(parseInt(surveyIdB)),
-        ]);
+        // Process RPC results into UPH Index per unit
+        const quantA = buildUPHIndex(rpcA.data);
+        const quantB = buildUPHIndex(rpcB.data);
 
         return NextResponse.json({
             surveyA: {
                 info: surveyInfoA.data,
                 metrics: metricsA,
-                quantitative: quantA,
+                quantitative: quantA.units,
+                uphIndex: quantA.overall,
                 responseRates: rateA,
+                campusParticipation: campusA,
             },
             surveyB: {
                 info: surveyInfoB.data,
                 metrics: metricsB,
-                quantitative: quantB,
+                quantitative: quantB.units,
+                uphIndex: quantB.overall,
                 responseRates: rateB,
+                campusParticipation: campusB,
             },
+            categoryComparison: categoryData,
         });
     } catch (e: any) {
         console.error("Compare API error:", e.message);
@@ -70,28 +83,46 @@ export async function GET(req: Request) {
 
 // --- Helper Functions ---
 
+function buildUPHIndex(rpcResult: any) {
+    const unitCampusScores: any[] = rpcResult?.unit_campus_scores || [];
+
+    // Per-unit averages
+    const unitMap: Record<number, { sum: number; count: number }> = {};
+    let globalSum = 0, globalCount = 0;
+
+    for (const row of unitCampusScores) {
+        const unitId = row.target_unit_id;
+        const avg = parseFloat(row.avg_score);
+        const count = parseInt(row.score_count);
+
+        if (!unitMap[unitId]) unitMap[unitId] = { sum: 0, count: 0 };
+        unitMap[unitId].sum += avg * count;
+        unitMap[unitId].count += count;
+
+        globalSum += avg * count;
+        globalCount += count;
+    }
+
+    return {
+        overall: globalCount > 0 ? parseFloat((globalSum / globalCount).toFixed(2)) : null,
+        units: unitMap,
+    };
+}
+
 async function fetchSurveyMetrics(surveyId: number) {
-    // Use the existing RPC
     const { data: rpcData } = await supabase.rpc('get_all_executive_metrics', {
         p_survey_id: surveyId,
     });
 
-    // Also get total respondents and feedback count
     const { count: respondentCount } = await supabase
         .from('respondents')
         .select('*', { count: 'exact', head: true })
         .eq('survey_id', surveyId);
 
-    const { count: feedbackCount } = await supabase
-        .from('raw_feedback_inputs')
-        .select('id, respondents!inner(survey_id)', { count: 'exact', head: true })
-        .eq('respondents.survey_id', surveyId)
-        .eq('requires_analysis', true);
-
-    // Calculate per-unit sentiment scores from RPC data
     const unitScores: {
         unit_id: number;
         unit_name: string;
+        short_name: string;
         positive: number;
         neutral: number;
         negative: number;
@@ -112,6 +143,7 @@ async function fetchSurveyMetrics(surveyId: number) {
             unitScores.push({
                 unit_id: row.unit_id,
                 unit_name: row.unit_name || "Unknown",
+                short_name: row.short_name || row.unit_name || "Unknown",
                 positive: pos,
                 neutral: neu,
                 negative: neg,
@@ -121,7 +153,6 @@ async function fetchSurveyMetrics(surveyId: number) {
         }
     }
 
-    // Overall aggregated score
     const totalPos = unitScores.reduce((s, u) => s + u.positive, 0);
     const totalNeu = unitScores.reduce((s, u) => s + u.neutral, 0);
     const totalNeg = unitScores.reduce((s, u) => s + u.negative, 0);
@@ -134,67 +165,150 @@ async function fetchSurveyMetrics(surveyId: number) {
         overallScore,
         totalComments: totalAll,
         totalRespondents: respondentCount || 0,
-        totalFeedback: feedbackCount || 0,
         criticalIssues: totalNeg,
         unitScores,
     };
 }
 
-async function fetchQuantitativeAverages(surveyId: number) {
-    // Fetch all quantitative inputs (numerical_score between 1-4) grouped by unit
+async function fetchCampusParticipation(surveyId: number) {
     const { data } = await supabase
-        .from('raw_feedback_inputs')
-        .select('target_unit_id, numerical_score, respondents!inner(survey_id)')
-        .eq('respondents.survey_id', surveyId)
-        .eq('is_quantitative', true)
-        .not('numerical_score', 'is', null)
-        .gte('numerical_score', 1)
-        .lte('numerical_score', 4);
+        .from('respondents')
+        .select('location')
+        .eq('survey_id', surveyId);
 
-    if (!data || data.length === 0) return [];
+    if (!data) return [];
 
-    // Group by unit and calculate average
-    const unitMap = new Map<number, { sum: number; count: number }>();
-    for (const row of data) {
-        const uid = row.target_unit_id;
-        const score = row.numerical_score!;
-        const existing = unitMap.get(uid) || { sum: 0, count: 0 };
-        existing.sum += score;
-        existing.count++;
-        unitMap.set(uid, existing);
+    const campusMap = new Map<string, number>();
+    for (const r of data) {
+        const loc = r.location || "Unknown";
+        campusMap.set(loc, (campusMap.get(loc) || 0) + 1);
     }
 
-    // Fetch unit names
-    const unitIds = Array.from(unitMap.keys());
+    return Array.from(campusMap.entries())
+        .map(([campus, count]) => ({ campus, respondents: count }))
+        .sort((a, b) => b.respondents - a.respondents);
+}
+
+async function fetchCategoryComparison(surveyIdA: number, surveyIdB: number) {
+    // Get all categories with their unit
+    const { data: categories } = await supabase
+        .from('analysis_categories')
+        .select('id, name, unit_id');
+
+    if (!categories || categories.length === 0) return [];
+
+    // Get unit names
+    const unitIds = [...new Set(categories.map(c => c.unit_id))];
     const { data: units } = await supabase
         .from('organization_units')
         .select('id, name, short_name')
         .in('id', unitIds);
+    const unitMap = new Map((units || []).map(u => [u.id, u]));
 
-    const nameMap = new Map((units || []).map(u => [u.id, u]));
+    // Helper to get all segments for a survey
+    const getSegmentsForSurvey = async (sId: number) => {
+        const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', sId);
+        const respIds = (resps || []).map(r => r.id);
 
-    return Array.from(unitMap.entries()).map(([unitId, stats]) => ({
-        unit_id: unitId,
-        unit_name: nameMap.get(unitId)?.name || "Unknown",
-        unit_short_name: nameMap.get(unitId)?.short_name || nameMap.get(unitId)?.name || "Unknown",
-        average: parseFloat((stats.sum / stats.count).toFixed(2)),
-        count: stats.count,
-    }));
+        const inputIds: number[] = [];
+        const CHUNK = 400;
+        const inputPromises = [];
+        for (let i = 0; i < respIds.length; i += CHUNK) {
+            const chunk = respIds.slice(i, i + CHUNK);
+            inputPromises.push(supabase.from('raw_feedback_inputs').select('id').in('respondent_id', chunk));
+        }
+        const inputResults = await Promise.all(inputPromises);
+        for (const res of inputResults) if (res.data) inputIds.push(...res.data.map((d: any) => d.id));
+
+        let segs: any[] = [];
+        const segPromises = [];
+        for (let i = 0; i < inputIds.length; i += CHUNK) {
+            const chunk = inputIds.slice(i, i + CHUNK);
+            segPromises.push(supabase.from('feedback_segments').select('category_id, sentiment').in('raw_input_id', chunk));
+        }
+        const segResults = await Promise.all(segPromises);
+        for (const res of segResults) if (res.data) segs.push(...res.data);
+
+        return segs;
+    };
+
+    const segsA = await getSegmentsForSurvey(surveyIdA);
+    const segsB = await getSegmentsForSurvey(surveyIdB);
+
+    // Count per category per sentiment
+    type CatCount = { positive: number; negative: number; neutral: number; total: number };
+    const countA = new Map<number, CatCount>();
+    const countB = new Map<number, CatCount>();
+
+    const accumulate = (map: Map<number, CatCount>, segments: any[] | null) => {
+        for (const seg of segments || []) {
+            if (!seg.category_id) continue;
+            if (!map.has(seg.category_id)) map.set(seg.category_id, { positive: 0, negative: 0, neutral: 0, total: 0 });
+            const entry = map.get(seg.category_id)!;
+            entry.total++;
+            if (seg.sentiment === "Positive") entry.positive++;
+            else if (seg.sentiment === "Negative") entry.negative++;
+            else entry.neutral++;
+        }
+    };
+
+    accumulate(countA, segsA);
+    accumulate(countB, segsB);
+
+    // Group by unit
+    const unitCatMap = new Map<number, {
+        unit_name: string;
+        short_name: string;
+        categories: {
+            category_name: string;
+            countA: CatCount;
+            countB: CatCount;
+        }[];
+    }>();
+
+    for (const cat of categories) {
+        const uid = cat.unit_id;
+        if (!unitCatMap.has(uid)) {
+            const unit = unitMap.get(uid);
+            unitCatMap.set(uid, {
+                unit_name: unit?.name || "Unknown",
+                short_name: unit?.short_name || unit?.name || "Unknown",
+                categories: [],
+            });
+        }
+        const a = countA.get(cat.id) || { positive: 0, negative: 0, neutral: 0, total: 0 };
+        const b = countB.get(cat.id) || { positive: 0, negative: 0, neutral: 0, total: 0 };
+
+        // Only include if at least one survey has data
+        if (a.total > 0 || b.total > 0) {
+            unitCatMap.get(uid)!.categories.push({
+                category_name: cat.name,
+                countA: a,
+                countB: b,
+            });
+        }
+    }
+
+    // Sort categories by total count descending
+    for (const entry of unitCatMap.values()) {
+        entry.categories.sort((a, b) => (b.countA.total + b.countB.total) - (a.countA.total + a.countB.total));
+    }
+
+    return Array.from(unitCatMap.entries())
+        .map(([uid, data]) => ({ unit_id: uid, ...data }))
+        .filter(u => u.categories.length > 0)
+        .sort((a, b) => a.unit_name.localeCompare(b.unit_name));
 }
 
 async function fetchResponseRates(surveyId: number) {
-    // Fetch enrollment data for this survey
     const { data: enrollments } = await supabase
-        .from('faculty_enrollment')
-        .select('unit_id, student_count')
+        .from('prodi_enrollment')
+        .select('student_count')
         .eq('survey_id', surveyId);
 
     if (!enrollments || enrollments.length === 0) return null;
 
-    // Fetch respondent counts per... we need to map respondents to units
-    // Since respondents have faculty, but units might not map directly,
-    // we'll return total enrollment vs total respondents for now
-    const totalEnrollment = enrollments.reduce((s, e) => s + e.student_count, 0);
+    const totalEnrollment = enrollments.reduce((s, e) => s + (e.student_count || 0), 0);
 
     const { count: totalRespondents } = await supabase
         .from('respondents')
