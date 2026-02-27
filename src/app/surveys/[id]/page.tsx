@@ -212,92 +212,105 @@ export default function SurveyDetailPage() {
     };
 
     // --- GLOBAL ANALYSIS ENGINE ---
-    const addGlobalLog = (msg: string) => setGlobalLogs(prev => [msg, ...prev].slice(0, 10));
+    const addGlobalLog = (msg: string) => setGlobalLogs(prev => [msg, ...prev].slice(0, 50));
 
     const handleRunGlobalAnalysis = async () => {
         setIsGlobalModalOpen(true);
         setIsAnalyzingGlobal(true);
         stopGlobalRef.current = false;
         setGlobalLogs([]);
+        setGlobalProgress(0);
         addGlobalLog("🚀 Initializing Global AI Engine...");
 
-        // Calculate total work
-        const totalItemsToProcess = unitStats.reduce((acc, unit) => acc + (unit.comment_count - unit.analyzed_count), 0);
-        let itemsProcessedSoFar = 0;
+        // Pre-fetch respondent IDs
+        const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
+        const respIds = (resps || []).map((r: any) => r.id);
+        addGlobalLog(`📋 Survey has ${respIds.length.toLocaleString()} respondents`);
 
-        if (totalItemsToProcess === 0) {
-            addGlobalLog("✅ Analysis already complete!");
-            setIsAnalyzingGlobal(false);
-            return;
-        }
+        const unitsToProcess = unitStats.filter(u => u.comment_count > 0);
+        let unitsDone = 0;
 
         try {
-            // Pre-fetch respondent IDs once for the global analysis
-            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
-            const respIds = (resps || []).map((r: any) => r.id);
+            for (const unit of unitsToProcess) {
+                if (stopGlobalRef.current) { addGlobalLog("🛑 Stopped by user."); break; }
 
-            // Iterate through each unit
-            for (const unit of unitStats) {
-                if (stopGlobalRef.current) break;
+                addGlobalLog(`\n📂 Unit: ${unit.unit_name}`);
 
-                // Check if this unit needs analysis
-                if (unit.analyzed_count >= unit.comment_count) continue;
-
-                addGlobalLog(`📂 Switching to Unit: ${unit.unit_name}...`);
-
-                // Fetch Taxonomy for this unit (CRITICAL)
-                const { data: categories } = await supabase.from('analysis_categories').select('*').eq('unit_id', unit.unit_id);
-                const { data: subcategories } = await supabase.from('analysis_subcategories').select('*, analysis_categories!inner(unit_id)').eq('analysis_categories.unit_id', unit.unit_id);
-
-                let allRaw: any[] = [];
-                const CHUNK_SIZE = 400;
-                for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
-                    const chunk = respIds.slice(i, i + CHUNK_SIZE);
-                    const { data } = await supabase.from('raw_feedback_inputs')
-                        .select('id, raw_text')
-                        .eq('target_unit_id', unit.unit_id)
-                        .in('respondent_id', chunk)
-                        .eq('is_quantitative', false);
-                    if (data) allRaw.push(...data);
+                // 1. Check categories exist
+                const { data: categories } = await supabase.from('analysis_categories').select('id, name, keywords').eq('unit_id', unit.unit_id);
+                if (!categories || categories.length === 0) {
+                    addGlobalLog(`⚠️ SKIPPED: No categories built for ${unit.unit_name}`);
+                    unitsDone++;
+                    setGlobalProgress(Math.round((unitsDone / unitsToProcess.length) * 100));
+                    continue;
                 }
-                const { data: existing } = await supabase.from('feedback_segments').select('raw_input_id');
-                const existingIds = new Set(existing?.map(e => e.raw_input_id));
-                const queue = allRaw?.filter(r => !existingIds.has(r.id)) || [];
+                addGlobalLog(`   ✅ ${categories.length} categories loaded`);
 
-                if (queue.length === 0) continue;
+                // 2. Count pending comments (requires_analysis = true)
+                let pendingCount = 0;
+                const CHUNK = 50;
+                for (let i = 0; i < respIds.length; i += CHUNK) {
+                    const chunk = respIds.slice(i, i + CHUNK);
+                    const { count } = await supabase.from('raw_feedback_inputs')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('target_unit_id', unit.unit_id)
+                        .eq('is_quantitative', false)
+                        .eq('requires_analysis', true)
+                        .in('respondent_id', chunk);
+                    pendingCount += (count || 0);
+                }
 
-                const BATCH_SIZE = 15;
-                for (let i = 0; i < queue.length; i += BATCH_SIZE) {
-                    if (stopGlobalRef.current) { addGlobalLog("🛑 Global Paused."); break; }
+                if (pendingCount === 0) {
+                    addGlobalLog(`   ✅ Already analyzed (0 pending)`);
+                    unitsDone++;
+                    setGlobalProgress(Math.round((unitsDone / unitsToProcess.length) * 100));
+                    continue;
+                }
 
-                    const batch = queue.slice(i, i + BATCH_SIZE);
+                addGlobalLog(`   ⏳ ${pendingCount} comments to analyze...`);
 
-                    // Call API
-                    const response = await fetch('/api/ai/analyze-batch', {
+                // 3. Process in batches of 50 using process-queue API
+                let processed = 0;
+                const BATCH_SIZE = 50;
+                while (processed < pendingCount) {
+                    if (stopGlobalRef.current) { addGlobalLog("🛑 Stopped by user."); break; }
+
+                    const response = await fetch('/api/ai/process-queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            comments: batch.map(b => ({ id: b.id, text: b.raw_text })),
-                            taxonomy: { categories: categories || [], subcategories: subcategories || [] }, // Pass loaded taxonomy
-                            context: { name: unit.unit_name, description: unit.unit_desc }
+                            unitId: unit.unit_id,
+                            surveyId: parseInt(surveyId),
+                            batchSize: BATCH_SIZE
                         })
                     });
 
-                    const { results } = await response.json();
-
-                    if (results && results.length > 0) {
-                        const { error } = await supabase.from('feedback_segments').insert(results);
-                        if (!error) {
-                            itemsProcessedSoFar += results.length;
-                            setGlobalProgress(Math.round((itemsProcessedSoFar / totalItemsToProcess) * 100));
-                        }
+                    const result = await response.json();
+                    if (result.error) {
+                        addGlobalLog(`   ❌ Error: ${result.error}`);
+                        break;
                     }
+
+                    processed += (result.processed || 0);
+                    addGlobalLog(`   ✅ Batch done: ${processed}/${pendingCount}`);
+
+                    if (result.remaining === 0 || result.processed === 0) break;
+
+                    // Brief pause between batches
+                    await new Promise(r => setTimeout(r, 1000));
                 }
+
+                unitsDone++;
+                setGlobalProgress(Math.round((unitsDone / unitsToProcess.length) * 100));
+                addGlobalLog(`   🏁 ${unit.unit_name} complete!`);
             }
-            addGlobalLog("🏁 Global Analysis Cycle Complete.");
-            loadSurveyData(); // Refresh stats on UI
+
+            addGlobalLog("\n🏁 Global Analysis Cycle Complete.");
+            toast.success("Global analysis finished!");
+            loadSurveyData();
         } catch (e: any) {
-            addGlobalLog(`❌ Error: ${e.message}`);
+            addGlobalLog(`❌ Fatal Error: ${e.message}`);
+            toast.error("Global analysis failed: " + e.message);
         } finally {
             setIsAnalyzingGlobal(false);
         }
@@ -433,8 +446,11 @@ export default function SurveyDetailPage() {
                                         variant="secondary"
                                         className="w-full text-blue-700 font-semibold shadow-sm"
                                         onClick={handleRunGlobalAnalysis}
+                                        disabled={true}
+                                        title="Global analysis is not yet activated. Contact admin to enable."
                                     >
                                         {overallProgress === 100 ? "Re-Run Analysis" : "Run Global Analysis"}
+                                        <span className="ml-2 text-xs font-normal opacity-60">(Coming Soon)</span>
                                     </Button>
                                 </div>
                             </CardContent>
