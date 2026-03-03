@@ -77,7 +77,7 @@ export async function POST(req: Request) {
                         .limit(BATCH_SIZE - rawItems.length);
 
                     if (skipIds && skipIds.length > 0) {
-                        q = q.not('id', 'in', `(${skipIds.slice(-20).join(',')})`);
+                        q = q.not('id', 'in', `(${skipIds.join(',')})`);
                     }
 
                     const { data } = await q;
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
                 .limit(BATCH_SIZE);
 
             if (skipIds && skipIds.length > 0) {
-                q = q.not('id', 'in', `(${skipIds.slice(-20).join(',')})`);
+                q = q.not('id', 'in', `(${skipIds.join(',')})`);
             }
             const { data } = await q;
             if (data) rawItems = data;
@@ -200,13 +200,26 @@ export async function POST(req: Request) {
         let segmentsToInsert: any[] = [];
         let processedInputIds = new Set<number>();
 
+        // Anti-Hallucination: track unique segments per input to avoid duplicates
+        let seenSegmentsPerInput = new Map<number, Set<string>>();
+
         if (Array.isArray(parsed)) {
             parsed.forEach((res: any) => {
                 const inputId = res.raw_input_id;
                 processedInputIds.add(inputId);
 
+                if (!seenSegmentsPerInput.has(inputId)) {
+                    seenSegmentsPerInput.set(inputId, new Set());
+                }
+                const seenSet = seenSegmentsPerInput.get(inputId)!;
+
                 if (Array.isArray(res.segments) && res.segments.length > 0) {
                     res.segments.forEach((seg: any) => {
+                        // Deduplicate exact same text per input
+                        const cleanText = (seg.text || "").trim();
+                        if (!cleanText || seenSet.has(cleanText.toLowerCase())) return;
+                        seenSet.add(cleanText.toLowerCase());
+
                         const matchedCat = categories.find((c: any) => c.name === seg.category_name);
 
                         // Resolve Cross-Unit Tagging
@@ -220,7 +233,7 @@ export async function POST(req: Request) {
 
                         segmentsToInsert.push({
                             raw_input_id: inputId,
-                            segment_text: seg.text,
+                            segment_text: cleanText,
                             sentiment: seg.sentiment,
                             is_suggestion: seg.is_suggestion === true,
                             category_id: matchedCat ? matchedCat.id : null,

@@ -27,9 +27,9 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
     const [categories, setCategories] = useState<any[]>([]);
     const [allUnits, setAllUnits] = useState<any[]>([]);
     const [instructions, setInstructions] = useState<string[]>([]);
-    const [localPendingCount, setLocalPendingCount] = useState(0); // For initial load display
 
     const [confirmReset, setConfirmReset] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
 
     useEffect(() => {
         loadStaticResources();
@@ -47,14 +47,6 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
 
         const { data: units } = await supabase.from('organization_units').select('id, name');
         if (units) setAllUnits(units);
-
-        // Initial pending count check (optional, but good for UI state before start)
-        // If analysis is running, we use context progress. If not, we check DB.
-        if (!isAnalyzing) {
-            // ... Simple count query ...
-            // Omitted for brevity, let's just rely on context or assume 0 until start? 
-            // Better to have it.
-        }
     }
 
     const [pendingCount, setPendingCount] = useState<number | null>(null);
@@ -77,7 +69,7 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
             if (surveyId && surveyId.trim() !== '') {
                 let rPage = 0;
                 while (true) {
-                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).order('id').range(rPage * 1000, (rPage + 1) * 1000 - 1);
                     if (!rBat || rBat.length === 0) break;
                     respIds.push(...rBat.map((r: any) => r.id));
                     if (rBat.length < 1000) break;
@@ -90,7 +82,7 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
             let analyzed = 0;
 
             if (respIds.length > 0) {
-                const CHUNK_SIZE = 400;
+                const CHUNK_SIZE = 100;
 
                 // Get Total Candidates (Raw Inputs)
                 let totalPromises = [];
@@ -180,11 +172,12 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
                             </div>
                         ) : !isActive ? (
                             <div className="flex gap-4">
-                                <Button size="lg" className="w-48 bg-blue-600 hover:bg-blue-700 shadow-lg" onClick={() => startAnalysis(unitId, surveyId)}>
+                                <Button size="lg" className="w-48 bg-blue-600 hover:bg-blue-700 shadow-lg" onClick={() => startAnalysis(unitId, surveyId)} disabled={isResetting}>
                                     <Play className="w-5 h-5 mr-2" /> Start Analysis
                                 </Button>
-                                <Button size="lg" variant="outline" className="w-48 border-red-200 text-red-600 hover:bg-red-50" onClick={() => setConfirmReset(true)}>
-                                    <Trash2 className="w-5 h-5 mr-2" /> Reset & Clear
+                                <Button size="lg" variant="outline" className="w-48 border-red-200 text-red-600 hover:bg-red-50" onClick={() => setConfirmReset(true)} disabled={isResetting}>
+                                    {isResetting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Trash2 className="w-5 h-5 mr-2" />}
+                                    {isResetting ? "Resetting..." : "Reset & Clear"}
                                 </Button>
                             </div>
                         ) : (
@@ -211,9 +204,14 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
                 description="This will permanently delete ALL analysis results. Are you sure?"
                 confirmLabel="Yes, Clear Everything"
                 variant="destructive"
-                onConfirm={() => {
+                onConfirm={async () => {
                     setConfirmReset(false);
-                    resetAnalysis(unitId, surveyId);
+                    setIsResetting(true);
+                    await resetAnalysis(unitId, surveyId);
+                    // Refresh pending count after reset
+                    await fetchPendingCount();
+                    setIsResetting(false);
+                    toast.success("Reset complete! All analysis data has been cleared.");
                 }}
             />
         </div>

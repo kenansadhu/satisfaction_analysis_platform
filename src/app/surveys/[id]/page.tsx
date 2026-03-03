@@ -117,7 +117,7 @@ export default function SurveyDetailPage() {
         setIsProcessing(true);
         try {
             let processed = 0;
-            const CHUNK_SIZE = 400;
+            const CHUNK_SIZE = 100;
 
             // Pre-fetch respondent IDs for this survey (fast)
             const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
@@ -166,7 +166,7 @@ export default function SurveyDetailPage() {
         setIsProcessing(true);
         try {
             let processed = 0;
-            const CHUNK_SIZE = 400;
+            const CHUNK_SIZE = 100;
 
             // Pre-fetch respondent IDs for this survey (fast)
             const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);

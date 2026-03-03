@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +53,6 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
 
     useEffect(() => {
         loadCategories();
-        loadVerificationStats();
     }, [unitId, surveyId]);
 
     // Debounce search input (300ms)
@@ -66,8 +65,23 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
     }, [filterText]);
 
     useEffect(() => {
+        // Don't load data while analysis is running — show wait overlay instead
+        if (isAnalyzing && currentUnitId === unitId) return;
         loadData();
-    }, [unitId, surveyId, page, debouncedFilter, verificationFilter]);
+    }, [unitId, surveyId, page, debouncedFilter, verificationFilter, isAnalyzing, currentUnitId]);
+
+    // When analysis finishes (transition from analyzing→done), reload everything
+    const wasAnalyzingRef = useRef(false);
+    useEffect(() => {
+        if (isAnalyzing && currentUnitId === unitId) {
+            wasAnalyzingRef.current = true;
+        } else if (wasAnalyzingRef.current) {
+            // Analysis just finished — reload
+            wasAnalyzingRef.current = false;
+            loadData();
+            loadCategories();
+        }
+    }, [isAnalyzing]);
 
 
 
@@ -76,62 +90,7 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
         if (data) setCategories(data);
     }
 
-    async function loadVerificationStats() {
-        // Get total segments count and verified count for this unit
-        let inputIds: number[] = [];
 
-        if (surveyId) {
-            let respIds: number[] = [];
-            let rPage = 0;
-            while (true) {
-                const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                if (!rBat || rBat.length === 0) break;
-                respIds.push(...rBat.map((r: any) => r.id));
-                if (rBat.length < 1000) break;
-                rPage++;
-            }
-            if (respIds.length > 0) {
-                const CHUNK = 400;
-                for (let i = 0; i < respIds.length; i += CHUNK) {
-                    const chunk = respIds.slice(i, i + CHUNK);
-                    const { data } = await supabase.from('raw_feedback_inputs').select('id').eq('target_unit_id', unitId).eq('requires_analysis', false).in('respondent_id', chunk);
-                    if (data) inputIds.push(...data.map(d => d.id));
-                }
-            }
-        } else {
-            let iPage = 0;
-            while (true) {
-                const { data } = await supabase.from('raw_feedback_inputs').select('id').eq('target_unit_id', unitId).eq('requires_analysis', false).range(iPage * 1000, (iPage + 1) * 1000 - 1);
-                if (!data || data.length === 0) break;
-                inputIds.push(...data.map(d => d.id));
-                if (data.length < 1000) break;
-                iPage++;
-            }
-        }
-
-        if (inputIds.length === 0) {
-            setTotalSegments(0);
-            setVerifiedCount(0);
-            return;
-        }
-
-        // Count total and verified segments
-        const CHUNK = 400;
-        let total = 0;
-        let verified = 0;
-        for (let i = 0; i < inputIds.length; i += CHUNK) {
-            const chunk = inputIds.slice(i, i + CHUNK);
-
-            const { count: tCount } = await supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk);
-            total += tCount || 0;
-
-            const { count: vCount } = await supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk).eq('is_verified', true);
-            verified += vCount || 0;
-        }
-
-        setTotalSegments(total);
-        setVerifiedCount(verified);
-    }
 
     async function loadData() {
         setLoading(true);
@@ -150,13 +109,19 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
             }
 
             if (respIds.length > 0) {
-                const CHUNK = 400;
+                const CHUNK = 200;
                 for (let i = 0; i < respIds.length; i += CHUNK) {
                     const chunk = respIds.slice(i, i + CHUNK);
-                    let q = supabase.from('raw_feedback_inputs').select('id, raw_text, feedback_segments!inner(id)').eq('target_unit_id', unitId).eq('requires_analysis', false).in('respondent_id', chunk);
-                    if (debouncedFilter) q = q.ilike('raw_text', `%${debouncedFilter}%`);
-                    const { data } = await q;
-                    if (data) inputIds.push(...data.map(d => d.id));
+                    let iPage = 0;
+                    while (true) {
+                        let q = supabase.from('raw_feedback_inputs').select('id, raw_text, feedback_segments!inner(id)').eq('target_unit_id', unitId).eq('requires_analysis', false).in('respondent_id', chunk).range(iPage * 1000, (iPage + 1) * 1000 - 1);
+                        if (debouncedFilter) q = q.ilike('raw_text', `%${debouncedFilter}%`);
+                        const { data } = await q;
+                        if (!data || data.length === 0) break;
+                        inputIds.push(...data.map(d => d.id));
+                        if (data.length < 1000) break;
+                        iPage++;
+                    }
                 }
             }
         } else {
@@ -176,6 +141,22 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
         inputIds = Array.from(new Set(inputIds));
         inputIds.sort((a, b) => a - b);
         setTotalCount(inputIds.length);
+
+        // Compute verification stats from these same inputIds
+        let totalSegs = 0;
+        let verifiedSegs = 0;
+        const STAT_CHUNK = 200;
+        for (let i = 0; i < inputIds.length; i += STAT_CHUNK) {
+            const chunk = inputIds.slice(i, i + STAT_CHUNK);
+            const [tRes, vRes] = await Promise.all([
+                supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk),
+                supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk).eq('is_verified', true)
+            ]);
+            totalSegs += tRes.count || 0;
+            verifiedSegs += vRes.count || 0;
+        }
+        setTotalSegments(totalSegs);
+        setVerifiedCount(verifiedSegs);
 
         const pageInputIds = inputIds.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -305,13 +286,13 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
     return (
         <div className="space-y-5 animate-in fade-in">
             {isAnalyzing && currentUnitId === unitId && (
-                <Alert className="bg-blue-50 border-blue-200 animate-pulse">
-                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                    <AlertTitle className="text-blue-800">Analysis In Progress</AlertTitle>
-                    <AlertDescription className="text-blue-700">
-                        New data is being processed ({progress.percentage}%). Results shown here will auto-refresh.
-                    </AlertDescription>
-                </Alert>
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-8 text-center space-y-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
+                    <div>
+                        <h3 className="text-lg font-semibold text-blue-800">Analysis In Progress ({progress.percentage}%)</h3>
+                        <p className="text-sm text-blue-600 mt-1">Processing {progress.processed} / {progress.total} comments. Results will appear here automatically once analysis is complete.</p>
+                    </div>
+                </div>
             )}
 
             {/* QA Progress Bar */}
@@ -558,7 +539,7 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
                                                                 >
                                                                     {seg.is_verified
                                                                         ? <CheckCircle2 className="w-5 h-5" />
-                                                                        : <CheckCircle2 className="w-5 h-5" />
+                                                                        : <Circle className="w-5 h-5" />
                                                                     }
                                                                 </button>
                                                             </TooltipTrigger>

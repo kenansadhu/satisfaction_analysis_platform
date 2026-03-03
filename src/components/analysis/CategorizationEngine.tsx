@@ -24,6 +24,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     const [instructions, setInstructions] = useState<Instruction[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     const [totalComments, setTotalComments] = useState(0);
+    const [pendingComments, setPendingComments] = useState(0);
 
     // UI State
     const [newInstruction, setNewInstruction] = useState("");
@@ -35,6 +36,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
 
     const stopRef = useRef(false);
     const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+    const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
     const [instructionToDelete, setInstructionToDelete] = useState<number | null>(null);
 
     // Unsaved changes tracking
@@ -45,8 +47,14 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     const [newKeywordInputs, setNewKeywordInputs] = useState<Record<number, string>>({});
     const [movingKeyword, setMovingKeyword] = useState<{ catIdx: number; keyword: string } | null>(null);
 
+    const isMounted = useRef(true);
+
     useEffect(() => {
+        isMounted.current = true;
         loadData();
+        return () => {
+            isMounted.current = false;
+        };
     }, [unitId, surveyId]);
 
     // --- Unsaved Changes Warning ---
@@ -68,27 +76,28 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
 
     async function loadData() {
         const { data: unit } = await supabase.from('organization_units').select('name, description').eq('id', unitId).single();
+        if (!isMounted.current) return;
         if (unit) {
             setUnitName(unit.name);
             setUnitDescription(unit.description || "");
         }
 
         const { data: inst } = await supabase.from('unit_analysis_instructions').select('*').eq('unit_id', unitId).order('created_at');
+        if (!isMounted.current) return;
         if (inst) setInstructions(inst);
 
         const { data: cats } = await supabase.from('analysis_categories').select('*').eq('unit_id', unitId);
+        if (!isMounted.current) return;
         if (cats && cats.length > 0) {
             const loaded = cats.map(c => ({ name: c.name, description: c.description || "", keywords: [...new Set((c.keywords || []) as string[])] }));
             setCategories(loaded);
             setSavedSnapshot(JSON.stringify(loaded));
+        } else {
+            setCategories([]);
+            setSavedSnapshot("[]");
         }
 
-        // Count ALL qualitative comments for this unit (regardless of analysis status)
-        let query = supabase.from('raw_feedback_inputs')
-            .select('*', { count: 'exact', head: true })
-            .eq('target_unit_id', unitId)
-            .eq('is_quantitative', false);
-
+        // Count qualitative comments for this unit
         // Scope by survey if provided
         if (surveyId) {
             let respIds: number[] = [];
@@ -103,27 +112,55 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
 
             if (respIds.length > 0) {
                 let totalC = 0;
-                const CHUNK_SIZE = 400;
-                const promises = [];
+                let pendingC = 0;
+                const CHUNK_SIZE = 100;
+                const totalPromises = [];
+                const pendingPromises = [];
                 for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
                     const chunk = respIds.slice(i, i + CHUNK_SIZE);
-                    promises.push(
+                    totalPromises.push(
                         supabase.from('raw_feedback_inputs')
                             .select('*', { count: 'exact', head: true })
                             .eq('target_unit_id', unitId)
                             .eq('is_quantitative', false)
                             .in('respondent_id', chunk)
                     );
+                    pendingPromises.push(
+                        supabase.from('raw_feedback_inputs')
+                            .select('*', { count: 'exact', head: true })
+                            .eq('target_unit_id', unitId)
+                            .eq('is_quantitative', false)
+                            .eq('requires_analysis', true)
+                            .in('respondent_id', chunk)
+                    );
                 }
-                const results = await Promise.all(promises);
-                for (const res of results) totalC += (res.count || 0);
+                const [totalResults, pendingResults] = await Promise.all([
+                    Promise.all(totalPromises),
+                    Promise.all(pendingPromises)
+                ]);
+                if (!isMounted.current) return;
+                for (const res of totalResults) totalC += (res.count || 0);
+                for (const res of pendingResults) pendingC += (res.count || 0);
                 setTotalComments(totalC);
+                setPendingComments(pendingC);
             } else {
+                if (!isMounted.current) return;
                 setTotalComments(0);
+                setPendingComments(0);
             }
         } else {
-            const { count } = await query;
-            setTotalComments(count || 0);
+            const { count: total } = await supabase.from('raw_feedback_inputs')
+                .select('*', { count: 'exact', head: true })
+                .eq('target_unit_id', unitId)
+                .eq('is_quantitative', false);
+            const { count: pending } = await supabase.from('raw_feedback_inputs')
+                .select('*', { count: 'exact', head: true })
+                .eq('target_unit_id', unitId)
+                .eq('is_quantitative', false)
+                .eq('requires_analysis', true);
+            if (!isMounted.current) return;
+            setTotalComments(total || 0);
+            setPendingComments(pending || 0);
         }
     }
 
@@ -179,7 +216,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
             if (surveyId) {
                 let rPage = 0;
                 while (true) {
-                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
+                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).order('id').range(rPage * 1000, (rPage + 1) * 1000 - 1);
                     if (!rBat || rBat.length === 0) break;
                     respIds.push(...rBat.map((r: any) => r.id));
                     if (rBat.length < 1000) break;
@@ -188,7 +225,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
             }
 
             if (surveyId && respIds.length > 0) {
-                const CHUNK_SIZE = 400;
+                const CHUNK_SIZE = 100;
                 const fetchPromises = [];
                 for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
                     const chunk = respIds.slice(i, i + CHUNK_SIZE);
@@ -197,7 +234,6 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                             .select('id, raw_text')
                             .eq('target_unit_id', unitId)
                             .eq('is_quantitative', false)
-                            .eq('requires_analysis', true)
                             .in('respondent_id', chunk)
                     );
                 }
@@ -212,7 +248,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                         .select('id, raw_text')
                         .eq('target_unit_id', unitId)
                         .eq('is_quantitative', false)
-                        .eq('requires_analysis', true);
+                        .order('id');
 
                     const { data, error } = await query.range(page * DB_BATCH, (page + 1) * DB_BATCH - 1);
 
@@ -260,13 +296,27 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
 
                 const result = await response.json();
                 if (result.categories && Array.isArray(result.categories)) {
-                    const sanitized = result.categories.map((c: any) => ({
-                        name: typeof c.name === 'string' ? c.name : "Unnamed Category",
-                        description: typeof c.description === 'string' ? c.description : "",
-                        keywords: Array.isArray(c.keywords) ? [...new Set(c.keywords)] : []
-                    }));
+                    const sanitized = result.categories
+                        .filter((c: any) => {
+                            const n = (c.name || "").toLowerCase();
+                            // Do not keep AI's versions of mandatory categories to prevent duplicates
+                            return !MANDATORY_CATEGORIES.some(mc => {
+                                const mcn = mc.name.toLowerCase();
+                                return n === mcn ||
+                                    n === mcn.replace("&", "and") ||
+                                    n.includes("others") ||
+                                    n.includes("service & response") ||
+                                    n.includes("service and response") ||
+                                    n.includes("staff service");
+                            });
+                        })
+                        .map((c: any) => ({
+                            name: typeof c.name === 'string' ? c.name : "Unnamed Category",
+                            description: typeof c.description === 'string' ? c.description : "",
+                            keywords: Array.isArray(c.keywords) ? [...new Set(c.keywords)] : []
+                        }));
 
-                    // Ensure mandatory categories are still present after AI processing
+                    // Ensure perfect mandatory categories are still present after AI processing
                     for (const mc of MANDATORY_CATEGORIES) {
                         if (!sanitized.some((c: Category) => c.name.toLowerCase() === mc.name.toLowerCase())) {
                             sanitized.push({ ...mc });
@@ -288,59 +338,31 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     };
 
     const saveTaxonomy = async () => {
-        // 1. Get ALL relevant raw feedback input IDs first
-        let respIds: number[] = [];
-        if (surveyId) {
-            let rPage = 0;
-            while (true) {
-                const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                if (!rBat || rBat.length === 0) break;
-                respIds.push(...rBat.map((r: any) => r.id));
-                if (rBat.length < 1000) break;
-                rPage++;
+        // 1. To completely replace the taxonomy for this unit, we MUST delete any existing
+        // feedback_segments that reference the old categories to avoid Foreign Key constraint 
+        // violations when we delete the old categories.
+
+        const { data: oldCats } = await supabase.from('analysis_categories').select('id').eq('unit_id', unitId);
+        if (oldCats && oldCats.length > 0) {
+            const catIds = oldCats.map(c => c.id);
+            const { error: delSegError } = await supabase
+                .from('feedback_segments')
+                .delete()
+                .in('category_id', catIds);
+
+            if (delSegError) {
+                toast.error("Segment cleanup failed: " + delSegError.message);
+                return;
             }
         }
 
-        let inputIds: number[] = [];
-        if (surveyId && respIds.length > 0) {
-            const CHUNK_SIZE = 400;
-            const promises = [];
-            for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
-                promises.push(
-                    supabase.from('raw_feedback_inputs')
-                        .select('id')
-                        .eq('target_unit_id', unitId)
-                        .in('respondent_id', respIds.slice(i, i + CHUNK_SIZE))
-                );
-            }
-            const results = await Promise.all(promises);
-            for (const res of results) {
-                if (res.data) inputIds.push(...res.data.map((r: any) => r.id));
-            }
-        } else if (!surveyId) {
-            const { data } = await supabase.from('raw_feedback_inputs').select('id').eq('target_unit_id', unitId);
-            if (data) inputIds.push(...data.map((r: any) => r.id));
+        // 2. Clear old categories safely now that segments are gone
+        const { error: catDeleteError } = await supabase.from('analysis_categories').delete().eq('unit_id', unitId);
+
+        if (catDeleteError) {
+            toast.error("Failed to delete old categories: " + catDeleteError.message);
+            return;
         }
-
-        // 2. Clear existing segments in batches by Input ID
-        if (inputIds.length > 0) {
-            const SEGMENT_BATCH = 1000;
-            for (let i = 0; i < inputIds.length; i += SEGMENT_BATCH) {
-                const batchIds = inputIds.slice(i, i + SEGMENT_BATCH);
-                const { error: delError } = await supabase
-                    .from('feedback_segments')
-                    .delete()
-                    .in('raw_input_id', batchIds);
-
-                if (delError) {
-                    toast.error("Partial cleanup failed: " + delError.message);
-                    return;
-                }
-            }
-        }
-
-        // 3. Clear old categories
-        await supabase.from('analysis_categories').delete().eq('unit_id', unitId);
 
         const payload = categories.map(c => ({
             unit_id: unitId,
@@ -359,6 +381,57 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
             toast.error("Save failed: " + error.message);
         }
         setShowSaveConfirm(false);
+    };
+
+    const confirmDeleteAllAndSave = async () => {
+        const justMandatory = MANDATORY_CATEGORIES.map(mc => ({ ...mc }));
+        setCategories(justMandatory);
+        markDirty();
+
+        // We cannot rely on the 'categories' state being updated immediately in saveTaxonomy,
+        // so we manually perform the save logic here using justMandatory.
+
+        // 1. Clear existing segments related to old categories
+        const { data: oldCats } = await supabase.from('analysis_categories').select('id').eq('unit_id', unitId);
+        if (oldCats && oldCats.length > 0) {
+            const catIds = oldCats.map(c => c.id);
+            const { error: delSegError } = await supabase
+                .from('feedback_segments')
+                .delete()
+                .in('category_id', catIds);
+
+            if (delSegError) {
+                toast.error("Segment cleanup failed: " + delSegError.message);
+                return;
+            }
+        }
+
+        // 2. Clear old categories safely
+        const { error: catDeleteError } = await supabase.from('analysis_categories').delete().eq('unit_id', unitId);
+
+        if (catDeleteError) {
+            toast.error("Failed to delete old categories: " + catDeleteError.message);
+            return;
+        }
+
+        // 3. Insert only mandatory categories
+        const payload = justMandatory.map(c => ({
+            unit_id: unitId,
+            name: c.name,
+            description: c.description,
+            keywords: c.keywords
+        }));
+
+        const { error } = await supabase.from('analysis_categories').insert(payload);
+        if (!error) {
+            toast.success("All non-mandatory categories deleted successfully!");
+            setHasUnsavedChanges(false);
+            setSavedSnapshot(JSON.stringify(justMandatory));
+            if (onDataChange) onDataChange();
+        } else {
+            toast.error("Save failed: " + error.message);
+        }
+        setShowDeleteAllConfirm(false);
     };
 
     // --- Category editing helpers ---
@@ -410,10 +483,20 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
         markDirty();
     };
 
-    // --- Save Button Component (reused top and bottom) ---
+    // --- Save & Delete Button Components ---
     const SaveButton = () => (
         <Button onClick={() => setShowSaveConfirm(true)} className="bg-green-600 hover:bg-green-700 shadow-sm">
             <Save className="w-4 h-4 mr-2" /> Save Taxonomy
+        </Button>
+    );
+
+    const DeleteAllButton = () => (
+        <Button
+            variant="destructive"
+            onClick={() => setShowDeleteAllConfirm(true)}
+            className="shadow-sm"
+        >
+            <Trash2 className="w-4 h-4 mr-2" /> Delete All
         </Button>
     );
 
@@ -519,7 +602,10 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                             <CardTitle className="text-lg flex items-center gap-2 text-green-900"><CheckCircle2 className="w-5 h-5" /> 3. Review Taxonomy</CardTitle>
                             <CardDescription>Found {categories.length} categories. Edit before saving.</CardDescription>
                         </div>
-                        <SaveButton />
+                        <div className="flex gap-2">
+                            <DeleteAllButton />
+                            <SaveButton />
+                        </div>
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {categories.map((cat, idx) => {
@@ -544,6 +630,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                                                 value={cat.name}
                                                 onChange={(e) => updateCategoryField(idx, 'name', e.target.value)}
                                                 className="font-bold border-none p-0 h-auto text-lg focus-visible:ring-0"
+                                                readOnly={mandatory}
                                             />
                                         </div>
                                         {!mandatory && (
@@ -652,7 +739,8 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                             <Plus className="w-8 h-8" /> Add Manual Category
                         </Button>
                     </CardContent>
-                    <CardFooter className="flex justify-end border-t pt-4">
+                    <CardFooter className="flex justify-between border-t pt-4">
+                        <DeleteAllButton />
                         <SaveButton />
                     </CardFooter>
                 </Card>
@@ -666,6 +754,16 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                 description="This will overwrite existing categories for this unit and clear previous analysis results. You can still edit them later. Continue?"
                 confirmLabel="Save"
                 onConfirm={saveTaxonomy}
+            />
+
+            <ConfirmDialog
+                open={showDeleteAllConfirm}
+                onOpenChange={setShowDeleteAllConfirm}
+                title="Delete All Non-Mandatory Categories?"
+                description="This will instantly wipe out all your custom categories and clear previous analysis results for this unit. This action is irreversible. Continue?"
+                confirmLabel="Delete All & Save"
+                variant="destructive"
+                onConfirm={confirmDeleteAllAndSave}
             />
 
             <ConfirmDialog

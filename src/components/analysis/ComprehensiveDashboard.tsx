@@ -12,6 +12,7 @@ import { Loader2, TrendingUp, AlertTriangle, Lightbulb, Filter, Sparkles, Refres
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import { toast } from "sonner";
 import UnitInsightChat from "./UnitInsightChat";
+import { useAnalysis } from "@/context/AnalysisContext";
 
 // --- TYPES ---
 type ChartData = { name: string; value: number; color?: string };
@@ -39,6 +40,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     const [exportingPdf, setExportingPdf] = useState(false);
     const { theme, systemTheme } = useTheme();
     const isDark = theme === "dark" || (theme === "system" && systemTheme === "dark");
+    const { isAnalyzing, currentUnitId, progress: analysisProgress } = useAnalysis();
+    const isCurrentlyAnalyzing = isAnalyzing && currentUnitId === unitId;
 
     const [baseRawInputs, setBaseRawInputs] = useState<any[]>([]);
     const [baseScores, setBaseScores] = useState<any[]>([]);
@@ -92,9 +95,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     const RAW_PAGE_SIZE = 25;
 
     useEffect(() => {
+        // Don't load data while analysis is running
+        if (isCurrentlyAnalyzing) return;
         fetchRawData();
         loadSavedReport();
-    }, [unitId, surveyId]);
+    }, [unitId, surveyId, isCurrentlyAnalyzing]);
 
     useEffect(() => {
         if (!baseRawInputs.length && !baseScores.length && !baseCatScores.length) return;
@@ -112,11 +117,14 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         const { data } = await supabase.from('unit_ai_reports').select('content, created_at').eq('unit_id', unitId).eq('report_type', 'executive').maybeSingle();
         if (data) {
             const saved = data.content.report;
-            // Support both old (string) and new (object) format
-            if (typeof saved === 'object' && saved.executive_summary) {
-                setReport(saved);
+            const savedSurveyId = data.content.survey_id;
+            // Only show report if it matches the current survey (or no survey filter)
+            if (!surveyId || !savedSurveyId || savedSurveyId === surveyId) {
+                if (typeof saved === 'object' && saved.executive_summary) {
+                    setReport(saved);
+                }
+                setLastSaved(new Date(data.created_at).toLocaleString());
             }
-            setLastSaved(new Date(data.created_at).toLocaleString());
         }
     }
 
@@ -154,7 +162,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             // 3. Chunked fetch helper — uses respondent IDs to leverage composite index
             // Chunk size 50: keeps URL under Supabase REST API length limit 
             // (300 IDs × URL encoding = too long, causes 500 errors)
-            const CHUNK = 50;
+            const CHUNK = 200;
             const fetchByRespondentChunks = async (
                 select: string,
                 filterFn: (q: any) => any
@@ -523,7 +531,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             if (data.report) {
                 setReport(data.report as ExecutiveReportData);
                 await supabase.from('unit_ai_reports').upsert(
-                    { unit_id: unitId, report_type: 'executive', content: { report: data.report } },
+                    { unit_id: unitId, report_type: 'executive', content: { report: data.report, survey_id: surveyId } },
                     { onConflict: 'unit_id,report_type' }
                 );
                 setLastSaved(new Date().toLocaleString());
@@ -579,6 +587,14 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             window.print();
         }, 500);
     };
+
+    if (isCurrentlyAnalyzing) return (
+        <div className="flex flex-col items-center justify-center py-20 space-y-4">
+            <Loader2 className="w-10 h-10 animate-spin text-indigo-600" />
+            <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-200">Analysis In Progress ({analysisProgress.percentage}%)</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Processing {analysisProgress.processed} / {analysisProgress.total} comments. Insights will load automatically once complete.</p>
+        </div>
+    );
 
     if (loading) return <div className="flex justify-center py-20 text-slate-400"><Loader2 className="w-8 h-8 animate-spin mr-2" /> Loading Analysis...</div>;
 
@@ -727,7 +743,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 {/* Hot Spot */}
                 <Card className="border-red-100 dark:border-red-900/30 shadow-md bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors print:break-inside-avoid">
                     <CardHeader className="pb-2"><CardDescription className="font-medium text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Top Issue</CardDescription><CardTitle className="text-2xl font-bold text-red-900 dark:text-red-200 leading-tight md:text-xl line-clamp-2">{topNegativeCategory.name}</CardTitle></CardHeader>
-                    <CardContent><div className="text-xs text-red-700 dark:text-red-400/80"><strong>{topNegativeCategory.count}</strong> negative comments {totalSegments > 0 && <span className="text-red-500 dark:text-red-500/70">({Math.round(topNegativeCategory.count / sentimentCounts.Negative * 100)}% of all negatives)</span>}</div></CardContent>
+                    <CardContent><div className="text-xs text-red-700 dark:text-red-400/80"><strong>{topNegativeCategory.count}</strong> negative comments {sentimentCounts.Negative > 0 && <span className="text-red-500 dark:text-red-500/70">({Math.round(topNegativeCategory.count / sentimentCounts.Negative * 100)}% of all negatives)</span>}</div></CardContent>
                 </Card>
             </div>
 
