@@ -316,6 +316,8 @@ INSTITUTION_NAME=              # Optional: defaults to "the institution"
 
 | Date | What Changed | Files Modified |
 |------|-------------|----------------|
+| 2026-03-04 | Added `survey_quant_cache` table for precomputed satisfaction scores. Report API uses lazy cache: instant on cache hit, computes + stores on miss. Load time: ~2min → 6s. Added cache management endpoint | `api/executive/report/route.ts`, `api/executive/cache-scores/route.ts` [NEW], `survey_quant_cache` [NEW TABLE] |
+| 2026-03-04 | Fixed Report tab N/A ratings (RPC timeout) and wrong score calculation. Matched ComprehensiveDashboard logic: group by `source_column`, exclude binary columns. Added retry logic for intermittent metrics 500 | `api/executive/report/route.ts`, `api/executive/metrics/route.ts` |
 | 2026-03-03 | Fixed verification stats showing 0: merged stats into loadData, fixed race condition with wasAnalyzingRef, removed broken loadVerificationStats | `DataBrowser.tsx` |
 | 2026-03-03 | Round 2: removed pending text from Tab 1, fixed progress > total, wait overlays for Tabs 3&4, fixed reset truncating at 500 respondents | `CategorizationEngine.tsx`, `AnalysisContext.tsx`, `DataBrowser.tsx`, `ComprehensiveDashboard.tsx` |
 | 2026-03-03 | Fixed 11 bugs across unit analysis flow: mandatory cat duplication, comment count mismatch, skipIds infinite loop, audit auto-refresh, division by zero, fetch chunk size, report survey scoping, verified icons, dead code, mandatory name protection | `CategorizationEngine.tsx`, `AnalysisEngine.tsx`, `DataBrowser.tsx`, `ComprehensiveDashboard.tsx`, `process-queue/route.ts` |

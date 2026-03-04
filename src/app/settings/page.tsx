@@ -1,15 +1,64 @@
 "use client";
 
+import { useState } from "react";
 import { useActiveSurvey, SurveyInfo } from "@/context/SurveyContext";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, CheckCircle2, AlertCircle } from "lucide-react";
-import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export default function SettingsPage() {
     const { surveys, activeSurveyId, setActiveSurveyId, activeSurvey, loading } = useActiveSurvey();
+
+    // Confirmation dialog state
+    const [confirmSurvey, setConfirmSurvey] = useState<SurveyInfo | null>(null);
+
+    // Cache clearing state
+    const [clearingCache, setClearingCache] = useState(false);
+
+    const handleSurveyClick = (survey: SurveyInfo) => {
+        if (survey.id.toString() === activeSurveyId) return; // Already active
+        setConfirmSurvey(survey);
+    };
+
+    const confirmSurveySwitch = () => {
+        if (confirmSurvey) {
+            setActiveSurveyId(confirmSurvey.id.toString());
+            toast.success(`Active survey changed to "${confirmSurvey.title}"`);
+            setConfirmSurvey(null);
+        }
+    };
+
+    const handleClearCache = async () => {
+        if (!activeSurveyId) return;
+        setClearingCache(true);
+        try {
+            const res = await fetch(`/api/executive/cache-scores?surveyId=${activeSurveyId}`, {
+                method: 'POST',
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast.success("Score cache cleared. Next executive report load will recompute scores.");
+            } else {
+                toast.error(data.error || "Failed to clear cache");
+            }
+        } catch {
+            toast.error("Failed to clear cache");
+        } finally {
+            setClearingCache(false);
+        }
+    };
 
     if (loading) return (
         <PageShell>
@@ -73,7 +122,7 @@ export default function SettingsPage() {
                             {surveys.map(s => (
                                 <button
                                     key={s.id}
-                                    onClick={() => setActiveSurveyId(s.id.toString())}
+                                    onClick={() => handleSurveyClick(s)}
                                     className={cn(
                                         "w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all duration-200 text-left group",
                                         s.id.toString() === activeSurveyId
@@ -113,6 +162,41 @@ export default function SettingsPage() {
                     </CardContent>
                 </Card>
 
+                {/* Cache Management Card */}
+                <Card>
+                    <CardHeader>
+                        <div className="flex items-center gap-2">
+                            <RefreshCcw className="w-5 h-5 text-slate-500" />
+                            <CardTitle className="text-lg">Score Cache</CardTitle>
+                        </div>
+                        <CardDescription>
+                            Quantitative satisfaction scores are cached for faster loading. Clear the cache if you re-imported survey data.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <div>
+                                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                    Clear cache for {activeSurvey?.title || "active survey"}
+                                </p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                    Next executive report load will recompute and re-cache scores
+                                </p>
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleClearCache}
+                                disabled={clearingCache || !activeSurveyId}
+                                className="gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
+                            >
+                                {clearingCache ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                Clear Cache
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
                 {/* Placeholder for future settings */}
                 <Card>
                     <CardHeader>
@@ -121,6 +205,43 @@ export default function SettingsPage() {
                     </CardHeader>
                 </Card>
             </div>
+
+            {/* Survey Switch Confirmation Dialog */}
+            <Dialog open={!!confirmSurvey} onOpenChange={(open) => { if (!open) setConfirmSurvey(null); }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Change Active Survey?</DialogTitle>
+                        <DialogDescription>
+                            Switching the active survey will change the data displayed across <strong>all pages</strong> —
+                            dashboards, charts, analysis, and executive reports will reload with data from the new survey.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {confirmSurvey && (
+                        <div className="py-3">
+                            <div className="flex items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-950/20 rounded-lg border border-indigo-200 dark:border-indigo-800/40">
+                                <div className="w-3 h-3 rounded-full bg-indigo-500 ring-4 ring-indigo-500/20" />
+                                <div>
+                                    <p className="font-semibold text-sm text-indigo-700 dark:text-indigo-300">
+                                        {confirmSurvey.title}
+                                        {confirmSurvey.year && <span className="text-xs font-normal text-slate-400 ml-2">({confirmSurvey.year})</span>}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-0.5">
+                                        {confirmSurvey.hasData ? "✅ Data is ready" : "⚠️ No analyzed data yet"}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button variant="outline" onClick={() => setConfirmSurvey(null)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={confirmSurveySwitch} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                            Confirm Switch
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </PageShell>
     );
 }

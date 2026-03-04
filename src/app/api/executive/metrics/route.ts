@@ -16,13 +16,22 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: "Failed to fetch top-level units" }, { status: 500 });
         }
 
-        // 2. Use the working qual RPC to get sentiment counts per unit
-        const { data: qualAgg, error: qualErr } = await supabase.rpc('get_qual_summary_by_unit', {
-            p_survey_id: surveyId ? parseInt(surveyId) : null
-        });
+        // 2. Use the working qual RPC to get sentiment counts per unit (with retry for intermittent timeouts)
+        let qualAgg: any[] | null = null;
+        let qualErr: any = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const result = await supabase.rpc('get_qual_summary_by_unit', {
+                p_survey_id: surveyId ? parseInt(surveyId) : null
+            });
+            qualAgg = result.data;
+            qualErr = result.error;
+            if (!qualErr) break;
+            console.warn(`[metrics] qual RPC attempt ${attempt + 1} failed: ${qualErr.message}`);
+            if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+        }
 
         if (qualErr) {
-            console.error("Qual RPC Error:", qualErr);
+            console.error("Qual RPC Error after retries:", qualErr);
             return NextResponse.json({ error: "Failed to fetch aggregated metrics" }, { status: 500 });
         }
 

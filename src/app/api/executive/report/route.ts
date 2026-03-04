@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from "@/lib/supabase";
 
 // Helper: paginate through all rows (Supabase default limit = 1000)
 async function fetchAll(queryFactory: () => any, label?: string): Promise<any[]> {
@@ -92,35 +87,134 @@ export async function GET(req: NextRequest) {
         .select('id, name, short_name')
         .order('name');
 
-    // 5. Aggregated data via lightweight RPCs (SQL aggregation, not row-by-row fetching)
-    // 5a. Quantitative scores: AVG + COUNT grouped by unit × campus (~50 rows)
-    const { data: quantAgg, error: quantErr } = await supabase.rpc('get_quant_scores_by_unit_campus', {
-        p_survey_id: parseInt(surveyId),
-    });
-    if (quantErr) console.error('[quant RPC] error:', quantErr.message);
-    console.log(`[report] quant RPC returned ${quantAgg?.length ?? 'null'} rows`, quantErr ? `ERROR: ${quantErr.message}` : '');
+    // 5. Aggregated data
+    // 5a. Quantitative scores — with lazy caching (scores are immutable after import)
+    const respIds = respList.map((r: any) => r.id);
+    const respLocationMap = new Map<number, string>();
+    respList.forEach((r: any) => respLocationMap.set(r.id, r.location || "Unknown"));
 
     type ScoreEntry = { avg: number; count: number };
     const unitScores = new Map<number, Map<string, ScoreEntry>>();
     const unitOverall = new Map<number, { sum: number; count: number }>();
     const campusScoreAccum = new Map<string, { avg: number; count: number }>();
 
-    for (const row of (quantAgg || [])) {
-        const unitId = row.target_unit_id;
-        const campus = row.campus || "Unknown";
-        const avg = parseFloat(row.avg_score);
-        const count = parseInt(row.score_count);
+    // Try cache first
+    const { data: cachedScores } = await supabase
+        .from('survey_quant_cache')
+        .select('unit_id, campus, avg_score, score_count')
+        .eq('survey_id', parseInt(surveyId));
 
-        // Per campus
-        if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
-        unitScores.get(unitId)!.set(campus, { avg, count });
-        campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
+    if (cachedScores && cachedScores.length > 0) {
+        // Cache hit — populate maps from cache (~40-60 rows, instant)
+        for (const row of cachedScores) {
+            const unitId = row.unit_id;
+            const campus = row.campus;
+            const avg = parseFloat(row.avg_score);
+            const count = row.score_count;
 
-        // Overall accumulation
-        if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
-        const overall = unitOverall.get(unitId)!;
-        overall.sum += avg * count;
-        overall.count += count;
+            if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
+            unitScores.get(unitId)!.set(campus, { avg, count });
+            campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
+
+            if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
+            const overall = unitOverall.get(unitId)!;
+            overall.sum += avg * count;
+            overall.count += count;
+        }
+    } else {
+        // Cache miss — compute from raw data, then store
+        // Uses same approach as ComprehensiveDashboard: group by source_column,
+        // exclude binary (0/1) columns by checking max value.
+        type ColumnAccum = {
+            maxScore: number;
+            campusData: Map<string, { sum: number; count: number }>;
+        };
+        const unitColumnAccum = new Map<number, Map<string, ColumnAccum>>();
+
+        const CHUNK = 400;
+        for (let i = 0; i < respIds.length; i += CHUNK) {
+            const chunk = respIds.slice(i, i + CHUNK);
+            const rows = await fetchAll(() =>
+                supabase.from('raw_feedback_inputs')
+                    .select('respondent_id, target_unit_id, source_column, numerical_score')
+                    .in('respondent_id', chunk)
+                    .eq('is_quantitative', true)
+                    .not('numerical_score', 'is', null),
+                'quant-scores'
+            );
+            for (const row of rows) {
+                const unitId = row.target_unit_id;
+                if (!unitId) continue;
+                const score = parseFloat(row.numerical_score);
+                if (isNaN(score)) continue;
+                const col = row.source_column || '_default';
+                const campus = respLocationMap.get(row.respondent_id) || "Unknown";
+
+                if (!unitColumnAccum.has(unitId)) unitColumnAccum.set(unitId, new Map());
+                const colMap = unitColumnAccum.get(unitId)!;
+                if (!colMap.has(col)) colMap.set(col, { maxScore: 0, campusData: new Map() });
+                const colAcc = colMap.get(col)!;
+                if (score > colAcc.maxScore) colAcc.maxScore = score;
+
+                if (!colAcc.campusData.has(campus)) colAcc.campusData.set(campus, { sum: 0, count: 0 });
+                const entry = colAcc.campusData.get(campus)!;
+                entry.sum += score;
+                entry.count += 1;
+            }
+        }
+
+        // Phase 2: Aggregate, excluding binary (0/1) columns
+        for (const [unitId, colMap] of unitColumnAccum) {
+            for (const [_col, colAcc] of colMap) {
+                if (colAcc.maxScore <= 1) continue;
+
+                if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
+                for (const [campus, data] of colAcc.campusData) {
+                    if (!unitScores.get(unitId)!.has(campus)) {
+                        unitScores.get(unitId)!.set(campus, { avg: 0, count: 0 });
+                    }
+                    const existing = unitScores.get(unitId)!.get(campus)!;
+                    const newCount = existing.count + data.count;
+                    existing.avg = (existing.avg * existing.count + data.sum) / newCount;
+                    existing.count = newCount;
+
+                    campusScoreAccum.set(`${unitId}__${campus}`, unitScores.get(unitId)!.get(campus)!);
+                    if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
+                }
+            }
+        }
+
+        // Recompute unitOverall from unitScores
+        for (const [unitId, campusMap] of unitScores) {
+            let sum = 0, count = 0;
+            for (const [_, entry] of campusMap) {
+                sum += entry.avg * entry.count;
+                count += entry.count;
+            }
+            unitOverall.set(unitId, { sum, count });
+        }
+
+        // Store to cache (fire-and-forget, don't block response)
+        const cacheRows: any[] = [];
+        for (const [unitId, campusMap] of unitScores) {
+            for (const [campus, entry] of campusMap) {
+                cacheRows.push({
+                    survey_id: parseInt(surveyId),
+                    unit_id: unitId,
+                    campus,
+                    avg_score: parseFloat(entry.avg.toFixed(3)),
+                    score_count: entry.count,
+                });
+            }
+        }
+        if (cacheRows.length > 0) {
+            supabase.from('survey_quant_cache')
+                .upsert(cacheRows, { onConflict: 'survey_id,unit_id,campus' })
+                .then(({ error }) => {
+                    if (error) console.error('[cache] write error:', error.message);
+                    else console.log(`[cache] wrote ${cacheRows.length} rows for survey ${surveyId}`);
+                });
+        }
     }
 
     // 5b. Qualitative summary: COUNT grouped by unit × category × sentiment (~200 rows)
@@ -128,7 +222,6 @@ export async function GET(req: NextRequest) {
         p_survey_id: parseInt(surveyId),
     });
     if (qualErr) console.error('[qual RPC] error:', qualErr.message);
-    console.log(`[report] qual RPC returned ${qualAgg?.length ?? 'null'} rows`, qualErr ? `ERROR: ${qualErr.message}` : '');
 
     // 6. Categories lookup
     const { data: categories } = await supabase
