@@ -33,12 +33,6 @@ export default function SurveyDetailPage() {
     const [unitStats, setUnitStats] = useState<UnitStat[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Data Hygiene State
-    const [invalidCount, setInvalidCount] = useState(0);
-    const [scoreCount, setScoreCount] = useState(0);
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [processStatus, setProcessStatus] = useState("");
-
     // Global Analysis State
     const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false);
     const [isAnalyzingGlobal, setIsAnalyzingGlobal] = useState(false);
@@ -53,10 +47,9 @@ export default function SurveyDetailPage() {
     async function loadSurveyData() {
         setIsLoading(true);
 
-        // === PHASE 1: Get survey info, respondent count, and units (all fast) ===
-        const [surveyRes, respCountRes, unitsRes] = await Promise.all([
+        // === PHASE 1: Get survey info and ALL respondent IDs (paginated) ===
+        const [surveyRes, unitsRes] = await Promise.all([
             supabase.from('surveys').select('title, year').eq('id', surveyId).single(),
-            supabase.from('respondents').select('*', { count: 'exact', head: true }).eq('survey_id', surveyId),
             supabase.from('organization_units').select('id, name, description').order('name'),
         ]);
 
@@ -64,152 +57,105 @@ export default function SurveyDetailPage() {
             setSurveyTitle(surveyRes.data.title);
             setSurveyYear(surveyRes.data.year || null);
         }
-        setTotalRespondents(respCountRes.count || 0);
 
-        // === PHASE 2: Single RPC — one scan of raw_feedback_inputs ===
-        const { data: rows, error: countErr } = await supabase.rpc('get_survey_detail_counts_v2', {
-            p_survey_id: parseInt(surveyId),
-        });
-        if (countErr) console.error('[survey detail counts] error:', countErr.message);
+        let allRespIds: string[] = [];
+        let hasMoreResps = true;
+        let page = 0;
+        const PAGE_SIZE = 1000;
 
-        // Aggregate: per-unit rows → global totals + per-unit maps
-        let totalDP = 0, invalidTotal = 0, scoreTotal = 0;
+        while (hasMoreResps) {
+            const { data, error } = await supabase
+                .from('respondents')
+                .select('id')
+                .eq('survey_id', surveyId)
+                .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+            if (error) {
+                console.error("Error fetching respondents page:", error);
+                break;
+            }
+
+            if (data && data.length > 0) {
+                allRespIds = [...allRespIds, ...data.map(r => r.id)];
+                hasMoreResps = data.length === PAGE_SIZE;
+                page++;
+            } else {
+                hasMoreResps = false;
+            }
+        }
+
+        setTotalRespondents(allRespIds.length);
+        const respIds = allRespIds;
+
+        // === PHASE 2: Controlled Parallel Aggregation — Speed + Safety ===
+        let totalDP = 0;
+        const totalByUnit = new Map<number, number>();
         const commentsByUnit = new Map<number, number>();
         const analyzedByUnit = new Map<number, number>();
 
-        for (const row of (rows || [])) {
-            totalDP += parseInt(row.total_count) || 0;
-            invalidTotal += parseInt(row.invalid_count) || 0;
-            scoreTotal += parseInt(row.scorelike_count) || 0;
-            commentsByUnit.set(row.out_unit_id, parseInt(row.comment_count) || 0);
-            analyzedByUnit.set(row.out_unit_id, parseInt(row.analyzed_count) || 0);
+        const AGG_CHUNK = 250;
+        const CONCURRENCY_LIMIT = 5; // Fetch up to 5 chunks in parallel at once
+
+        for (let i = 0; i < respIds.length; i += AGG_CHUNK * CONCURRENCY_LIMIT) {
+            const batchPromises = [];
+            for (let j = 0; j < CONCURRENCY_LIMIT; j++) {
+                const start = i + (j * AGG_CHUNK);
+                if (start >= respIds.length) break;
+                const chunk = respIds.slice(start, start + AGG_CHUNK);
+                batchPromises.push(
+                    supabase.rpc('get_respondent_group_counts', {
+                        p_respondent_ids: chunk
+                    })
+                );
+            }
+
+            const results = await Promise.all(batchPromises);
+
+            for (const { data: rows, error: batchErr } of results) {
+                if (batchErr) {
+                    console.warn(`[survey detail counts] Aggregation batch failed:`, batchErr.message);
+                    continue;
+                }
+
+                for (const row of (rows || [])) {
+                    const uId = parseInt(row.out_unit_id);
+                    const tCount = parseInt(row.total_count) || 0;
+                    const cCount = parseInt(row.comment_count) || 0;
+                    const aCount = parseInt(row.analyzed_count) || 0;
+
+                    totalDP += tCount;
+                    totalByUnit.set(uId, (totalByUnit.get(uId) || 0) + tCount);
+                    commentsByUnit.set(uId, (commentsByUnit.get(uId) || 0) + cCount);
+                    analyzedByUnit.set(uId, (analyzedByUnit.get(uId) || 0) + aCount);
+                }
+            }
         }
 
         setTotalDataPoints(totalDP);
-        setInvalidCount(invalidTotal);
-        setScoreCount(scoreTotal);
 
         const units = unitsRes.data;
         if (units) {
-            const stats = units.map(unit => {
+            const stats = units.map((unit: { id: number; name: string; description: string | null }) => {
                 const commentCount = commentsByUnit.get(unit.id) || 0;
-                const analyzedCount = Math.min(analyzedByUnit.get(unit.id) || 0, commentCount);
+                const analyzedCount = analyzedByUnit.get(unit.id) || 0;
                 return {
                     unit_id: unit.id,
                     unit_name: unit.name,
-                    unit_desc: unit.description,
+                    unit_desc: unit.description || undefined,
                     comment_count: commentCount,
                     analyzed_count: analyzedCount,
                 };
             });
 
-            const validStats = stats.filter(s => s.comment_count > 0).sort((a, b) => a.unit_name.localeCompare(b.unit_name));
-            setUnitStats(validStats);
+            // Show units that have at least one total data point
+            const sortedStats = stats
+                .filter(s => (totalByUnit.get(s.unit_id) || 0) > 0)
+                .sort((a: UnitStat, b: UnitStat) => a.unit_name.localeCompare(b.unit_name));
+
+            setUnitStats(sortedStats);
         }
         setIsLoading(false);
     }
-
-    const [confirmAction, setConfirmAction] = useState<"deleteInvalid" | "archiveScores" | null>(null);
-
-    // --- CLEANUP FUNCTIONS ---
-    const handleDeleteInvalid = async () => {
-        setConfirmAction(null);
-        setIsProcessing(true);
-        try {
-            let processed = 0;
-            const CHUNK_SIZE = 100;
-
-            // Pre-fetch respondent IDs for this survey (fast)
-            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
-            const respIds = (resps || []).map((r: any) => r.id);
-
-            for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
-                const chunk = respIds.slice(i, i + CHUNK_SIZE);
-
-                // 1. Fetch a batch of INVALID IDs scoped to this chunk
-                const { data: invalidItems, error: fetchError } = await supabase
-                    .from('raw_feedback_inputs')
-                    .select('id')
-                    .in('respondent_id', chunk)
-                    .or('raw_text.eq.-,raw_text.eq.N/A,raw_text.eq.nan,raw_text.eq.Nilai,raw_text.is.null');
-
-                if (fetchError) throw fetchError;
-
-                if (invalidItems && invalidItems.length > 0) {
-                    // 2. Delete this batch
-                    const idsToDelete = invalidItems.map(i => i.id);
-                    setProcessStatus(`Deleting batch of ${idsToDelete.length} (Total: ${processed.toLocaleString()})...`);
-
-                    const { error: deleteError } = await supabase
-                        .from('raw_feedback_inputs')
-                        .delete()
-                        .in('id', idsToDelete);
-
-                    if (deleteError) throw deleteError;
-
-                    processed += idsToDelete.length;
-                }
-            }
-
-            toast.success(`Cleanup Complete! Removed ${processed.toLocaleString()} invalid entries.`);
-            await loadSurveyData(); // Refresh counts from server
-        } catch (e: any) {
-            toast.error("Error cleaning data: " + e.message);
-        } finally {
-            setIsProcessing(false);
-            setProcessStatus("");
-        }
-    };
-
-    const handleArchiveScores = async () => {
-        setConfirmAction(null);
-        setIsProcessing(true);
-        try {
-            let processed = 0;
-            const CHUNK_SIZE = 100;
-
-            // Pre-fetch respondent IDs for this survey (fast)
-            const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
-            const respIds = (resps || []).map((r: any) => r.id);
-
-            for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
-                const chunk = respIds.slice(i, i + CHUNK_SIZE);
-
-                // 1. Fetch a batch of SCORE-LIKE IDs in chunk
-                const { data: scoreItems, error: fetchError } = await supabase
-                    .from('raw_feedback_inputs')
-                    .select('id')
-                    .in('respondent_id', chunk)
-                    .eq('is_quantitative', false)
-                    .or('raw_text.like._ = %,raw_text.like.NA = %,raw_text.eq.Ya,raw_text.eq.Tidak');
-
-                if (fetchError) throw fetchError;
-
-                if (scoreItems && scoreItems.length > 0) {
-                    // 2. Update this batch
-                    const idsToUpdate = scoreItems.map(i => i.id);
-                    setProcessStatus(`Reclassifying batch of ${idsToUpdate.length} (Total: ${processed.toLocaleString()})...`);
-
-                    const { error: updateError } = await supabase
-                        .from('raw_feedback_inputs')
-                        .update({ is_quantitative: true })
-                        .in('id', idsToUpdate);
-
-                    if (updateError) throw updateError;
-
-                    processed += idsToUpdate.length;
-                }
-            }
-
-            toast.success(`Success! Reclassified ${processed.toLocaleString()} entries.`);
-            await loadSurveyData();
-        } catch (e: any) {
-            toast.error("Error archiving scores: " + e.message);
-        } finally {
-            setIsProcessing(false);
-            setProcessStatus("");
-        }
-    };
 
     // --- GLOBAL ANALYSIS ENGINE ---
     const addGlobalLog = (msg: string) => setGlobalLogs(prev => [msg, ...prev].slice(0, 50));
@@ -316,9 +262,8 @@ export default function SurveyDetailPage() {
         }
     };
 
-    const needsCleaning = invalidCount > 0 || scoreCount > 0;
     const overallProgress = unitStats.length > 0
-        ? Math.round((unitStats.reduce((acc, u) => acc + u.analyzed_count, 0) / unitStats.reduce((acc, u) => acc + u.comment_count, 0)) * 100)
+        ? Math.round((unitStats.reduce((acc: number, u: UnitStat) => acc + u.analyzed_count, 0) / unitStats.reduce((acc: number, u: UnitStat) => acc + (u.comment_count || 1), 0)) * 100)
         : 0;
 
     return (
@@ -387,51 +332,6 @@ export default function SurveyDetailPage() {
                     </div>
                 )}
 
-                {/* --- DATA HYGIENE CARD --- */}
-                {!isLoading && needsCleaning && (
-                    <Card className="border-amber-200 bg-amber-50/50 overflow-hidden">
-                        <div className="h-1 bg-gradient-to-r from-amber-400 to-orange-500" />
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-amber-800">
-                                <Trash2 className="w-5 h-5" /> Data Hygiene Required
-                            </CardTitle>
-                            <CardDescription className="text-amber-700">
-                                We detected entries that should be cleaned before analysis for best results.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {isProcessing && (
-                                <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-100 px-3 py-2 rounded-md">
-                                    <Loader2 className="w-4 h-4 animate-spin" /> {processStatus}
-                                </div>
-                            )}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {invalidCount > 0 && (
-                                    <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-amber-200">
-                                        <div>
-                                            <div className="font-semibold text-slate-800">{invalidCount.toLocaleString()} Invalid Entries</div>
-                                            <div className="text-xs text-slate-500">Junk values: -, N/A, nan, Nilai, null</div>
-                                        </div>
-                                        <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50" onClick={() => setConfirmAction("deleteInvalid")} disabled={isProcessing}>
-                                            <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove
-                                        </Button>
-                                    </div>
-                                )}
-                                {scoreCount > 0 && (
-                                    <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-amber-200">
-                                        <div>
-                                            <div className="font-semibold text-slate-800">{scoreCount.toLocaleString()} Score-like Text</div>
-                                            <div className="text-xs text-slate-500">E.g. "4 = Baik", "Ya", "Tidak"</div>
-                                        </div>
-                                        <Button size="sm" variant="outline" className="border-blue-200 text-blue-600 hover:bg-blue-50" onClick={() => setConfirmAction("archiveScores")} disabled={isProcessing}>
-                                            <Archive className="w-3.5 h-3.5 mr-1.5" /> Reclassify
-                                        </Button>
-                                    </div>
-                                )}
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
 
                 {/* --- ANALYSIS CONSOLE & UNIT GRID --- */}
                 {!isLoading && (
@@ -506,18 +406,7 @@ export default function SurveyDetailPage() {
                 )}
 
             </div>
-            <ConfirmDialog
-                open={confirmAction !== null}
-                onOpenChange={(open) => !open && setConfirmAction(null)}
-                title={confirmAction === "deleteInvalid" ? "Delete Invalid Entries?" : "Reclassify Score-like Text?"}
-                description={confirmAction === "deleteInvalid"
-                    ? "This will permanently delete all invalid/junk responses (-, N/A, nan, Nilai, null). This cannot be undone."
-                    : "This will reclassify score-like text responses (e.g. '4 = Baik', 'Ya', 'Tidak') as quantitative so they're excluded from qualitative analysis."
-                }
-                confirmLabel={confirmAction === "deleteInvalid" ? "Delete" : "Reclassify"}
-                variant={confirmAction === "deleteInvalid" ? "destructive" : "default"}
-                onConfirm={() => confirmAction === "deleteInvalid" ? handleDeleteInvalid() : handleArchiveScores()}
-            />
+
         </PageShell>
     );
 }

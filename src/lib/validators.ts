@@ -35,10 +35,12 @@ export const generateDashboardSchema = z.object({
 });
 
 export const generateReportSchema = z.object({
-    unitName: z.string(),
+    unitId: z.union([z.string(), z.number()]).optional(),
+    surveyId: z.union([z.string(), z.number()]).optional(),
+    unitName: z.string().optional(),
     unitDescription: z.string().optional(),
-    stats: z.any(), // Flexible
-    segments: z.array(z.any()),
+    stats: z.any().optional(),
+    segments: z.array(z.any()).optional(),
     categoryBreakdown: z.array(z.any()).optional(),
 });
 

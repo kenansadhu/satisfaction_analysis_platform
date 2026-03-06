@@ -4,7 +4,7 @@
 > This is the single source of truth for the project's structure, data flow, and component relationships.
 > After every change, you **MUST** update the relevant section of this document.
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-03-05
 **Tech Stack:** Next.js 16 • React 19 • TypeScript • Supabase (PostgreSQL) • Google Gemini AI • TailwindCSS 4 • Radix UI • Recharts • Framer Motion
 
 ---
@@ -55,6 +55,8 @@ raw_feedback_inputs
   ├─ respondent_id (FK → respondents)
   ├─ is_quantitative (bool), requires_analysis (bool)
   ├─ numerical_score (nullable float)
+  ├─ score_rule (text)  ← "NUMBER", "LIKERT", "BOOLEAN", "TEXT_SCALE", or "CUSTOM_MAPPING"
+  ├─ custom_mapping (jsonb)  ← stores key-value pairs for explicit Likert overrides
 
 feedback_segments  ← AI-generated analysis results
   ├─ id (PK)
@@ -64,6 +66,11 @@ feedback_segments  ← AI-generated analysis results
   ├─ is_suggestion (bool)
   ├─ is_verified (bool, default false)  ← used in Audit Results tab for QA
   ├─ related_unit_ids (int[])
+
+### 2.1 RPC Functions
+`get_respondent_group_counts(p_respondent_ids BIGINT[])`
+- **Purpose**: Aggregates total counts, comment counts, and analyzed counts for a batch of respondents. 
+- **Benefit**: Shifts heavy `raw_feedback_inputs` scans from the browser to the database. Essential for handling 8.6k+ surveys within Supabase's 10s timeout.
 
 analysis_jobs  ← tracks batch processing state
   ├─ id (PK)
@@ -198,6 +205,7 @@ User uploads CSV → /import page
   5. handleStartImport() → creates survey + respondents + raw_feedback_inputs in Supabase
      - TEXT columns: requires_analysis = true, is_quantitative = false
      - SCORE columns: requires_analysis = false, is_quantitative = true, numerical_score = parsed value
+     - CUSTOM_MAPPING: AI suggests or user explicitly maps text variants (e.g. "Puas" → 3) which are stored in `custom_mapping` and applied to `numerical_score`
 ```
 
 ### 4.2 AI Analysis Flow (Comment → Segments)
@@ -222,8 +230,9 @@ SurveyDetailPage or AnalysisEngine triggers startAnalysis(unitId, surveyId)
 ### 4.3 Dashboard Data Flow
 ```
 ComprehensiveDashboard loads for a specific unit + optional survey:
-  1. Fetches feedback_segments (qualitative) via respondent-chunked queries
-  2. Fetches raw_feedback_inputs where is_quantitative = true (quantitative)
+  1. Fetches all respondent IDs for the survey (paginated in chunks of 1,000 to bypass API limits).
+  2. **Controlled Parallel Aggregation**: Uses `get_respondent_group_counts` to crunch data in batches of 250 IDs. 
+     - **Concurrency Control**: Fetches 5 batches in parallel at a time. This balances speed (parallelism) with stability (prevents DB connection pool exhaustion/500 errors).
   3. Computes:
      - Sentiment distribution (pie chart)
      - Category breakdown (bar chart, sorted)
@@ -250,7 +259,9 @@ ComprehensiveDashboard loads for a specific unit + optional survey:
 
 ### 5.1 Data Access Pattern
 - **ALWAYS** filter by `respondent_id` when querying by survey (surveys don't directly link to raw_feedback_inputs)
-- Use **chunked queries** (400 IDs per chunk) for `IN` clauses to avoid Supabase URL limits
+- **Indexing**: A btree index on `raw_feedback_inputs(respondent_id)` is **MANDATORY** for dashboard performance.
+- Use **chunked queries** (400 IDs per chunk) for `IN` clauses to avoid Supabase URL limits.
+- **Aggregation**: Prefer database-side aggregation (RPC) over client-side loops for counts.
 - Never use `!inner` joins with respondents — they cause timeouts on large datasets
 
 ### 5.2 Component Hierarchy
@@ -316,6 +327,9 @@ INSTITUTION_NAME=              # Optional: defaults to "the institution"
 
 | Date | What Changed | Files Modified |
 |------|-------------|----------------|
+| 2026-03-06 | **Final Dashboard Optimization**: Removed Data Hygiene logic (preventing timeouts). Implemented **Controlled Parallel Aggregation**: 5x parallel batches of 250 respondent IDs via `get_respondent_group_counts`. Aligned RPC to `BIGINT[]`. Reduced load time from ∞ → ~5s for 8.6k dataset. | `surveys/[id]/page.tsx`, `get_respondent_group_counts` [NEW RPC] |
+| 2026-03-05 | **Column Mapping UX overhaul**: Replaced table layout with expandable card rows. Full column names (no truncation), inline Unit/Type/Transform selectors, inline custom mapping controls. Added `survey_column_cache` table: user-triggered "Build Cache" button persists unique values (max 20/col) for instant loading on subsequent visits. | `manage/page.tsx`, `survey_column_cache` [NEW TABLE] |
+| 2026-03-04 | Added **Custom Likert Mapping** system. Users can map distinct text values to scores (1-4, 0, NA). Persisted via new `score_rule` and `custom_mapping` columns in `raw_feedback_inputs`. Integrated into both **Import Wizard** (with AI auto-suggestions) and **Manage Survey** page. Added `0` mapping support for binary data. | `import/page.tsx`, `manage/page.tsx`, `api/ai/map-columns/route.ts`, `raw_feedback_inputs` [SCHEMA UPDATE] |
 | 2026-03-04 | Added `survey_quant_cache` table for precomputed satisfaction scores. Report API uses lazy cache: instant on cache hit, computes + stores on miss. Load time: ~2min → 6s. Added cache management endpoint | `api/executive/report/route.ts`, `api/executive/cache-scores/route.ts` [NEW], `survey_quant_cache` [NEW TABLE] |
 | 2026-03-04 | Fixed Report tab N/A ratings (RPC timeout) and wrong score calculation. Matched ComprehensiveDashboard logic: group by `source_column`, exclude binary columns. Added retry logic for intermittent metrics 500 | `api/executive/report/route.ts`, `api/executive/metrics/route.ts` |
 | 2026-03-03 | Fixed verification stats showing 0: merged stats into loadData, fixed race condition with wasAnalyzingRef, removed broken loadVerificationStats | `DataBrowser.tsx` |

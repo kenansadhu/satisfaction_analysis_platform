@@ -54,6 +54,8 @@ export interface RawFeedbackInput {
     is_quantitative: boolean;
     requires_analysis: boolean;
     numerical_score?: number;
+    score_rule?: string;
+    custom_mapping?: Record<string, number | null>;
 }
 
 export interface FeedbackSegment {

@@ -18,8 +18,9 @@ import { Badge } from "@/components/ui/badge";
 type Unit = { id: number; name: string; description?: string };
 type ColumnConfig = {
   unitId: string;
-  type: "TEXT" | "SCORE" | "CATEGORY" | "IGNORE"; // New Types
-  rule?: "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE";
+  type: "TEXT" | "SCORE" | "CATEGORY" | "IGNORE";
+  rule?: "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE" | "CUSTOM_MAPPING";
+  customMapping?: Record<string, number | null>;
 };
 
 // --- Helper: Identity Column Selector ---
@@ -170,7 +171,8 @@ export default function ImportPage() {
           newConfigs[header] = {
             unitId: config.unit_id,
             type: config.type, // SCORE, TEXT, CATEGORY
-            rule: config.rule
+            rule: config.rule,
+            customMapping: config.customMapping || {}
           };
         });
         setColumnConfigs(newConfigs);
@@ -184,6 +186,19 @@ export default function ImportPage() {
 
   const updateConfig = (header: string, field: keyof ColumnConfig, value: any) => {
     setColumnConfigs(prev => ({ ...prev, [header]: { ...prev[header], [field]: value } }));
+  };
+
+  const handleUpdateCustomMapping = (header: string, valueStr: string, mappedScore: number | null) => {
+    setColumnConfigs(prev => ({
+      ...prev,
+      [header]: {
+        ...prev[header],
+        customMapping: {
+          ...(prev[header]?.customMapping || {}),
+          [valueStr]: mappedScore
+        }
+      }
+    }));
   };
 
   // --- 4. IMPORT EXECUTION (UPDATED) ---
@@ -226,7 +241,9 @@ export default function ImportPage() {
               source_column: header,
               is_quantitative: config.type === "SCORE", // Only scores are quantitative
               requires_analysis: config.type === "TEXT", // Only open text needs AI
-              numerical_score: null
+              numerical_score: null,
+              score_rule: config.type === "SCORE" ? (config.rule || "NUMBER") : null,
+              custom_mapping: config.type === "SCORE" && config.rule === "CUSTOM_MAPPING" ? config.customMapping : null
             };
 
             // --- TRANSFORMATIONS ---
@@ -250,6 +267,9 @@ export default function ImportPage() {
                 else if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) payload.numerical_score = 2;
                 else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) payload.numerical_score = 3;
                 else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) payload.numerical_score = 4;
+              } else if (config.rule === "CUSTOM_MAPPING" && config.customMapping) {
+                const mapped = config.customMapping[rawValue];
+                if (mapped !== undefined) payload.numerical_score = mapped;
               }
             }
 
@@ -322,26 +342,114 @@ export default function ImportPage() {
               <CardHeader className="flex flex-row items-center justify-between"><div><CardTitle>Column Studio</CardTitle><CardDescription>Assign types: <b>Text</b> (Open Comments), <b>Score</b> (Quantitative), or <b>Category</b> (Filters).</CardDescription></div><div className="flex gap-2"><Button variant="secondary" onClick={handleAutoMapColumns} disabled={isAiMapping} className="gap-2 bg-purple-100 text-purple-700 hover:bg-purple-200">{isAiMapping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} AI Auto-Detect</Button></div></CardHeader>
               <CardContent>
                 <div className="flex gap-2 mb-4"><Search className="w-4 h-4 text-slate-400 mt-3 absolute ml-3" /><Input placeholder="Filter headers..." className="pl-9" value={filterText} onChange={e => setFilterText(e.target.value)} /></div>
-                <div className="border rounded-md overflow-hidden bg-white shadow-sm h-[600px] overflow-y-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-100 text-slate-600 font-semibold border-b sticky top-0 z-10 shadow-sm">
-                      <tr><th className="p-3 w-10">View</th><th className="p-3">CSV Header</th><th className="p-3 w-64">Assigned Unit</th><th className="p-3 w-40">Data Type</th><th className="p-3 w-48">Transformation</th></tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {headers.filter(h => !isIdentity(h) && h.toLowerCase().includes(filterText.toLowerCase())).map(h => {
-                        const config = columnConfigs[h] || { type: "IGNORE", unitId: "" };
-                        return (
-                          <tr key={h} className={`hover:bg-slate-50 transition-colors ${config.type === "IGNORE" ? "opacity-60 bg-slate-50/50" : "bg-white"}`}>
-                            <td className="p-3 text-center"><Button variant="ghost" size="icon" onClick={() => setPreviewHeader(h)} title="Click to see entries"><Eye className="w-4 h-4 text-blue-500" /></Button></td>
-                            <td className="p-3 font-medium text-slate-700 max-w-md cursor-pointer hover:text-blue-600" onClick={() => setPreviewHeader(h)}><div className="line-clamp-2" title={h}>{h}</div></td>
-                            <td className="p-3"><Select value={config.unitId} onValueChange={(val) => updateConfig(h, 'unitId', val)}><SelectTrigger className="h-9 bg-white"><SelectValue placeholder="Select Unit" /></SelectTrigger><SelectContent>{units.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)}</SelectContent></Select></td>
-                            <td className="p-3"><Select value={config.type} onValueChange={(val) => updateConfig(h, 'type', val)}><SelectTrigger className={`h-9 ${config.type === "SCORE" ? "text-blue-700 bg-blue-50" : config.type === "TEXT" ? "text-green-700 bg-green-50" : config.type === "CATEGORY" ? "text-purple-700 bg-purple-50" : "bg-white"}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="TEXT">Text (Analyze)</SelectItem><SelectItem value="SCORE">Score (Number)</SelectItem><SelectItem value="CATEGORY">Category (Filter)</SelectItem><SelectItem value="IGNORE">Ignore</SelectItem></SelectContent></Select></td>
-                            <td className="p-3">{config.type === "SCORE" && (<Select value={config.rule || "NUMBER"} onValueChange={(val) => updateConfig(h, 'rule', val)}><SelectTrigger className="h-9 bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="LIKERT">Likert (4=Puas)</SelectItem><SelectItem value="BOOLEAN">Yes/No (1/0)</SelectItem><SelectItem value="TEXT_SCALE">Scale (Sering=4)</SelectItem><SelectItem value="NUMBER">Raw Number</SelectItem></SelectContent></Select>)}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2 custom-scrollbar">
+                  {headers.filter(h => !isIdentity(h) && h.toLowerCase().includes(filterText.toLowerCase())).map(h => {
+                    const config = columnConfigs[h] || { type: "IGNORE", unitId: "" };
+                    const samples = getSamples(h);
+
+                    return (
+                      <Card key={h} className={`transition-all border-l-4 ${config.type === "SCORE" ? "border-l-blue-500 bg-blue-50/20" :
+                          config.type === "TEXT" ? "border-l-green-500 bg-green-50/20" :
+                            config.type === "CATEGORY" ? "border-l-purple-500 bg-purple-50/20" :
+                              "border-l-slate-300 opacity-70"
+                        }`}>
+                        <CardContent className="p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                            {/* Column Name & Preview */}
+                            <div className="md:col-span-4 space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-800 break-words line-clamp-2" title={h}>{h}</span>
+                                <Button variant="ghost" size="icon" onClick={() => setPreviewHeader(h)} className="h-6 w-6"><Eye className="w-3 h-3" /></Button>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {samples.map((s, idx) => (
+                                  <span key={idx} className="text-[10px] bg-white border px-1.5 py-0.5 rounded text-slate-500 truncate max-w-[80px]">{s}</span>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Unit Selector */}
+                            <div className="md:col-span-3">
+                              <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Assigned Unit</label>
+                              <Select value={config.unitId} onValueChange={(val) => updateConfig(h, 'unitId', val)}>
+                                <SelectTrigger className="h-9 bg-white shadow-sm border-slate-200">
+                                  <SelectValue placeholder="Select Unit..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {units.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Type Selector */}
+                            <div className="md:col-span-2">
+                              <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Data Type</label>
+                              <Select value={config.type} onValueChange={(val) => updateConfig(h, 'type', val)}>
+                                <SelectTrigger className="h-9 bg-white shadow-sm border-slate-200">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="SCORE">Score (Quantitative)</SelectItem>
+                                  <SelectItem value="TEXT">Text (AI Analysis)</SelectItem>
+                                  <SelectItem value="CATEGORY">Category (Filter)</SelectItem>
+                                  <SelectItem value="IGNORE">Ignore</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Rule / Transformation */}
+                            <div className="md:col-span-3">
+                              {config.type === "SCORE" ? (
+                                <>
+                                  <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Scoring Rule</label>
+                                  <Select value={config.rule || "NUMBER"} onValueChange={(val) => updateConfig(h, 'rule', val)}>
+                                    <SelectTrigger className="h-9 bg-white shadow-sm border-slate-200">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="LIKERT">Likert (1-4)</SelectItem>
+                                      <SelectItem value="BOOLEAN">Yes/No (1/0)</SelectItem>
+                                      <SelectItem value="CUSTOM_MAPPING">Custom Mapping</SelectItem>
+                                      <SelectItem value="NUMBER">Raw Number</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </>
+                              ) : config.type === "TEXT" ? (
+                                <div className="mt-6 flex items-center gap-2 text-[10px] font-bold text-green-600 bg-green-100/50 p-2 rounded border border-green-200">
+                                  <Sparkles className="w-3 h-3" /> AI Analysis Enabled
+                                </div>
+                              ) : config.type === "CATEGORY" ? (
+                                <div className="mt-6 flex items-center gap-2 text-[10px] font-bold text-purple-600 bg-purple-100/50 p-2 rounded border border-purple-200">
+                                  <Tag className="w-3 h-3" /> Demographic Filter
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {/* Custom Mapping Section (Visible if rule is CUSTOM_MAPPING) */}
+                          {config.type === "SCORE" && config.rule === "CUSTOM_MAPPING" && (
+                            <div className="mt-4 pt-4 border-t border-slate-200/50 bg-white/50 p-3 rounded-md">
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold text-slate-600 flex items-center gap-1"><List className="w-3 h-3" /> Active Mapping</h4>
+                                <Button variant="ghost" size="sm" onClick={() => setPreviewHeader(h)} className="h-6 text-[10px]">Update Levels</Button>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {Object.entries(config.customMapping || {}).map(([val, score]) => (
+                                  <Badge key={val} variant="outline" className="bg-white gap-2 py-1">
+                                    <span className="text-slate-500">{val}:</span>
+                                    <span className="font-bold text-blue-600">{score === null ? "NA" : score}</span>
+                                  </Badge>
+                                ))}
+                                {Object.keys(config.customMapping || {}).length === 0 && (
+                                  <p className="text-[10px] text-slate-400 italic">No levels mapped yet. Click 'Update Levels' to begin.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
                 <div className="flex justify-between mt-6 border-t pt-4"><Button variant="outline" onClick={() => setStep(2)}><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button><Button onClick={() => setStep(4)} className="bg-blue-600 hover:bg-blue-700">Next: Validate <ArrowRight className="w-4 h-4 ml-2" /></Button></div>
               </CardContent>
@@ -355,8 +463,37 @@ export default function ImportPage() {
                   <div className="flex gap-4 text-sm"><div className="bg-slate-100 px-3 py-2 rounded">Total Valid Rows: <b>{previewStats?.totalValid}</b></div><div className="bg-blue-50 text-blue-700 px-3 py-2 rounded">Unique Values: <b>{previewStats?.uniqueCount}</b></div></div>
                   {previewStats?.isCategorical ? (
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Found Distinct Levels:</div>
-                      <div className="flex flex-wrap gap-2">{previewStats?.uniqueValues.map(v => <Badge key={v} variant="outline" className="text-sm py-1 px-3 bg-white">{v}</Badge>)}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Found Distinct Levels:</div>
+                        {previewHeader && columnConfigs[previewHeader]?.type === "SCORE" && columnConfigs[previewHeader]?.rule !== "CUSTOM_MAPPING" && (
+                          <Button variant="outline" size="sm" onClick={() => updateConfig(previewHeader, 'rule', 'CUSTOM_MAPPING')} className="h-7 text-xs">Switch to Custom Mapping</Button>
+                        )}
+                      </div>
+                      {previewHeader && columnConfigs[previewHeader]?.rule === "CUSTOM_MAPPING" ? (
+                        <div className="grid gap-2 border rounded-md p-3 bg-slate-50 max-h-[400px] overflow-y-auto">
+                          {previewStats?.uniqueValues.map((v, i) => (
+                            <div key={i} className="flex items-center justify-between gap-4">
+                              <span className="text-sm font-medium text-slate-700 break-all">{v || "(empty)"}</span>
+                              <Select
+                                value={columnConfigs[previewHeader]?.customMapping?.[v] !== undefined ? (columnConfigs[previewHeader].customMapping![v] === null ? "NA" : columnConfigs[previewHeader].customMapping![v]?.toString()) : "NA"}
+                                onValueChange={val => handleUpdateCustomMapping(previewHeader, v, val === "NA" ? null : parseInt(val))}
+                              >
+                                <SelectTrigger className="w-[120px] h-8 bg-white"><SelectValue placeholder="Map to..." /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="1">1</SelectItem>
+                                  <SelectItem value="2">2</SelectItem>
+                                  <SelectItem value="3">3</SelectItem>
+                                  <SelectItem value="4">4</SelectItem>
+                                  <SelectItem value="0">0</SelectItem>
+                                  <SelectItem value="NA">NA / Ignore</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">{previewStats?.uniqueValues.map(v => <Badge key={v} variant="outline" className="text-sm py-1 px-3 bg-white">{v}</Badge>)}</div>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-2">

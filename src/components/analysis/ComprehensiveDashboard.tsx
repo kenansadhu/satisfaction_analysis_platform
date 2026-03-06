@@ -25,14 +25,6 @@ type QuestionGroup = {
 };
 type DrillDownEntry = { id: number; raw_text: string; numerical_score?: number };
 
-type ExecutiveReportData = {
-    executive_summary: string;
-    overall_verdict: "Excellent" | "Good" | "Needs Improvement" | "Critical";
-    strengths: { title: string; detail: string; evidence: string }[];
-    concerns: { title: string; detail: string; severity: "High" | "Medium" | "Low"; evidence: string }[];
-    recommendations: { title: string; action: string; impact: string; priority: "Immediate" | "Short-term" | "Long-term" }[];
-    closing_statement: string;
-};
 
 export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: string; surveyId?: string }) {
     const dashboardRef = useRef<HTMLDivElement>(null);
@@ -68,8 +60,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     const [quantGroups, setQuantGroups] = useState<QuestionGroup[]>([]);
     const [globalAvgScore, setGlobalAvgScore] = useState<string>("N/A");
 
-    // AI Report
-    const [report, setReport] = useState<ExecutiveReportData | null>(null);
     const [generatingReport, setGeneratingReport] = useState(false);
     const [lastSaved, setLastSaved] = useState<string | null>(null);
 
@@ -98,7 +88,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         // Don't load data while analysis is running
         if (isCurrentlyAnalyzing) return;
         fetchRawData();
-        loadSavedReport();
     }, [unitId, surveyId, isCurrentlyAnalyzing]);
 
     useEffect(() => {
@@ -112,21 +101,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     }, [activeFilters, baseRawInputs, baseScores, baseCatScores]);
 
     // --- DATA LOADING ---
-    async function loadSavedReport() {
-        // TODO: ideally scope report by survey_id too if table allows
-        const { data } = await supabase.from('unit_ai_reports').select('content, created_at').eq('unit_id', unitId).eq('report_type', 'executive').maybeSingle();
-        if (data) {
-            const saved = data.content.report;
-            const savedSurveyId = data.content.survey_id;
-            // Only show report if it matches the current survey (or no survey filter)
-            if (!surveyId || !savedSurveyId || savedSurveyId === surveyId) {
-                if (typeof saved === 'object' && saved.executive_summary) {
-                    setReport(saved);
-                }
-                setLastSaved(new Date(data.created_at).toLocaleString());
-            }
-        }
-    }
 
     async function fetchRawData() {
         setLoading(true);
@@ -505,42 +479,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     };
 
 
-    const generateReport = async () => {
-        setGeneratingReport(true);
-        try {
-            const { data: unit } = await supabase.from('organization_units').select('*').eq('id', unitId).single();
-            const topSegments = allSegments.slice(0, 100);
-            const quantSummary = quantGroups.filter(g => g.type === "SCORE").map(g => `${g.question}: ${g.average}/4`).join(', ');
-            const categoryBreakdown = Object.values(catCounts).map((c: any) => ({
-                name: c.name, positive: c.positive, negative: c.negative, neutral: c.neutral, total: c.total
-            }));
-
-            const res = await fetch('/api/ai/generate-report', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    unitName: unit?.name || unitName,
-                    unitDescription: unit?.description || '',
-                    stats: `Total Comments: ${allSegments.length}. Sentiment: ${sentimentCounts.Positive} Positive, ${sentimentCounts.Negative} Negative, ${sentimentCounts.Neutral} Neutral. Quantitative: ${quantSummary}. Sentiment Score: ${sentimentScore}/100.`,
-                    segments: topSegments,
-                    categoryBreakdown
-                })
-            });
-
-            const data = await res.json();
-            if (data.report) {
-                setReport(data.report as ExecutiveReportData);
-                await supabase.from('unit_ai_reports').upsert(
-                    { unit_id: unitId, report_type: 'executive', content: { report: data.report, survey_id: surveyId } },
-                    { onConflict: 'unit_id,report_type' }
-                );
-                setLastSaved(new Date().toLocaleString());
-                toast.success("Executive Report Generated");
-            } else if (data.error) {
-                toast.error("AI Error: " + data.error);
-            }
-        } catch (e) { toast.error("Generation failed"); } finally { setGeneratingReport(false); }
-    };
 
     // --- RAW DATA LOADING ---
     const loadRawData = useCallback(async (tab: "comments" | "ratings", page: number, search: string) => {
@@ -747,102 +685,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 </Card>
             </div>
 
-            {/* --- EXECUTIVE REPORT --- */}
-            <Card className="border-indigo-200 dark:border-indigo-900/50 bg-white dark:bg-slate-900 shadow-xl overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-indigo-500 to-purple-500 print:hidden" />
-                <CardHeader className="flex flex-row items-center justify-between bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800 py-4 print:hidden">
-                    <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /><h3 className="font-semibold text-slate-800 dark:text-slate-100">Executive Analysis</h3>{lastSaved && <span className="text-[10px] text-slate-400 ml-2">Last: {lastSaved}</span>}</div>
-                    <div className="flex gap-2">
-                        <Button onClick={generateReport} disabled={generatingReport} size="sm" className="bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600 dark:text-white">{generatingReport ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCcw className="w-3 h-3 mr-1" />} {report ? "Regenerate" : "Generate"}</Button>
-                        {report && <Button variant="outline" size="sm" onClick={exportToPdf} disabled={exportingPdf} className="dark:border-slate-700 dark:hover:bg-slate-800"><Download className="w-3 h-3 mr-1" /> PDF</Button>}
-                    </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                    {report ? (
-                        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {/* Header Banner */}
-                            <div className="bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-950/30 dark:to-violet-950/30 px-8 py-6">
-                                <div className="flex items-center justify-between mb-3">
-                                    <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Executive Analysis Report</h2>
-                                    <Badge className={`text-xs px-3 py-1 ${report.overall_verdict === 'Excellent' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-400' : report.overall_verdict === 'Good' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400' : report.overall_verdict === 'Needs Improvement' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400' : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'}`}>
-                                        {report.overall_verdict === 'Excellent' ? '🟢' : report.overall_verdict === 'Good' ? '🔵' : report.overall_verdict === 'Needs Improvement' ? '🟡' : '🔴'} {report.overall_verdict}
-                                    </Badge>
-                                </div>
-                                <p className="text-sm text-slate-500 dark:text-slate-400">{unitName} · Generated {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                            </div>
 
-                            {/* Executive Summary */}
-                            <div className="px-8 py-6">
-                                <p className="text-[15px] text-slate-700 dark:text-slate-300 leading-relaxed italic border-l-4 border-indigo-300 dark:border-indigo-700 pl-4">{report.executive_summary}</p>
-                            </div>
-
-                            {/* Strengths */}
-                            <div className="px-8 py-6">
-                                <div className="flex items-center gap-2 mb-4"><CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-500" /><h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Strengths</h3></div>
-                                <div className="space-y-4">
-                                    {report.strengths?.map((s, i) => (
-                                        <div key={i} className="bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 rounded-lg p-4">
-                                            <h4 className="font-semibold text-emerald-900 dark:text-emerald-400 text-sm mb-1">▸ {s.title}</h4>
-                                            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{s.detail}</p>
-                                            {s.evidence && <div className="mt-2 flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400 italic"><Quote className="w-3 h-3 mt-0.5 text-emerald-400 dark:text-emerald-600 shrink-0" /><span>&ldquo;{s.evidence}&rdquo;</span></div>}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Concerns */}
-                            <div className="px-8 py-6">
-                                <div className="flex items-center gap-2 mb-4"><AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-500" /><h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Areas of Concern</h3></div>
-                                <div className="space-y-4">
-                                    {report.concerns?.map((c, i) => (
-                                        <div key={i} className="bg-amber-50/30 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-lg p-4">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <h4 className="font-semibold text-amber-900 dark:text-amber-400 text-sm">▸ {c.title}</h4>
-                                                <Badge variant="outline" className={`text-[10px] ${c.severity === 'High' ? 'border-red-300 dark:border-red-800 text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30' : c.severity === 'Medium' ? 'border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30' : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50'}`}>{c.severity === 'High' ? '🔴' : c.severity === 'Medium' ? '🟡' : '🟢'} {c.severity}</Badge>
-                                            </div>
-                                            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{c.detail}</p>
-                                            {c.evidence && <div className="mt-2 flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400 italic"><Quote className="w-3 h-3 mt-0.5 text-amber-400 dark:text-amber-600 shrink-0" /><span>&ldquo;{c.evidence}&rdquo;</span></div>}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Recommendations */}
-                            <div className="px-8 py-6">
-                                <div className="flex items-center gap-2 mb-4"><Target className="w-5 h-5 text-blue-600 dark:text-blue-500" /><h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Recommendations</h3></div>
-                                <div className="space-y-3">
-                                    {report.recommendations?.map((r, i) => (
-                                        <div key={i} className="bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/50 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <h4 className="font-semibold text-blue-900 dark:text-blue-400 text-sm">{i + 1}. {r.title}</h4>
-                                                <Badge className={`text-[10px] px-2 ${r.priority === 'Immediate' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : r.priority === 'Short-term' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}`}>
-                                                    {r.priority === 'Immediate' ? '⚡' : r.priority === 'Short-term' ? '📅' : '🔮'} {r.priority}
-                                                </Badge>
-                                            </div>
-                                            <div className="space-y-1 text-sm">
-                                                <p className="text-slate-700 dark:text-slate-300"><span className="font-medium text-slate-500 dark:text-slate-400">Action:</span> {r.action}</p>
-                                                <p className="text-slate-600 dark:text-slate-400"><span className="font-medium text-slate-500 dark:text-slate-500">Impact:</span> {r.impact}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Closing */}
-                            <div className="px-8 py-6 bg-slate-50/50 dark:bg-slate-900/50">
-                                <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed text-center italic" style={{ fontFamily: 'Georgia, serif' }}>{report.closing_statement}</p>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="p-8 text-center text-slate-400 dark:text-slate-600 italic">Generate a report to see strategic insights.</div>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* --- AI INSIGHT CHAT (UNIT LEVEL) MOVED UNDER EXEC ANALYSIS --- */}
-            <div className="print:hidden">
-                <UnitInsightChat unitId={unitId} surveyId={surveyId} />
-            </div>
 
             {/* --- CAROUSEL --- */}
             {randomQuotes.length > 0 && (

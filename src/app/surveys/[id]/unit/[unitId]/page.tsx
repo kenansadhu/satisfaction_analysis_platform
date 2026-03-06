@@ -13,6 +13,7 @@ import CategorizationEngine from "@/components/analysis/CategorizationEngine";
 import AnalysisEngine from "@/components/analysis/AnalysisEngine";
 import DataBrowser from "@/components/analysis/DataBrowser";
 import ComprehensiveDashboard from "@/components/analysis/ComprehensiveDashboard";
+import UnitInsightChat from "@/components/analysis/UnitInsightChat";
 
 // Tab value mapping for URL shortcut
 const TAB_MAP: Record<string, string> = {
@@ -20,6 +21,7 @@ const TAB_MAP: Record<string, string> = {
     analysis: "analysis",
     audit: "results",
     insights: "insights",
+    chat: "chat",
 };
 
 export default function ScopedUnitWorkspace() {
@@ -69,7 +71,7 @@ export default function ScopedUnitWorkspace() {
 
                 {/* Main Workspace Tabs */}
                 <Tabs defaultValue={defaultTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 mb-8 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden">
+                    <TabsList className="grid w-full grid-cols-5 mb-8 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden">
 
                         <TabsTrigger value="categorization" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-purple-700 data-[state=active]:shadow-sm">
                             <BrainCircuit className="w-4 h-4" /> 1. Build Categories
@@ -84,7 +86,11 @@ export default function ScopedUnitWorkspace() {
                         </TabsTrigger>
 
                         <TabsTrigger value="insights" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">
-                            <PieChart className="w-4 h-4" /> 4. Comprehensive Insights
+                            <PieChart className="w-4 h-4" /> 4. Dashboard
+                        </TabsTrigger>
+
+                        <TabsTrigger value="chat" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-pink-600 data-[state=active]:shadow-sm">
+                            <Sparkles className="w-4 h-4" /> 5. AI Specialist
                         </TabsTrigger>
 
                     </TabsList>
@@ -117,6 +123,12 @@ export default function ScopedUnitWorkspace() {
                         </ErrorBoundary>
                     </TabsContent>
 
+                    {/* TAB 5: AI CHAT ANALYST */}
+                    <TabsContent value="chat" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <ErrorBoundary fallbackTitle="AI Analyst crashed">
+                            <UnitInsightChat unitId={unitId} surveyId={surveyId} fullPage={true} />
+                        </ErrorBoundary>
+                    </TabsContent>
 
                 </Tabs>
 

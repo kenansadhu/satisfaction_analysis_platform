@@ -19,7 +19,8 @@ This document lists all pending tasks consolidated from previous audits.
 ---
 
 ### Phase 2: Maintainability & Code Quality
-- [ ] **Move Client-Side Aggregation to Database:** Several dashboards fetch all rows and aggregate in JavaScript. Create Supabase Database Views or RPC functions (e.g., `get_sentiment_counts(unit_id)`) to let Postgres do the heavy lifting and only return aggregated numbers to the UI.
+- [x] **Move Client-Side Aggregation to Database:** (Completed for Survey Detail dashboard) Implemented Hybrid Aggregation via RPC and sequential batching to handle 8.6k+ rows without timeouts.
+- [ ] **Fix AnalysisContext Re-render Bloat:** Every log/progress update in `AnalysisContext.tsx` re-renders all subscribed components. Consider splitting into separate contexts (progress vs. controls) or using a more granular state manager like Zustand.
 - [ ] **Fix AnalysisContext Re-render Bloat:** Every log/progress update in `AnalysisContext.tsx` re-renders all subscribed components. Consider splitting into separate contexts (progress vs. controls) or using a more granular state manager like Zustand.
 - [ ] **TypeScript Strictness:** Import and use the types defined in `src/types/index.ts`. Replace all `any` types in component states, API responses, and Zod schemas (`z.any()`) with proper interfaces.
 - [ ] **Split `ComprehensiveDashboard.tsx`:** At 1,131 lines (83KB), this mega-component should be decomposed into 5+ focused sub-components (e.g., SentimentOverview, QuantitativeMetrics, QualitativeBreakdown, ExecutiveReport, DrillDownDialog).
@@ -53,3 +54,16 @@ This document lists all pending tasks consolidated from previous audits.
 - [ ] **Audit Logs:** Track who changed what.
 - [ ] **RBAC:** Roles for Rector vs. Dean vs. Student Rep.
     - *Critical:* Strictly restrict adding/removing Surveys and Organization Units to the Super Admin. Deletion cascades across the entire database, preventing regular admins from making irreversible destructive actions.
+
+---
+
+## 🐛 Bugs
+
+### 1. Caching Instability & Network Errors
+- **Description:** The "Build Cache" process frequently stalls or fails with `ERR_NAME_NOT_RESOLVED` and `net::ERR_CONNECTION_CLOSED` errors. 
+- **Cause:** This is a DNS/Network connection issue to the Supabase domain (`axfeurjlxvqsrimpzeis.supabase.co`). While the project is active, the browser or local machine is intermittently losing the ability to resolve the host.
+- **Workaround:** Ensure no VPN/Firewall is blocking Supabase. If it fails, refresh and try again.
+
+### 2. Cache Build Lack of Resume
+- **Description:** Clicking "Build Cache" always restarts from column 1/116.
+- **Goal:** Modify `buildUniqueValuesCache` to check if a column is already cached in `survey_column_cache` and skip it, allowing for a "resume" behavior after network failures.
