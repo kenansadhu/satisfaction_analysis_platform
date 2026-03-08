@@ -93,13 +93,18 @@ export async function POST(req: Request) {
       return `• ${col}: ${avg} avg (${data.count} responses) [Scale: ${scaleType}]`;
     }).join('\n');
 
+    // 3.5. EMPTY STATE EARLY RETURN
+    if (finalQualitativeData.length === 0 && Object.keys(quantStats).length === 0) {
+      return NextResponse.json({ error: "Insufficient Data: No feedback found for this unit to analyze." }, { status: 400 });
+    }
+
     const statsPrompt = `Unit Respondents: ${unitRespondentCount || 0} unique students out of ${totalSurveyPopulation} total survey participants.
 Qualitative Data: ${finalQualitativeData.length} items provided. Sentiment Distribution: ${sentimentCounts.Positive} Positive, ${sentimentCounts.Negative} Negative, ${sentimentCounts.Neutral} Neutral.`;
 
     const categoryPrompt = Object.entries(categories).map(([name, count]) => `${name} (${count})`).join(', ');
 
-    // 4. RESTORE SENIOR STRATEGIC CONSULTANT PROMPT WITH ENHANCED CONTEXT & WEIGHTING
-    const prompt = `You are a Senior Strategic Consultant writing an Executive Analysis Report for the "${unit?.name || 'Unit'}" department. 
+    // 4. RESTORE OBJECTIVE DATA INTELLIGENCE ENGINE PROMPT WITH ENHANCED CONTEXT & WEIGHTING
+    const prompt = `You are an objective Data Intelligence Engine tasked with writing an Executive Analysis Report for the "${unit?.name || 'Unit'}" department. 
 
 CONTEXT: ${unit?.description || 'No additional context provided.'}
 
@@ -141,13 +146,26 @@ Produce a boardroom-quality JSON report.
 
 Return ONLY valid JSON. Exactly 3 items per list.`;
 
-    const reportJson = await callGemini(prompt, { jsonMode: true });
-
     let parsed;
-    try {
-      parsed = typeof reportJson === 'string' ? JSON.parse(reportJson) : reportJson;
-    } catch {
-      return NextResponse.json({ error: 'AI returned invalid JSON' }, { status: 500 });
+    let retries = 0;
+    const maxRetries = 2;
+
+    while (retries <= maxRetries) {
+      const reportJson = await callGemini(prompt, { jsonMode: true });
+      try {
+        parsed = typeof reportJson === 'string' ? JSON.parse(reportJson) : reportJson;
+        // Verify it didn't hallucinate an empty object
+        if (parsed && parsed.executive_summary) {
+          break; // Success
+        } else {
+          throw new Error("Missing required JSON fields");
+        }
+      } catch (err) {
+        retries++;
+        if (retries > maxRetries) {
+          return NextResponse.json({ error: 'AI returned invalid JSON after multiple attempts' }, { status: 500 });
+        }
+      }
     }
 
     return NextResponse.json({ report: parsed });

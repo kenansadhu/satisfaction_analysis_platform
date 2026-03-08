@@ -40,10 +40,18 @@ export async function POST(req: Request) {
         const { data: surveyResps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
         const surveyRespIds = (surveyResps || []).map(r => r.id);
 
-        // FETCH RAW DATA (QUAL + QUANT)
+        // FETCH RAW DATA (QUAL + QUANT + FACULTY ORIGIN)
         const { data: rawInputs } = await supabase
             .from('raw_feedback_inputs')
-            .select('id, raw_text, source_column, respondent_id, numerical_score, is_quantitative')
+            .select(`
+                id, 
+                raw_text, 
+                source_column, 
+                respondent_id, 
+                numerical_score, 
+                is_quantitative,
+                respondents(faculty)
+            `)
             .eq('target_unit_id', unitId)
             .in('respondent_id', surveyRespIds);
 
@@ -56,12 +64,20 @@ export async function POST(req: Request) {
         ]);
 
         const catMap = new Map(((categoriesRes.data as any[]) || []).map(c => [c.id, c.name]));
-        let segmentsView = ((segmentsRes.data as any[]) || []).map(s => ({
-            segment_text: s.segment_text,
-            sentiment: s.sentiment,
-            category_name: catMap.get(s.category_id) || "General",
-            is_suggestion: s.is_suggestion
-        }));
+
+        // Map raw inputs to lookup faculty
+        const rawInputMap = new Map((rawInputs || []).map(ri => [ri.id, ri]));
+
+        let segmentsView = ((segmentsRes.data as any[]) || []).map(s => {
+            const rawRef = rawInputMap.get(s.raw_input_id) as any;
+            return {
+                segment_text: s.segment_text,
+                sentiment: s.sentiment,
+                category_name: catMap.get(s.category_id) || "General",
+                is_suggestion: s.is_suggestion,
+                faculty: rawRef?.respondents?.faculty || "Unknown Faculty"
+            };
+        });
 
         // FALLBACK: If no analyzed segments, get raw qualitative feedback (verbatim)
         if (segmentsView.length === 0) {
@@ -69,7 +85,8 @@ export async function POST(req: Request) {
                 segment_text: f.raw_text as string,
                 sentiment: "Neutral",
                 category_name: f.source_column,
-                is_suggestion: false
+                is_suggestion: false,
+                faculty: (f as any).respondents?.faculty || "Unknown Faculty"
             })).slice(0, 100);
         }
 
@@ -93,6 +110,11 @@ export async function POST(req: Request) {
             return `• ${col}: ${avg} avg (${data.count} responses) [Scale: ${scaleType}]`;
         }).join('\n');
 
+        // EMPTY STATE EARLY RETURN
+        if (segmentsView.length === 0 && Object.keys(quantStats).length === 0) {
+            return NextResponse.json({ error: "Insufficient Data: No feedback found for this unit to analyze." }, { status: 400 });
+        }
+
         const unitUniqueResps = new Set((rawInputs || []).map(ri => ri.respondent_id));
         const unitRespondentCount = unitUniqueResps.size;
 
@@ -100,7 +122,7 @@ export async function POST(req: Request) {
             `${m.role === 'user' ? 'USER' : 'AI'}: ${m.content}`
         ).join('\n\n');
 
-        const systemPrompt = `You are a Senior Strategic AI Analyst for the unit "${unitName}".
+        const systemPrompt = `You are an objective Data Intelligence Engine analyzing feedback for the unit "${unitName}".
 CONTEXT: ${unitDescription}
 
 === DATA STATE (HIGH PRECISION - STRICTLY ISOLATED TO THIS SURVEY) ===
@@ -119,7 +141,7 @@ Verdict: ${executiveReport.overall_verdict}
 Top Strengths: ${executiveReport.strengths?.map((s: any) => s.title).join(', ')}
 Top Concerns: ${executiveReport.concerns?.map((c: any) => c.title).join(', ')}` : "No strategic overview generated yet."}
 
-=== REPRESENTATIVE STUDENT VOICES (VERBATIM SAMPLES) ===
+=== REPRESENTATIVE STUDENT VOICES (VERBATIM SAMPLES WITH FACULTY DEMOGRAPHICS)  ===
 ${JSON.stringify(segmentsView.slice(0, 80))}
 
 CONVERSATION HISTORY:
@@ -127,18 +149,18 @@ ${conversationHistory}
 
 USER: ${prompt}
 
-RESPONSE GUIDELINES (CRITICAL):
-1. **STRUCTURED BOXES (MANDATORY)**: Wrap every major finding, explanation, or thematic deep-dive inside a <box title="Section Title">...</box> tag.
-    - Start with a natural introduction or overview outside of any box.
-    - Each distinct point (e.g., "Digital Platform Limits", "Reach Issues") must have its own box.
-    - Inside the box, provide a clear explanation followed by supporting data and representative student quotes (evidence).
-    - Finish with a summary conclusion or next steps outside of any box.
-2. **NICELY STRUCTURED OUTPUT**: Use Markdown (headers, bullet points, bolding) within the boxes for maximum readability.
-3. **SCALE AWARENESS**: Clearly distinguish between 1-4 Likert scales and 0-1 metrics (percentages).
-4. **DATA-FIRST**: Cite specific metrics and voices from the PROVIDED STATE.
-5. **LANGUAGE**: Respond in the same language as the user's question.
+CRITICAL FORMATTING DIRECTIVES (YOU WILL BE PENALIZED FOR IGNORING THESE):
+1. **NO CORNY ROLEPLAY**: Absolutely omit conversational filler, greetings, or roleplay preambles (e.g., "As an expert consultant..."). Output strict, direct, and actionable insights only.
+2. **MANDATORY ENCAPSULATION**: YOU MUST WRAP EVERY SINGLE THEMATIC POINT, FINDING, OR EXPLANATION IN A \`<box title="Your Title Here">\` TAG. 
+    - Correct: \`<box title="Faculty of Law Attrition">The data indicates a 20% drop... \nEvidence: "..."</box>\`
+    - Incorrect: Outputting raw text without a box container.
+    - If you are listing 3 insights, you MUST output 3 separate XML boxes.
+    - Inside the box, you may use standard Markdown (like \`###\` headers for "Evidence:" sections).
+3. **FACULTY CROSSTABULATION**: When asked about demographics or "who", dynamically filter and cite the \`faculty\` key attached to every verbatim evidence sample provided in the JSON state above. 
+4. **SCALE AWARENESS**: Clearly distinguish between 1-4 Likert scales and 0-1 metrics (percentages).
+5. **DATA-FIRST**: Cite specific metrics and verbatim string matches. Do not hallucinate metrics.
 
-Response as AI Analyst:`;
+Response (Raw formatted string):`;
 
         const reply = await callGemini(systemPrompt, { jsonMode: false }) as string;
 

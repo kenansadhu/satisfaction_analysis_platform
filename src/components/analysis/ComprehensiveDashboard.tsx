@@ -11,8 +11,16 @@ import { Input } from "@/components/ui/input";
 import { Loader2, TrendingUp, AlertTriangle, Lightbulb, Filter, Sparkles, RefreshCcw, Save, Download, BarChart2, MessageSquare, ChevronRight, ChevronDown, X, Quote, Target, CheckCircle2, AlertCircle, Search, Table2, Check } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import UnitInsightChat from "./UnitInsightChat";
 import { useAnalysis } from "@/context/AnalysisContext";
+
+// --- IMPORT NEW SUB-COMPONENTS ---
+import DashboardFilters from "./DashboardFilters";
+import DashboardQualView from "./DashboardQualView";
+import DashboardQuantView from "./DashboardQuantView";
+import RawDataExplorer from "./RawDataExplorer";
+import DrillDownModal, { ActiveQuantDrillDown, ActiveQualDrillDown } from "./DrillDownModal";
 
 // --- TYPES ---
 type ChartData = { name: string; value: number; color?: string };
@@ -54,6 +62,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         total_segments: number;
         sentiment_counts: { Positive: number; Negative: number; Neutral: number };
         category_counts: any[];
+        faculty_counts: any[];
     } | null>(null);
 
     // Quantitative
@@ -71,8 +80,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     const [isFilterOpen, setIsFilterOpen] = useState(false);
 
     // Drill-Down States
-    const [activeQualDrillDown, setActiveQualDrillDown] = useState<{ category: string, sentiment: string } | null>(null);
-    const [activeQuantDrillDown, setActiveQuantDrillDown] = useState<{ question: string, filterValue: string, type: "SCORE" | "CATEGORY", entries: DrillDownEntry[], loading: boolean } | null>(null);
+    const [activeQualDrillDown, setActiveQualDrillDown] = useState<ActiveQualDrillDown | null>(null);
+    const [activeQuantDrillDown, setActiveQuantDrillDown] = useState<ActiveQuantDrillDown | null>(null);
 
     // Raw Data Explorer
     const [showRawData, setShowRawData] = useState(false);
@@ -178,7 +187,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                         }
                         if (!data || data.length === 0) break;
                         allData.push(...data);
-                        lastId = data[data.length - 1].id;
+                        lastId = (data as any[])[data.length - 1].id;
                         if (data.length < 100) break;
                     }
                 }
@@ -272,7 +281,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             let sampleSegments: any[] = [];
             let crossUnits: any[] = [];
 
+            let facCountsMap: Record<string, any> = {};
+
             filteredInputs.forEach((r: any) => {
+                const facName = r.respondents?.faculty_short_name || r.respondents?.faculty || "Unknown Faculty";
+
                 // Determine if this input mentions any segments
                 r.feedback_segments?.forEach((s: any) => {
                     const catName = catMap.get(s.category_id) || "Uncategorized";
@@ -301,6 +314,15 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                     }
                     catCountsMap[s.category_id].total += 1;
 
+                    // Aggregate Faculty Sentiments
+                    if (!facCountsMap[facName]) {
+                        facCountsMap[facName] = { faculty_name: facName, positive: 0, neutral: 0, negative: 0, total: 0 };
+                    }
+                    if (s.sentiment === 'Positive') facCountsMap[facName].positive += 1;
+                    if (s.sentiment === 'Neutral') facCountsMap[facName].neutral += 1;
+                    if (s.sentiment === 'Negative') facCountsMap[facName].negative += 1;
+                    facCountsMap[facName].total += 1;
+
                     sampleSegments.push({ ...s, category_name: catName });
 
                     // Cross-Unit Mentions logic
@@ -323,7 +345,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             setDashboardMetrics({
                 total_segments: totalSegments,
                 sentiment_counts: sentimentCounts,
-                category_counts: Object.values(catCountsMap)
+                category_counts: Object.values(catCountsMap),
+                faculty_counts: Object.values(facCountsMap)
             });
             setAllSegments(sampleSegments);
             setCrossUnitSegments(crossUnits);
@@ -455,6 +478,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         { name: 'Negative', value: sentimentCounts.Negative, color: '#ef4444' },
     ];
 
+    const facultyChartData = [...(dashboardMetrics?.faculty_counts || [])]
+        .sort((a, b) => b.positive - a.positive);
+
     // --- HANDLERS ---
     const handleQualDrillDown = (data: any) => {
         if (data && data.activePayload && data.activePayload.length > 0) {
@@ -516,8 +542,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     }, [unitId, surveyId, allSegments]);
 
     useEffect(() => {
-        if (showRawData) loadRawData(rawDataTab, rawDataPage, rawDataSearch);
-    }, [showRawData, rawDataTab, rawDataPage, rawDataSearch, loadRawData]);
+        loadRawData(rawDataTab, rawDataPage, rawDataSearch);
+    }, [rawDataTab, rawDataPage, rawDataSearch, loadRawData]);
 
     const exportToPdf = () => {
         toast.info("Preparing PDF... Please follow the browser print dialog.");
@@ -548,486 +574,189 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             )}
 
             {/* --- FILTER CONTROL ROW --- */}
-            <div className="print:hidden space-y-3">
-                <div className="flex items-center justify-between bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl shadow-sm">
-                    <div className="flex items-center gap-3">
-                        <Filter className="w-5 h-5 text-indigo-500" />
-                        <span className="font-medium text-slate-700 dark:text-slate-200">Data Filters</span>
+            <DashboardFilters
+                isFilterOpen={isFilterOpen}
+                setIsFilterOpen={setIsFilterOpen}
+                activeFilters={activeFilters}
+                setActiveFilters={setActiveFilters}
+                filterOptions={filterOptions}
+            />
 
-                        {(activeFilters.sentiment.length + activeFilters.location.length + activeFilters.faculty.length + activeFilters.program.length) > 0 && (
-                            <div className="flex items-center gap-2 ml-4">
-                                <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 hover:bg-indigo-100">
-                                    {activeFilters.sentiment.length + activeFilters.location.length + activeFilters.faculty.length + activeFilters.program.length} Active
-                                </Badge>
-                                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200" onClick={() => setActiveFilters({ sentiment: [], location: [], faculty: [], program: [] })}>Clear All</Button>
-                            </div>
-                        )}
+            {/* --- SUB TABS NAVIGATION --- */}
+            <Tabs defaultValue="overview" className="w-full space-y-6">
+                <TabsList className="grid w-full grid-cols-4 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden print:hidden">
+                    <TabsTrigger value="overview" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">
+                        <Target className="w-4 h-4" /> Overview
+                    </TabsTrigger>
+                    <TabsTrigger value="qualitative" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-pink-700 data-[state=active]:shadow-sm">
+                        <MessageSquare className="w-4 h-4" /> Qualitative Insights
+                    </TabsTrigger>
+                    <TabsTrigger value="quantitative" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-700 data-[state=active]:shadow-sm">
+                        <BarChart2 className="w-4 h-4" /> Performance Metrics
+                    </TabsTrigger>
+                    <TabsTrigger value="rawdata" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-slate-700 dark:data-[state=active]:text-slate-300 data-[state=active]:shadow-sm">
+                        <Table2 className="w-4 h-4" /> Raw Data Explorer
+                    </TabsTrigger>
+                </TabsList>
+
+                {/* TAB A: OVERVIEW */}
+                <TabsContent value="overview" className="space-y-8 focus-visible:ring-0">
+                    {/* --- UNIFIED METRICS ROW --- */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        {/* Sentiment Score */}
+                        <Card className="border-none shadow-lg bg-gradient-to-br from-indigo-600 to-violet-700 text-white relative group overflow-hidden print:break-inside-avoid">
+                            <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingUp className="w-24 h-24" /></div>
+                            <CardHeader className="pb-2"><CardDescription className="text-indigo-100 font-medium">Sentiment Index</CardDescription><CardTitle className="text-4xl font-bold">{sentimentScore}<span className="text-xl opacity-50">/100</span></CardTitle></CardHeader>
+                            <CardContent><div className="text-xs text-indigo-100 flex items-center gap-1">{sentimentScore >= 70 ? <Sparkles className="w-3 h-3" /> : sentimentScore >= 40 ? <TrendingUp className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />} {sentimentScore >= 70 ? "Excellent" : sentimentScore >= 40 ? "Moderate" : "Needs Focus"}</div></CardContent>
+                        </Card>
+
+                        {/* Avg Quant Score */}
+                        <Card className="border-slate-200 dark:border-slate-800 shadow-md bg-white dark:bg-slate-900 hover:shadow-lg transition-shadow print:break-inside-avoid">
+                            <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Avg. Rating</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{globalAvgScore}<span className="text-xl text-slate-400 dark:text-slate-500 font-normal">/4.0</span></CardTitle></CardHeader>
+                            <CardContent><div className="text-xs text-slate-500 dark:text-slate-300">Across {quantGroups.filter(g => g.type === "SCORE").length} metrics</div></CardContent>
+                        </Card>
+
+                        {/* Volume */}
+                        <Card className="border-slate-200 dark:border-slate-800 shadow-md bg-white dark:bg-slate-900 hover:shadow-lg transition-shadow print:break-inside-avoid">
+                            <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Analyzed Comments</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{baseRawInputs.length.toLocaleString()}</CardTitle></CardHeader>
+                            <CardContent>
+                                <div className="flex flex-col gap-1">
+                                    <div className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 font-medium"><MessageSquare className="w-3 h-3" /> {totalSegmentCount.toLocaleString()} segments extracted</div>
+                                    <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium"><CheckCircle2 className="w-3 h-3" /> {verifiedCount.toLocaleString()} / {totalSegmentCount.toLocaleString()} verified ({totalSegmentCount > 0 ? Math.round(verifiedCount / totalSegmentCount * 100) : 0}%)</div>
+                                    <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium"><BarChart2 className="w-3 h-3" /> {quantGroups.reduce((a, b) => a + b.totalResponses, 0).toLocaleString()} quantitative data points</div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Hot Spot */}
+                        <Card className="border-red-100 dark:border-red-900/30 shadow-md bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors print:break-inside-avoid">
+                            <CardHeader className="pb-2"><CardDescription className="font-medium text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Top Issue</CardDescription><CardTitle className="text-2xl font-bold text-red-900 dark:text-red-200 leading-tight md:text-xl line-clamp-2">{topNegativeCategory.name}</CardTitle></CardHeader>
+                            <CardContent><div className="text-xs text-red-700 dark:text-red-400/80"><strong>{topNegativeCategory.count}</strong> negative comments {sentimentCounts.Negative > 0 && <span className="text-red-500 dark:text-red-500/70">({Math.round(topNegativeCategory.count / sentimentCounts.Negative * 100)}% of all negatives)</span>}</div></CardContent>
+                        </Card>
                     </div>
-                    <Button variant="outline" size="sm" className="gap-2 dark:border-slate-700 dark:hover:bg-slate-800" onClick={() => setIsFilterOpen(!isFilterOpen)}>
-                        {isFilterOpen ? 'Close Filters' : 'Edit Filters'} <ChevronDown className={`w-4 h-4 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
-                    </Button>
-                </div>
 
-                {isFilterOpen && (
-                    <Card className="border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/30 dark:bg-indigo-950/20 shadow-inner animate-in slide-in-from-top-2">
-                        <CardContent className="p-5 grid grid-cols-1 md:grid-cols-4 gap-6">
+                    {/* --- CAROUSEL --- */}
+                    {randomQuotes.length > 0 && (
+                        <div className="bg-slate-900 text-slate-200 p-3 rounded-lg overflow-hidden relative shadow-inner">
+                            <div className="flex items-center gap-4 animate-marquee whitespace-nowrap">
+                                <span className="font-bold text-indigo-400 text-xs flex items-center gap-2 px-4 border-r border-slate-700">LIVE FEED</span>
+                                {randomQuotes.map((q, i) => (
+                                    <span key={i} className="mx-8 text-sm italic opacity-80 flex items-center gap-2">
+                                        <span className={`w-2 h-2 rounded-full ${q.sentiment === 'Positive' ? 'bg-green-400' : q.sentiment === 'Negative' ? 'bg-red-400' : 'bg-slate-400'}`} /> &ldquo;{q.segment_text}&rdquo;
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
-                            {/* Sentiment */}
-                            <div className="space-y-3">
-                                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1"><MessageSquare className="w-3 h-3" /> Sentiment</label>
-                                <div className="flex flex-col gap-2">
-                                    {['Positive', 'Neutral', 'Negative'].map(s => (
-                                        <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
-                                            <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
-                                                checked={activeFilters.sentiment.includes(s)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) setActiveFilters(p => ({ ...p, sentiment: [...p.sentiment, s] }));
-                                                    else setActiveFilters(p => ({ ...p, sentiment: p.sentiment.filter(x => x !== s) }));
-                                                }}
+                    {/* --- OVERALL SENTIMENT OVERVIEW --- */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                            <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Overall Sentiment Distribution</h2>
+                        </div>
+                        <Card className="shadow-md border-indigo-100 dark:border-indigo-900/30 bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-900 overflow-hidden">
+                            <CardContent className="h-[300px] pt-6 flex items-center justify-center relative">
+                                <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-800/20 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.5))] pointer-events-none" />
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={pieData}
+                                            cx="50%" cy="50%"
+                                            innerRadius={70} outerRadius={100}
+                                            paddingAngle={5}
+                                            dataKey="value"
+                                            stroke={isDark ? "#0f172a" : "#ffffff"}
+                                            strokeWidth={3}
+                                        >
+                                            {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} className="drop-shadow-sm hover:opacity-80 transition-opacity" />)}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
+                                            itemStyle={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 600 }}
+                                        />
+                                        <Legend verticalAlign="bottom" height={36} wrapperStyle={{ color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }} />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* --- FACULTY SENTIMENT DISTRIBUTION --- */}
+                    {facultyChartData.length > 0 && (
+                        <div className="space-y-4 pt-4">
+                            <div className="flex items-center gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                                <Target className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Sentiment Distribution by Faculty</h2>
+                            </div>
+                            <Card className="shadow-md border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                                <CardContent className="pt-6 relative" style={{ height: Math.max(300, facultyChartData.length * 40 + 60) + 'px' }}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={facultyChartData} layout="vertical" margin={{ top: 0, right: 30, bottom: 0, left: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke={isDark ? "#334155" : "#f1f5f9"} />
+                                            <XAxis type="number" tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+                                            <YAxis dataKey="faculty_name" type="category" width={200} tick={{ fontSize: 11, fill: isDark ? "#cbd5e1" : "#475569" }} axisLine={false} tickLine={false} />
+                                            <Tooltip
+                                                cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)' }}
+                                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                             />
-                                            <span className={`w-2 h-2 rounded-full ${s === 'Positive' ? 'bg-green-500' : s === 'Negative' ? 'bg-red-500' : 'bg-slate-400'}`} />
-                                            {s}
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Location */}
-                            <div className="space-y-3">
-                                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Location</label>
-                                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-                                    {filterOptions.locations.length === 0 ? <span className="text-xs text-slate-400 italic">No locations</span> : filterOptions.locations.map(s => (
-                                        <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
-                                            <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
-                                                checked={activeFilters.location.includes(s)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) setActiveFilters(p => ({ ...p, location: [...p.location, s] }));
-                                                    else setActiveFilters(p => ({ ...p, location: p.location.filter(x => x !== s) }));
-                                                }}
-                                            /> <span className="truncate" title={s}>{s}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Faculty */}
-                            <div className="space-y-3">
-                                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Faculty</label>
-                                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-                                    {filterOptions.faculties.length === 0 ? <span className="text-xs text-slate-400 italic">No faculties</span> : filterOptions.faculties.map(s => (
-                                        <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
-                                            <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
-                                                checked={activeFilters.faculty.includes(s)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) setActiveFilters(p => ({ ...p, faculty: [...p.faculty, s] }));
-                                                    else setActiveFilters(p => ({ ...p, faculty: p.faculty.filter(x => x !== s) }));
-                                                }}
-                                            /> <span className="truncate" title={s}>{s}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Study Program */}
-                            <div className="space-y-3">
-                                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Study Program</label>
-                                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-                                    {filterOptions.programs.length === 0 ? <span className="text-xs text-slate-400 italic">No programs</span> : filterOptions.programs.map(s => (
-                                        <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
-                                            <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
-                                                checked={activeFilters.program.includes(s)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) setActiveFilters(p => ({ ...p, program: [...p.program, s] }));
-                                                    else setActiveFilters(p => ({ ...p, program: p.program.filter(x => x !== s) }));
-                                                }}
-                                            /> <span className="truncate" title={s}>{s}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                        </CardContent>
-                    </Card>
-                )}
-            </div>
-
-            {/* --- UNIFIED METRICS ROW --- */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                {/* Sentiment Score */}
-                <Card className="border-none shadow-lg bg-gradient-to-br from-indigo-600 to-violet-700 text-white relative group overflow-hidden print:break-inside-avoid">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingUp className="w-24 h-24" /></div>
-                    <CardHeader className="pb-2"><CardDescription className="text-indigo-100 font-medium">Sentiment Index</CardDescription><CardTitle className="text-4xl font-bold">{sentimentScore}<span className="text-xl opacity-50">/100</span></CardTitle></CardHeader>
-                    <CardContent><div className="text-xs text-indigo-100 flex items-center gap-1">{sentimentScore >= 70 ? <Sparkles className="w-3 h-3" /> : sentimentScore >= 40 ? <TrendingUp className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />} {sentimentScore >= 70 ? "Excellent" : sentimentScore >= 40 ? "Moderate" : "Needs Focus"}</div></CardContent>
-                </Card>
-
-                {/* Avg Quant Score */}
-                <Card className="border-slate-200 dark:border-slate-800 shadow-md bg-white dark:bg-slate-900 hover:shadow-lg transition-shadow print:break-inside-avoid">
-                    <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Avg. Rating</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{globalAvgScore}<span className="text-xl text-slate-400 dark:text-slate-500 font-normal">/4.0</span></CardTitle></CardHeader>
-                    <CardContent><div className="text-xs text-slate-500 dark:text-slate-300">Across {quantGroups.filter(g => g.type === "SCORE").length} metrics</div></CardContent>
-                </Card>
-
-                {/* Volume */}
-                <Card className="border-slate-200 dark:border-slate-800 shadow-md bg-white dark:bg-slate-900 hover:shadow-lg transition-shadow print:break-inside-avoid">
-                    <CardHeader className="pb-2"><CardDescription className="font-medium text-slate-500 dark:text-slate-300">Analyzed Comments</CardDescription><CardTitle className="text-4xl font-bold text-slate-800 dark:text-slate-100">{baseRawInputs.length.toLocaleString()}</CardTitle></CardHeader>
-                    <CardContent>
-                        <div className="flex flex-col gap-1">
-                            <div className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 font-medium"><MessageSquare className="w-3 h-3" /> {totalSegmentCount.toLocaleString()} segments extracted</div>
-                            <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium"><CheckCircle2 className="w-3 h-3" /> {verifiedCount.toLocaleString()} / {totalSegmentCount.toLocaleString()} verified ({totalSegmentCount > 0 ? Math.round(verifiedCount / totalSegmentCount * 100) : 0}%)</div>
-                            <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium"><BarChart2 className="w-3 h-3" /> {quantGroups.reduce((a, b) => a + b.totalResponses, 0).toLocaleString()} quantitative data points</div>
+                                            <Legend verticalAlign="top" height={36} wrapperStyle={{ color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500, paddingBottom: '20px' }} />
+                                            <Bar dataKey="positive" name="Positive" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
+                                            <Bar dataKey="neutral" name="Neutral" stackId="a" fill="#94a3b8" radius={[0, 0, 0, 0]} />
+                                            <Bar dataKey="negative" name="Negative" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
                         </div>
-                    </CardContent>
-                </Card>
+                    )}
+                </TabsContent>
 
-                {/* Hot Spot */}
-                <Card className="border-red-100 dark:border-red-900/30 shadow-md bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors print:break-inside-avoid">
-                    <CardHeader className="pb-2"><CardDescription className="font-medium text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Top Issue</CardDescription><CardTitle className="text-2xl font-bold text-red-900 dark:text-red-200 leading-tight md:text-xl line-clamp-2">{topNegativeCategory.name}</CardTitle></CardHeader>
-                    <CardContent><div className="text-xs text-red-700 dark:text-red-400/80"><strong>{topNegativeCategory.count}</strong> negative comments {sentimentCounts.Negative > 0 && <span className="text-red-500 dark:text-red-500/70">({Math.round(topNegativeCategory.count / sentimentCounts.Negative * 100)}% of all negatives)</span>}</div></CardContent>
-                </Card>
-            </div>
+                {/* TAB B: QUALITATIVE INSIGHTS */}
+                <TabsContent value="qualitative" className="focus-visible:ring-0">
+                    <DashboardQualView
+                        catCounts={catCounts}
+                        handleQualDrillDown={handleQualDrillDown}
+                        crossUnitSegments={crossUnitSegments}
+                    />
+                </TabsContent>
 
+                {/* TAB C: QUANTITATIVE PERFORMANCE */}
+                <TabsContent value="quantitative" className="focus-visible:ring-0">
+                    <DashboardQuantView
+                        quantGroups={quantGroups}
+                        handleQuantDrillDown={handleQuantDrillDown}
+                    />
+                </TabsContent>
 
+                {/* TAB D: RAW DATA EXPLORER */}
+                <TabsContent value="rawdata" className="focus-visible:ring-0">
+                    <RawDataExplorer
+                        rawDataTab={rawDataTab}
+                        setRawDataTab={setRawDataTab}
+                        showRawData={true} // Always open in its dedicated tab
+                        setShowRawData={() => { }} // Not toggleable when in its own tab
+                        rawDataPage={rawDataPage}
+                        setRawDataPage={setRawDataPage}
+                        rawDataSearch={rawDataSearch}
+                        setRawDataSearch={setRawDataSearch}
+                        rawDataLoading={rawDataLoading}
+                        rawDataEntries={rawDataEntries}
+                        rawDataTotal={rawDataTotal}
+                        RAW_PAGE_SIZE={RAW_PAGE_SIZE}
+                    />
+                </TabsContent>
 
-            {/* --- CAROUSEL --- */}
-            {randomQuotes.length > 0 && (
-                <div className="bg-slate-900 text-slate-200 p-3 rounded-lg overflow-hidden relative shadow-inner">
-                    <div className="flex items-center gap-4 animate-marquee whitespace-nowrap">
-                        <span className="font-bold text-indigo-400 text-xs flex items-center gap-2 px-4 border-r border-slate-700">LIVE FEED</span>
-                        {randomQuotes.map((q, i) => (
-                            <span key={i} className="mx-8 text-sm italic opacity-80 flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${q.sentiment === 'Positive' ? 'bg-green-400' : q.sentiment === 'Negative' ? 'bg-red-400' : 'bg-slate-400'}`} /> &ldquo;{q.segment_text}&rdquo;
-                            </span>
-                        ))}
-                    </div>
-                </div>
-            )}
+            </Tabs>
 
-            {/* --- SENTIMENT BY CATEGORY (FULL WIDTH) --- */}
-            <Card className="shadow-sm border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 print:break-inside-avoid">
-                <CardHeader className="pb-2">
-                    <div className="flex items-center gap-2"><MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /><CardTitle className="text-base text-slate-800 dark:text-slate-100">Sentiment by Category</CardTitle></div>
-                    <CardDescription className="dark:text-slate-400">Click bars to view comments. {Object.keys(catCounts).length} categories detected.</CardDescription>
-                </CardHeader>
-                <CardContent style={{ height: `${Math.max(300, Object.keys(catCounts).length * 40)}px` }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={Object.values(catCounts)} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }} onClick={handleQualDrillDown}>
-                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                            <XAxis type="number" tick={{ fill: isDark ? "#94a3b8" : "#64748b" }} />
-                            <YAxis dataKey="name" type="category" width={140} tick={{ fontSize: 11, fill: isDark ? "#cbd5e1" : "#475569" }} />
-                            <Tooltip cursor={{ fill: isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)' }} contentStyle={isDark ? { backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' } : undefined} />
-                            <Legend wrapperStyle={{ color: isDark ? "#cbd5e1" : undefined }} />
-                            <Bar dataKey="positive" stackId="a" fill="#4ade80" name="Positive" radius={[4, 0, 0, 4]} cursor="pointer" />
-                            <Bar dataKey="neutral" stackId="a" fill="#94a3b8" name="Neutral" cursor="pointer" />
-                            <Bar dataKey="negative" stackId="a" fill="#f87171" name="Negative" radius={[0, 4, 4, 0]} cursor="pointer" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </CardContent>
-            </Card>
-
-            {/* QUAL DRILL DOWN PREVIEW */}
-            {activeQualDrillDown && (
-                <Card className="border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-indigo-950/20 animate-in fade-in slide-in-from-top-2 print:hidden">
-                    <CardHeader className="py-3 flex flex-row items-center justify-between">
-                        <div className="text-sm font-medium text-indigo-900 dark:text-indigo-300">Drill Down: {activeQualDrillDown.category} ({activeQualDrillDown.sentiment})</div>
-                        <Button variant="ghost" size="sm" onClick={() => setActiveQualDrillDown(null)} className="h-6 w-6 p-0 dark:text-slate-400 dark:hover:text-slate-200"><X className="w-4 h-4" /></Button>
-                    </CardHeader>
-                    <CardContent className="max-h-[300px] overflow-y-auto space-y-2">
-                        {allSegments.filter(s => s.category_name === activeQualDrillDown.category && (activeQualDrillDown.sentiment === 'Positive' ? s.sentiment === 'Positive' : activeQualDrillDown.sentiment === 'Negative' ? s.sentiment === 'Negative' : s.sentiment === 'Neutral')).map(s => (
-                            <div key={s.id} className="bg-white dark:bg-slate-900 p-2 text-xs rounded border border-indigo-100 dark:border-slate-800 shadow-sm dark:text-slate-300">&ldquo;{s.segment_text}&rdquo;</div>
-                        ))}
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* --- OVERALL SENTIMENT --- */}
-            <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
-                    <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Overall Sentiment Distribution</h2>
-                </div>
-                <Card className="shadow-md border-indigo-100 dark:border-indigo-900/30 bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-900 overflow-hidden">
-                    <CardContent className="h-[300px] pt-6 flex items-center justify-center relative">
-                        <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-800/20 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.5))] pointer-events-none" />
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={pieData}
-                                    cx="50%" cy="50%"
-                                    innerRadius={70} outerRadius={100}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                    stroke={isDark ? "#0f172a" : "#ffffff"}
-                                    strokeWidth={3}
-                                >
-                                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} className="drop-shadow-sm hover:opacity-80 transition-opacity" />)}
-                                </Pie>
-                                <Tooltip
-                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-                                    itemStyle={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 600 }}
-                                />
-                                <Legend verticalAlign="bottom" height={36} wrapperStyle={{ color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* --- QUANTITATIVE METRICS by Scale --- */}
-            <div className="space-y-8">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
-                    <BarChart2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Performance Metrics</h2>
-                </div>
-
-                {quantGroups.length === 0 && <div className="text-center py-10 text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">No quantitative columns detected.</div>}
-
-                {/* 1-4 Scale (Likert / Ratings) */}
-                {quantGroups.filter(g => g.type === "SCORE" && g.chartData.some(d => parseFloat(d.name) > 1)).length > 0 && (
-                    <div className="space-y-4">
-                        <h3 className="text-sm font-semibold text-slate-500 tracking-widest uppercase ml-1">Satisfaction Scores (1.0 - 4.0)</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {quantGroups.filter(g => g.type === "SCORE" && g.chartData.some(d => parseFloat(d.name) > 1)).map((group, idx) => (
-                                <Card key={`4scale-${idx}`} className="hover:shadow-lg transition-all duration-300 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 group">
-                                    <CardHeader className="py-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800 relative overflow-hidden">
-                                        <div className="absolute top-0 right-0 w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-bl-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                                        <div className="flex justify-between items-start gap-4 z-10 relative">
-                                            <CardTitle className="text-sm font-semibold text-slate-800 dark:text-slate-100 line-clamp-2 leading-relaxed" title={group.question}>{group.question}</CardTitle>
-                                            <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 font-bold whitespace-nowrap text-xs">{group.average}</Badge>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="py-4 h-[180px]">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={group.chartData} layout="horizontal" margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#f1f5f9"} />
-                                                <XAxis dataKey="name" tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-                                                <YAxis tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-                                                <Tooltip cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                <Bar dataKey="value" barSize={24} radius={[4, 4, 0, 0]} onClick={(d: any) => handleQuantDrillDown(group.question, group.type, d.name)}>
-                                                    {group.chartData.map((e, i) => <Cell key={i} fill={e.color || "#3b82f6"} className="cursor-pointer hover:opacity-80 transition-opacity" />)}
-                                                </Bar>
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* 0-1 Scale (Binary / Yes-No) */}
-                {quantGroups.filter(g => g.type === "SCORE" && !g.chartData.some(d => parseFloat(d.name) > 1)).length > 0 && (
-                    <div className="space-y-4">
-                        <h3 className="text-sm font-semibold text-slate-500 tracking-widest uppercase ml-1">Binary Indicators (0.0 - 1.0)</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {quantGroups.filter(g => g.type === "SCORE" && !g.chartData.some(d => parseFloat(d.name) > 1)).map((group, idx) => (
-                                <Card key={`bin-${idx}`} className="hover:shadow-lg transition-all duration-300 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                                    <CardHeader className="py-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800">
-                                        <div className="flex justify-between items-start gap-4">
-                                            <CardTitle className="text-sm font-semibold text-slate-800 dark:text-slate-100 line-clamp-2 leading-relaxed" title={group.question}>{group.question}</CardTitle>
-                                            <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 font-bold whitespace-nowrap text-xs">{group.average}</Badge>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="py-4 h-[150px]">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={group.chartData} layout="horizontal" margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#f1f5f9"} />
-                                                <XAxis dataKey="name" tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-                                                <YAxis tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-                                                <Tooltip cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                <Bar dataKey="value" barSize={32} radius={[4, 4, 0, 0]} fill="#10b981" onClick={(d: any) => handleQuantDrillDown(group.question, group.type, d.name)} className="cursor-pointer hover:opacity-80 transition-opacity" />
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Categorical Distribution */}
-                {quantGroups.filter(g => g.type === "CATEGORY").length > 0 && (
-                    <div className="space-y-4">
-                        <h3 className="text-sm font-semibold text-slate-500 tracking-widest uppercase ml-1">Categorical Distributions</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {quantGroups.filter(g => g.type === "CATEGORY").map((group, idx) => (
-                                <Card key={`cat-${idx}`} className="hover:shadow-lg transition-all duration-300 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                                    <CardHeader className="py-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800">
-                                        <div className="flex justify-between items-start gap-4">
-                                            <CardTitle className="text-sm font-semibold text-slate-800 dark:text-slate-100 line-clamp-2 leading-relaxed" title={group.question}>{group.question}</CardTitle>
-                                            <Badge variant="outline" className="border-violet-200 text-violet-700 dark:border-violet-800 dark:text-violet-400 font-medium whitespace-nowrap text-xs">Categories</Badge>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="py-4 h-[250px]">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={group.chartData} layout="vertical" margin={{ top: 0, right: 30, bottom: 0, left: 0 }}>
-                                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke={isDark ? "#334155" : "#f1f5f9"} />
-                                                <XAxis type="number" tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-                                                <YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 11, fill: isDark ? "#cbd5e1" : "#475569" }} axisLine={false} tickLine={false} />
-                                                <Tooltip cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                <Bar dataKey="value" barSize={16} radius={[0, 4, 4, 0]} fill="#8b5cf6" onClick={(d: any) => handleQuantDrillDown(group.question, group.type, d.name)}>
-                                                    {group.chartData.map((e, i) => <Cell key={i} fill={e.color || "#8b5cf6"} className="cursor-pointer hover:opacity-80 transition-opacity" />)}
-                                                </Bar>
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* --- CROSS-UNIT MENTIONS TABLE --- */}
-            {crossUnitSegments.length > 0 && (
-                <Card className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm print:hidden">
-                    <CardHeader className="py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                        <div className="flex items-center gap-2">
-                            <Lightbulb className="w-5 h-5 text-amber-500" />
-                            <CardTitle className="text-base text-slate-800 dark:text-slate-100">Cross-Unit Mentions</CardTitle>
-                            <Badge variant="outline" className="text-[10px] ml-2 border-amber-200 text-amber-700 bg-amber-50 dark:border-amber-900/40 dark:text-amber-400 dark:bg-amber-950/20">{crossUnitSegments.length} comments</Badge>
-                        </div>
-                        <CardDescription className="dark:text-slate-500">Comments processed in this unit that explicitly mention or relate to other departments.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-0 max-h-[400px] overflow-y-auto custom-scrollbar">
-                        <table className="w-full text-xs">
-                            <thead className="bg-slate-50 dark:bg-slate-950/50 sticky top-0 z-10 shadow-sm">
-                                <tr>
-                                    <th className="text-left p-3 font-medium text-slate-600 dark:text-slate-300 w-[45%]">Student Comment</th>
-                                    <th className="text-left p-3 font-medium text-slate-600 dark:text-slate-300">Sentiment</th>
-                                    <th className="text-left p-3 font-medium text-slate-600 dark:text-slate-300">Category</th>
-                                    <th className="text-left p-3 font-medium text-slate-600 dark:text-slate-300">Tagged Units</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {crossUnitSegments.map((entry, i) => (
-                                    <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                                        <td className="p-3 text-slate-700 dark:text-slate-300 leading-relaxed">&ldquo;{entry.segment_text}&rdquo;</td>
-                                        <td className="p-3">
-                                            <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${entry.sentiment === 'Positive' ? 'text-green-700 dark:text-green-400' : entry.sentiment === 'Negative' ? 'text-red-700 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>
-                                                <span className={`w-1.5 h-1.5 rounded-full ${entry.sentiment === 'Positive' ? 'bg-green-500' : entry.sentiment === 'Negative' ? 'bg-red-500' : 'bg-slate-400'}`} />
-                                                {entry.sentiment}
-                                            </span>
-                                        </td>
-                                        <td className="p-3"><Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">{entry.category_name}</Badge></td>
-                                        <td className="p-3"><span className="font-semibold text-indigo-600 dark:text-indigo-400">{entry.tagged_units}</span></td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* --- RAW DATA EXPLORER --- */}
-            <Card className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm print:hidden">
-                <CardHeader className="py-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors" onClick={() => setShowRawData(!showRawData)}>
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Table2 className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-                            <CardTitle className="text-base text-slate-800 dark:text-slate-100">Raw Data Explorer</CardTitle>
-                            <Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">Verify</Badge>
-                        </div>
-                        <ChevronDown className={`w-4 h-4 text-slate-400 dark:text-slate-500 transition-transform ${showRawData ? 'rotate-180' : ''}`} />
-                    </div>
-                    <CardDescription className="dark:text-slate-500">Click to inspect actual comments and ratings</CardDescription>
-                </CardHeader>
-                {showRawData && (
-                    <CardContent className="pt-0">
-                        {/* Tab Switcher */}
-                        <div className="flex items-center gap-4 mb-4 border-b border-slate-200 dark:border-slate-800">
-                            <button onClick={() => { setRawDataTab("comments"); setRawDataPage(0); }} className={`pb-2 text-sm font-medium border-b-2 transition-colors ${rawDataTab === "comments" ? "border-indigo-500 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200"}`}>
-                                <MessageSquare className="w-3 h-3 inline mr-1" /> Comments
-                            </button>
-                            <button onClick={() => { setRawDataTab("ratings"); setRawDataPage(0); }} className={`pb-2 text-sm font-medium border-b-2 transition-colors ${rawDataTab === "ratings" ? "border-indigo-500 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200"}`}>
-                                <BarChart2 className="w-3 h-3 inline mr-1" /> Ratings
-                            </button>
-                            <div className="flex-1" />
-                            <div className="relative mb-1">
-                                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <Input placeholder="Search..." className="h-7 pl-7 text-xs w-40 dark:bg-slate-800 dark:border-slate-700" value={rawDataSearch} onChange={e => { setRawDataSearch(e.target.value); setRawDataPage(0); }} />
-                            </div>
-                        </div>
-
-                        {/* Table */}
-                        {rawDataLoading ? (
-                            <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
-                        ) : (
-                            <>
-                                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-                                    <table className="w-full text-xs">
-                                        <thead className="bg-slate-50 dark:bg-slate-950/50">
-                                            <tr>
-                                                {rawDataTab === "comments" ? (
-                                                    <>
-                                                        <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300 w-[50%]">Comment</th>
-                                                        <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Category</th>
-                                                        <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Sentiment</th>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300 w-[40%]">Question</th>
-                                                        <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Score</th>
-                                                        <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Raw Text</th>
-                                                    </>
-                                                )}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {rawDataEntries.map((entry, i) => (
-                                                <tr key={entry.id || i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                                                    {rawDataTab === "comments" ? (
-                                                        <>
-                                                            <td className="p-2 text-slate-700 dark:text-slate-300">{entry.segment_text}</td>
-                                                            <td className="p-2"><Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">{entry.category_name}</Badge></td>
-                                                            <td className="p-2"><span className={`inline-flex items-center gap-1 text-[10px] font-medium ${entry.sentiment === 'Positive' ? 'text-green-700 dark:text-green-400' : entry.sentiment === 'Negative' ? 'text-red-700 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}><span className={`w-1.5 h-1.5 rounded-full ${entry.sentiment === 'Positive' ? 'bg-green-500' : entry.sentiment === 'Negative' ? 'bg-red-500' : 'bg-slate-400'}`} />{entry.sentiment}</span></td>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <td className="p-2 text-slate-700 dark:text-slate-300 font-medium">{entry.source_column}</td>
-                                                            <td className="p-2"><Badge className={`text-[10px] ${entry.numerical_score <= 1 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : entry.numerical_score === 2 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'}`}>{entry.numerical_score}</Badge></td>
-                                                            <td className="p-2 text-slate-500 dark:text-slate-400 italic">{entry.raw_text || '—'}</td>
-                                                        </>
-                                                    )}
-                                                </tr>
-                                            ))}
-                                            {rawDataEntries.length === 0 && (
-                                                <tr><td colSpan={3} className="p-6 text-center text-slate-400 dark:text-slate-500">No data found.</td></tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {/* Pagination */}
-                                <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
-                                    <span>Showing {rawDataPage * RAW_PAGE_SIZE + 1}–{Math.min((rawDataPage + 1) * RAW_PAGE_SIZE, rawDataTotal)} of {rawDataTotal}</span>
-                                    <div className="flex gap-1">
-                                        <Button variant="outline" size="sm" className="h-6 text-xs" disabled={rawDataPage === 0} onClick={() => setRawDataPage(p => p - 1)}>Previous</Button>
-                                        <Button variant="outline" size="sm" className="h-6 text-xs" disabled={(rawDataPage + 1) * RAW_PAGE_SIZE >= rawDataTotal} onClick={() => setRawDataPage(p => p + 1)}>Next</Button>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </CardContent>
-                )}
-            </Card>
-
-            {/* --- QUANT DRILL DOWN MODAL --- */}
-            {activeQuantDrillDown && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 print:hidden">
-                    <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col m-4 border border-slate-200 dark:border-slate-800">
-                        <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
-                            <h3 className="font-semibold text-slate-800 dark:text-slate-100">Drill Down: {activeQuantDrillDown.filterValue}</h3>
-                            <Button variant="ghost" size="sm" onClick={() => setActiveQuantDrillDown(null)} className="dark:text-slate-400 dark:hover:text-slate-200"><X className="w-4 h-4" /></Button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                            {activeQuantDrillDown.loading ? <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /> :
-                                activeQuantDrillDown.entries.map((e, i) => (
-                                    <div key={e.id} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded border border-slate-100 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300">{e.raw_text || <em>(No text response)</em>}</div>
-                                ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
+            {/* --- DRILL DOWN MODALS --- */}
+            <DrillDownModal
+                activeQuantDrillDown={activeQuantDrillDown}
+                setActiveQuantDrillDown={setActiveQuantDrillDown}
+                activeQualDrillDown={activeQualDrillDown}
+                setActiveQualDrillDown={setActiveQualDrillDown}
+                allSegments={allSegments}
+            />
         </div>
     );
 }

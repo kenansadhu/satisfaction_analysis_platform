@@ -84,6 +84,9 @@ function BoxedMessageRenderer({ content }: { content: string }) {
                                             <span className="leading-relaxed" {...props} />
                                         </div>
                                     ),
+                                    h3: ({ node, ...props }) => (
+                                        <h3 className="text-base font-black text-slate-800 dark:text-slate-200 mt-8 mb-4 border-b border-indigo-100 dark:border-indigo-900/50 pb-2" {...props} />
+                                    ),
                                     h4: ({ node, ...props }) => (
                                         <h4 className="text-xs font-black text-indigo-500 uppercase tracking-[0.3em] mb-4 mt-8 first:mt-0 flex items-center gap-2" {...props} />
                                     ),
@@ -245,12 +248,12 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
         <Tabs defaultValue="strategy" className="w-full h-full flex flex-col animate-in fade-in duration-700">
             {/* Sub-tab Navigation (Matching Main Page Style) */}
             <div className="flex items-center justify-center mb-8 shrink-0">
-                <TabsList className="grid w-full max-w-2xl grid-cols-2 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden">
-                    <TabsTrigger value="strategy" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm font-bold text-[13px]">
-                        <LayoutDashboard className="w-4 h-4" /> 1. Strategic Analysis
+                <TabsList className="grid w-full max-w-2xl grid-cols-2 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-0 h-12 shadow-sm rounded-xl overflow-hidden print:hidden">
+                    <TabsTrigger value="strategy" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">
+                        <LayoutDashboard className="w-4 h-4 flex-shrink-0" /> 1. Strategic Analysis
                     </TabsTrigger>
-                    <TabsTrigger value="chat" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-pink-600 data-[state=active]:shadow-sm font-bold text-[13px]">
-                        <MessageSquare className="w-4 h-4" /> 2. Interactive AI Assistant
+                    <TabsTrigger value="chat" className="h-full rounded-none gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-pink-600 data-[state=active]:shadow-sm">
+                        <MessageSquare className="w-4 h-4 flex-shrink-0" /> 2. Interactive AI Assistant
                     </TabsTrigger>
                 </TabsList>
             </div>
@@ -259,7 +262,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
             <TabsContent value="strategy" className="flex-1 min-h-0 focus-visible:ring-0">
                 <div className="flex gap-6 h-full">
                     {/* Strategy Sidebar */}
-                    <div className="w-72 flex flex-col gap-4 shrink-0">
+                    <div className="w-72 flex flex-col gap-4 shrink-0 print:hidden">
                         <Card className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
                             <CardHeader className="py-4 px-6 bg-slate-50/50 dark:bg-slate-800/20 border-b border-slate-100 dark:border-slate-800">
                                 <CardTitle className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
@@ -300,9 +303,9 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <CardTitle className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter flex items-center gap-3">
-                                                <Lightbulb className="w-7 h-7 text-amber-500" /> Strategic Synthesis Report
+                                                <Lightbulb className="w-7 h-7 text-amber-500" /> Executive Analysis Report
                                             </CardTitle>
-                                            <CardDescription className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-widest">Boardroom Intelligence Console</CardDescription>
+                                            <CardDescription className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-widest">AI-Generated Insights Summary</CardDescription>
                                         </div>
                                         <Badge className={`px-5 py-2 text-xs font-black uppercase tracking-[0.2em] shadow-lg ${report.overall_verdict === 'Excellent' ? 'bg-emerald-500' : report.overall_verdict === 'Good' ? 'bg-indigo-600' : report.overall_verdict === 'Needs Improvement' ? 'bg-amber-600' : 'bg-red-600'}`}>
                                             Verdict: {report.overall_verdict}
@@ -318,7 +321,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                             <h4 className="text-xs font-black text-indigo-500 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
                                                 <FileText className="w-5 h-5" /> Executive summary
                                             </h4>
-                                            <p className="text-lg text-slate-800 dark:text-slate-200 leading-relaxed font-serif italic border-l-4 border-indigo-500/50 pl-8 transition-colors">
+                                            <p className="text-lg text-slate-800 dark:text-slate-200 leading-relaxed italic border-l-4 border-indigo-500/50 pl-8 transition-colors">
                                                 {report.executive_summary}
                                             </p>
                                         </div>
@@ -401,7 +404,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                         </div>
 
                                         <div className="pt-12 text-center pb-8 border-t border-slate-100 dark:border-slate-800">
-                                            <p className="text-lg font-serif text-slate-500 italic max-w-2xl mx-auto leading-relaxed opacity-70">
+                                            <p className="text-lg text-slate-500 italic max-w-2xl mx-auto leading-relaxed opacity-70">
                                                 &ldquo;{report.closing_statement}&rdquo;
                                             </p>
                                         </div>
@@ -425,7 +428,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
             <TabsContent value="chat" className="flex-1 min-h-0 focus-visible:ring-0">
                 <div className="flex gap-6 h-full">
                     {/* Chat Sidebar */}
-                    <div className="w-72 flex flex-col gap-4 shrink-0">
+                    <div className="w-72 flex flex-col gap-4 shrink-0 print:hidden">
                         <Card className="flex-1 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden flex flex-col shadow-sm">
                             <CardHeader className="py-4 px-6 bg-slate-50/50 dark:bg-slate-800/20 border-b border-slate-100 dark:border-slate-800">
                                 <CardTitle className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
@@ -465,7 +468,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                         <Button
                             variant="outline"
                             className="w-full gap-3 text-xs h-12 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 font-bold rounded-2xl shadow-sm hover:shadow-md transition-all"
-                            onClick={() => toast.info("PDF Export is being finalized!")}
+                            onClick={() => window.print()}
                         >
                             <Download className="w-4 h-4 text-slate-400" /> Export Discussion Report
                         </Button>
@@ -482,7 +485,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                         <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-none">
                                             <Bot className="w-5 h-5 text-white" />
                                         </div>
-                                        Interactive Intelligence Console
+                                        AI Analysis Assistant
                                     </div>
                                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100/50 dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-800/50">
                                         <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />

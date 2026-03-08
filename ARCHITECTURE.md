@@ -33,6 +33,17 @@ organization_units
   ├─ analysis_context (AI instructions for this unit)
   ├─ analysis_status ("NOT_STARTED" | "IN_PROGRESS" | "COMPLETED")
 
+faculties
+  ├─ id (PK)
+  ├─ name (unique text)
+  ├─ short_name (text, nullable)
+
+study_programs
+  ├─ id (PK)
+  ├─ faculty_id (FK → faculties)
+  ├─ name (unique text)
+  ├─ short_name (text, nullable)
+
 faculty_enrollments
   ├─ id (PK)
   ├─ unit_id (FK → organization_units), survey_id (FK → surveys)
