@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import { BoxedMessageRenderer } from "./BoxedMessageRenderer";
 
 type Message = {
     id: string;
@@ -30,86 +30,6 @@ type ExecutiveReportData = {
     recommendations: { title: string; action: string; impact: string; priority: "Immediate" | "Short-term" | "Long-term" }[];
     closing_statement: string;
 };
-
-// --- NEW STRUCTURED MESSAGE RENDERER ---
-function BoxedMessageRenderer({ content }: { content: string }) {
-    // Regex for <box title="...">...</box>
-    const boxRegex = /<box title="([^"]+)">([\s\S]*?)<\/box>/g;
-    const parts: { type: 'text' | 'box', title?: string, content: string }[] = [];
-    let lastIndex = 0;
-    let match;
-
-    while ((match = boxRegex.exec(content)) !== null) {
-        if (match.index > lastIndex) {
-            parts.push({ type: 'text', content: content.slice(lastIndex, match.index) });
-        }
-        parts.push({ type: 'box', title: match[1], content: match[2] });
-        lastIndex = boxRegex.lastIndex;
-    }
-
-    if (lastIndex < content.length) {
-        parts.push({ type: 'text', content: content.slice(lastIndex) });
-    }
-
-    // Default markdown if no boxes
-    if (parts.length === 0) {
-        return (
-            <div className="prose prose-slate prose-indigo dark:prose-invert max-w-none 
-                prose-p:leading-relaxed prose-headings:font-black prose-headings:tracking-tighter prose-headings:text-indigo-600 dark:prose-headings:text-indigo-400
-                prose-blockquote:border-l-4 prose-blockquote:border-l-indigo-500 prose-blockquote:bg-indigo-50/20 dark:prose-blockquote:bg-indigo-900/10 
-                prose-blockquote:rounded-r-2xl prose-blockquote:px-8 prose-blockquote:py-2
-                prose-strong:text-indigo-700 dark:prose-strong:text-indigo-300
-                prose-code:text-indigo-600 dark:prose-code:text-indigo-400 prose-code:font-black">
-                <ReactMarkdown>{content}</ReactMarkdown>
-            </div>
-        );
-    }
-
-    return (
-        <div className="space-y-8">
-            {parts.map((part, i) => (
-                part.type === 'box' ? (
-                    <Card key={i} className="border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-slate-900/50 shadow-sm overflow-hidden rounded-[2rem] border-2 group hover:border-indigo-400 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4">
-                        <CardHeader className="py-5 px-8 border-b border-indigo-100/50 dark:border-indigo-900/50 bg-white dark:bg-slate-950">
-                            <CardTitle className="text-sm font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-3">
-                                <Sparkles className="w-4 h-4 text-amber-500" /> {part.title}
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-8 prose prose-indigo dark:prose-invert max-w-none text-[15px] leading-relaxed">
-                            <ReactMarkdown
-                                components={{
-                                    blockquote: ({ node, ...props }) => (
-                                        <div className="text-sm text-indigo-700/80 dark:text-indigo-400/60 italic flex items-start gap-4 bg-white dark:bg-black/20 p-6 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/50 shadow-sm my-6">
-                                            <Quote className="w-4 h-4 mt-1 shrink-0 text-indigo-300" />
-                                            <span className="leading-relaxed" {...props} />
-                                        </div>
-                                    ),
-                                    h3: ({ node, ...props }) => (
-                                        <h3 className="text-base font-black text-slate-800 dark:text-slate-200 mt-8 mb-4 border-b border-indigo-100 dark:border-indigo-900/50 pb-2" {...props} />
-                                    ),
-                                    h4: ({ node, ...props }) => (
-                                        <h4 className="text-xs font-black text-indigo-500 uppercase tracking-[0.3em] mb-4 mt-8 first:mt-0 flex items-center gap-2" {...props} />
-                                    ),
-                                    strong: ({ node, ...props }) => (
-                                        <strong className="text-indigo-900 dark:text-indigo-300 font-black" {...props} />
-                                    )
-                                }}
-                            >
-                                {part.content}
-                            </ReactMarkdown>
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <div key={i} className="prose prose-slate prose-indigo dark:prose-invert max-w-none px-2
-                        prose-p:leading-relaxed prose-headings:font-black prose-headings:tracking-tighter prose-headings:text-indigo-600 dark:prose-headings:text-indigo-400
-                        prose-strong:text-indigo-700 dark:prose-strong:text-indigo-300">
-                        <ReactMarkdown>{part.content}</ReactMarkdown>
-                    </div>
-                )
-            ))}
-        </div>
-    );
-}
 
 export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: { unitId: string; surveyId?: string; fullPage?: boolean }) {
     const [messages, setMessages] = useState<Message[]>([]);

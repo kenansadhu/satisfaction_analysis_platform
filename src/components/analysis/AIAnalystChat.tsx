@@ -9,30 +9,36 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Legend, ScatterChart, Scatter,
-    PieChart, Pie, Cell
+    PieChart, Pie, Cell, LineChart, Line
 } from "recharts";
 import {
     Sparkles, Send, Loader2, Save, CheckCircle2,
-    Copy, MessageSquare, Trash2, RotateCcw
+    Copy, MessageSquare, Trash2, RotateCcw, Database,
+    Quote, User, Bot
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { BoxedMessageRenderer } from "./BoxedMessageRenderer";
 
 type ChartConfig = {
     id: string;
-    type: "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER";
+    type: "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER" | "LINE";
     title: string;
     description: string;
     xKey: string;
     yKey: string;
     yKeys?: string[];
     aggregation?: "AVG" | "COUNT" | "SUM";
+    fullExplanation?: string;
+    dataFilter?: Record<string, string>;
+    yLabelMap?: Record<string, string>;
 };
 
 interface ChatMessage {
     role: "user" | "assistant";
     content: string;
-    chart?: ChartConfig;
+    charts?: ChartConfig[];
     timestamp: Date;
 }
 
@@ -45,12 +51,20 @@ interface AIAnalystChatProps {
 
 const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#84cc16'];
 
+const getBarColor = (key: string, index: number, overrideGradient?: string) => {
+    const k = key.toLowerCase();
+    if (k.includes('pos')) return overrideGradient || '#22c55e'; // Green 500
+    if (k.includes('neg')) return overrideGradient || '#f43f5e'; // Rose 500
+    if (k.includes('neu')) return '#94a3b8'; // Slate 400
+    return COLORS[index % COLORS.length];
+};
+
 const QUICK_PROMPTS = [
-    "Which unit has the worst sentiment and why?",
-    "Show me a scatter plot of positive vs negative comments across all units",
-    "Compare Teaching category sentiment across all departments",
-    "What are the top 3 issues students complain about?",
-    "Create a bar chart ranking all units by overall satisfaction score",
+    "Plot a scatter graph showing sentiment score vs. total segment volume to identify noisy but critical units.",
+    "Which 3 units are struggling the most with Facilities & Infrastructure, and how does it compare to their Teaching sentiment?",
+    "Generate a horizontal bar chart visualizing the ratio of positive to negative feedback exclusively for the worst-performing study programs.",
+    "Map out a multi-dimensional comparison of the top 5 largest units by total feedback volume.",
+    "Which department has the most surprising disparity between quantitative survey scores and qualitative written sentiment?"
 ];
 
 export default function AIAnalystChat({ surveyId, macroData, existingChart, onChartSaved }: AIAnalystChatProps) {
@@ -58,6 +72,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [savedChartIds, setSavedChartIds] = useState<Set<string>>(new Set());
+    const [hoveredSeries, setHoveredSeries] = useState<string | null>(null);
     // Live dataset from the API — this is the SAME data the AI analyzed
     const [liveData, setLiveData] = useState<any[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -74,7 +89,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
             setMessages([{
                 role: "assistant",
                 content: `I can see you want to refine **"${existingChart.title}"**. This is a ${existingChart.type} chart showing ${existingChart.description}.\n\nWhat would you like to change? I can adjust the chart type, axes, filters, or create a completely new perspective on this data.`,
-                chart: existingChart,
+                charts: [existingChart],
                 timestamp: new Date(),
             }]);
         }
@@ -103,7 +118,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                     messages: newMessages.map(m => ({
                         role: m.role,
                         content: m.content,
-                        chart: m.chart,
+                        charts: m.charts,
                     })),
                     surveyId,
                     existingChart: existingChart || undefined,
@@ -124,8 +139,8 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
 
             const assistantMsg: ChatMessage = {
                 role: "assistant",
-                content: data.reply || "I couldn't generate a response. Please try again.",
-                chart: data.chart || undefined,
+                content: data.reply || (data.charts?.length > 0 ? "Here are the insights you requested:" : "I couldn't generate a response. Please try again."),
+                charts: data.charts?.length > 0 ? data.charts : undefined,
                 timestamp: new Date(),
             };
 
@@ -143,13 +158,13 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
         }
     }, [input, messages, isLoading, surveyId, existingChart]);
 
-    const saveChart = async (chart: ChartConfig) => {
+    const saveChart = async (chart: ChartConfig, fullExplanation?: string) => {
         try {
             const { error } = await supabase.from('saved_ai_charts').insert({
                 survey_id: surveyId ? parseInt(surveyId) : null,
                 title: chart.title,
                 description: chart.description,
-                config: chart,
+                config: { ...chart, fullExplanation },
             });
             if (error) throw error;
 
@@ -203,24 +218,49 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
             }
         });
 
-        return Object.entries(groups).map(([name, stats]: [string, any]) => {
-            const obj: any = {
-                name,
-                fullName: stats.fullName,
-                value: config.aggregation === "AVG" ? Number((stats.sum / stats.count).toFixed(2)) : stats.sum
-            };
-            config.yKeys?.forEach(k => { obj[k] = stats[k]; });
-            return obj;
-        }).sort((a, b) => b.value - a.value).slice(0, 15);
+        return Object.entries(groups)
+            .map(([name, stats]: [string, any]) => {
+                const obj: any = {
+                    name,
+                    fullName: stats.fullName,
+                    value: config.aggregation === "AVG" ? Number((stats.sum / stats.count).toFixed(2)) : stats.sum
+                };
+
+                let hasRealData = false;
+
+                if (config.yKeys?.length) {
+                    config.yKeys.forEach(k => {
+                        obj[k] = stats[k];
+                        if (stats[k] !== 0 && stats[k] !== undefined && stats[k] !== null && !isNaN(stats[k])) {
+                            hasRealData = true;
+                        }
+                    });
+                } else {
+                    if (obj.value !== 0 && obj.value !== undefined && obj.value !== null && !isNaN(obj.value)) {
+                        hasRealData = true;
+                    }
+                }
+
+                obj._hasRealData = hasRealData;
+                return obj;
+            })
+            .filter(obj => obj._hasRealData) // Filter out units with absolutely no data for the requested metrics
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 15);
     };
 
     // Custom tooltip
     const CustomTooltip = ({ active, payload, label }: any) => {
-        if (active && payload?.length) {
+        if (active && payload?.length && hoveredSeries) {
+            // Filter payload to only show the hovered series if available, otherwise show all
+            const itemsToShow = payload.filter((p: any) => p.dataKey === hoveredSeries);
+
+            if (itemsToShow.length === 0) return null;
+
             return (
                 <div className="bg-white dark:bg-slate-800 p-3 border rounded-lg shadow-xl text-sm">
                     <p className="font-semibold mb-1">{payload[0].payload.fullName || label}</p>
-                    {payload.map((entry: any, i: number) => (
+                    {itemsToShow.map((entry: any, i: number) => (
                         <div key={i} className="flex justify-between gap-4 text-xs">
                             <span style={{ color: entry.color }}>{entry.name}:</span>
                             <span className="font-medium">{entry.value}</span>
@@ -232,26 +272,43 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
         return null;
     };
 
+    // Data toggle state
+    const [showDataForChart, setShowDataForChart] = useState<string | null>(null);
+
     // --- Chart Renderer ---
-    const renderInlineChart = (chart: ChartConfig, messageIndex: number) => {
+    const renderInlineChart = (chart: ChartConfig, messageIndex: number, fullExplanation?: string) => {
         const chartData = prepareChartData(chart);
         const isSaved = savedChartIds.has(chart.id);
+        const isShowingData = showDataForChart === chart.id;
+
+        // Determine if chart is purely Positive or purely Negative for gradient styling
+        const isPurePos = (chart.yKeys?.length === 1 && chart.yKeys[0].toLowerCase().includes('pos')) || (!chart.yKeys && chart.yKey?.toLowerCase().includes('pos'));
+        const isPureNeg = (chart.yKeys?.length === 1 && chart.yKeys[0].toLowerCase().includes('neg')) || (!chart.yKeys && chart.yKey?.toLowerCase().includes('neg'));
+        const horizGradientUrl = isPurePos ? 'url(#colorPosHoriz)' : (isPureNeg ? 'url(#colorNegHoriz)' : undefined);
+        const vertGradientUrl = isPurePos ? 'url(#colorPosVert)' : (isPureNeg ? 'url(#colorNegVert)' : undefined);
 
         return (
-            <div className="mt-3 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-900/30 rounded-xl overflow-hidden shadow-sm">
+            <div key={chart.id} className="mt-4 mb-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-900/30 rounded-xl overflow-hidden shadow-sm">
                 <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/20 dark:to-indigo-950/20 px-4 py-3 border-b border-purple-100 dark:border-purple-900/20">
                     <div className="flex items-center justify-between">
                         <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">{chart.title}</h4>
                         <div className="flex gap-1.5">
                             <Button
                                 size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-purple-200 text-purple-600 hover:bg-purple-50"
+                                onClick={() => setShowDataForChart(isShowingData ? null : chart.id)}
+                            >
+                                <Database className="w-3 h-3 mr-1" /> {isShowingData ? "Hide Data" : "View Source"}
+                            </Button>
+                            <Button
+                                size="sm"
                                 variant={isSaved ? "secondary" : "default"}
                                 className={`h-7 text-xs ${isSaved ? 'bg-green-100 text-green-700' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
-                                onClick={() => !isSaved && saveChart(chart)}
-                                disabled={isSaved}
+                                onClick={() => !isSaved && saveChart(chart, fullExplanation)}
                             >
                                 {isSaved ? <CheckCircle2 className="w-3 h-3 mr-1" /> : <Save className="w-3 h-3 mr-1" />}
-                                {isSaved ? "Saved" : "Save"}
+                                {isSaved ? "Saved" : "Save to Dashboard"}
                             </Button>
                         </div>
                     </div>
@@ -267,14 +324,37 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                             <ResponsiveContainer width="100%" height="100%">
                                 {chart.type === "PIE" ? (
                                     <PieChart>
+                                        <defs>
+                                            <linearGradient id="colorPosVert" x1="0" y1="1" x2="0" y2="0">
+                                                <stop offset="0%" stopColor="#86efac" stopOpacity={0.9} />
+                                                <stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} />
+                                            </linearGradient>
+                                            <linearGradient id="colorNegVert" x1="0" y1="1" x2="0" y2="0">
+                                                <stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} />
+                                                <stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} />
+                                            </linearGradient>
+                                            <linearGradient id="colorPosHoriz" x1="0" y1="0" x2="1" y2="0">
+                                                <stop offset="0%" stopColor="#86efac" stopOpacity={0.9} />
+                                                <stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} />
+                                            </linearGradient>
+                                            <linearGradient id="colorNegHoriz" x1="0" y1="0" x2="1" y2="0">
+                                                <stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} />
+                                                <stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} />
+                                            </linearGradient>
+                                        </defs>
                                         <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2}>
                                             {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                                         </Pie>
                                         <Tooltip content={<CustomTooltip />} />
-                                        <Legend wrapperStyle={{ fontSize: '11px' }} />
                                     </PieChart>
                                 ) : chart.type === "SCATTER" ? (
                                     <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                        <defs>
+                                            <linearGradient id="colorPosVert" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="#86efac" stopOpacity={0.9} /><stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorNegVert" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} /><stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorPosHoriz" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#86efac" stopOpacity={0.9} /><stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorNegHoriz" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} /><stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} /></linearGradient>
+                                        </defs>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                         <XAxis type="number" dataKey="x" name={chart.xKey} tick={{ fontSize: 11 }} />
                                         <YAxis type="number" dataKey="y" name={chart.yKey} tick={{ fontSize: 11 }} />
@@ -282,35 +362,108 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                         <Scatter data={chartData} fill="#8b5cf6" />
                                     </ScatterChart>
                                 ) : chart.type === "HORIZONTAL_BAR" ? (
-                                    <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                    <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 20 }} barCategoryGap="15%" barGap={2}>
+                                        <defs>
+                                            <linearGradient id="colorPosVert" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="#86efac" stopOpacity={0.9} /><stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorNegVert" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} /><stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorPosHoriz" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#86efac" stopOpacity={0.9} /><stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorNegHoriz" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} /><stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} /></linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
                                         <XAxis type="number" hide />
-                                        <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 10 }} />
-                                        <Tooltip content={<CustomTooltip />} />
+                                        <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'transparent' }} />
                                         {chart.yKeys?.length ? (
                                             chart.yKeys.map((key, i) => (
-                                                <Bar key={key} dataKey={key} name={key} fill={COLORS[i % COLORS.length]} radius={[0, 4, 4, 0]} barSize={24} />
+                                                <Bar
+                                                    key={key}
+                                                    dataKey={key}
+                                                    name={chart.yLabelMap?.[key] || key}
+                                                    fill={getBarColor(key, i, horizGradientUrl)}
+                                                    radius={[0, 4, 4, 0]}
+                                                    onMouseEnter={() => setHoveredSeries(key)}
+                                                    onMouseLeave={() => setHoveredSeries(null)}
+                                                />
                                             ))
                                         ) : (
-                                            <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={24}>
-                                                {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                            <Bar
+                                                dataKey="value"
+                                                fill="#8b5cf6"
+                                                radius={[0, 4, 4, 0]}
+                                                onMouseEnter={() => setHoveredSeries("value")}
+                                                onMouseLeave={() => setHoveredSeries(null)}
+                                            >
+                                                {chartData.map((_, i) => <Cell key={i} fill={getBarColor("value", i, horizGradientUrl)} />)}
                                             </Bar>
                                         )}
                                     </BarChart>
-                                ) : (
-                                    <BarChart data={chartData} margin={{ bottom: 50, top: 10 }}>
+                                ) : chart.type === "LINE" ? (
+                                    <LineChart data={chartData} margin={{ bottom: 50, top: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                        <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-40} textAnchor="end" interval={0} />
-                                        <YAxis tick={{ fontSize: 11 }} />
+                                        <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} axisLine={false} tickLine={false} scale="band" type="category" padding={{ left: 10, right: 10 }} />
+                                        <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                                         <Tooltip content={<CustomTooltip />} />
-                                        <Legend />
                                         {chart.yKeys?.length ? (
                                             chart.yKeys.map((key, i) => (
-                                                <Bar key={key} dataKey={key} name={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} barSize={28} />
+                                                <Line
+                                                    key={key}
+                                                    type="monotone"
+                                                    dataKey={key}
+                                                    name={chart.yLabelMap?.[key] || key}
+                                                    stroke={getBarColor(key, i)}
+                                                    strokeWidth={3}
+                                                    dot={{ r: 4 }}
+                                                    activeDot={{ r: 6 }}
+                                                    onMouseEnter={() => setHoveredSeries(key)}
+                                                    onMouseLeave={() => setHoveredSeries(null)}
+                                                />
                                             ))
                                         ) : (
-                                            <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={28}>
-                                                {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                            <Line
+                                                type="monotone"
+                                                dataKey="value"
+                                                stroke="#6366f1"
+                                                strokeWidth={3}
+                                                dot={{ r: 4 }}
+                                                activeDot={{ r: 6 }}
+                                                onMouseEnter={() => setHoveredSeries("value")}
+                                                onMouseLeave={() => setHoveredSeries(null)}
+                                            />
+                                        )}
+                                    </LineChart>
+                                ) : (
+                                    <BarChart data={chartData} margin={{ bottom: 50, top: 10 }} barCategoryGap="10%" barGap={2}>
+                                        <defs>
+                                            <linearGradient id="colorPosVert" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="#86efac" stopOpacity={0.9} /><stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorNegVert" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} /><stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorPosHoriz" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#86efac" stopOpacity={0.9} /><stop offset="100%" stopColor="#16a34a" stopOpacity={0.9} /></linearGradient>
+                                            <linearGradient id="colorNegHoriz" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fecdd3" stopOpacity={0.9} /><stop offset="100%" stopColor="#e11d48" stopOpacity={0.9} /></linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                        <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} axisLine={false} tickLine={false} scale="band" type="category" padding={{ left: 10, right: 10 }} />
+                                        <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                                        {chart.yKeys?.length ? (
+                                            chart.yKeys.map((key, i) => (
+                                                <Bar
+                                                    key={key}
+                                                    dataKey={key}
+                                                    name={chart.yLabelMap?.[key] || key}
+                                                    fill={getBarColor(key, i, vertGradientUrl)}
+                                                    radius={[4, 4, 0, 0]}
+                                                    onMouseEnter={() => setHoveredSeries(key)}
+                                                    onMouseLeave={() => setHoveredSeries(null)}
+                                                />
+                                            ))
+                                        ) : (
+                                            <Bar
+                                                dataKey="value"
+                                                fill="#6366f1"
+                                                radius={[4, 4, 0, 0]}
+                                                onMouseEnter={() => setHoveredSeries("value")}
+                                                onMouseLeave={() => setHoveredSeries(null)}
+                                            >
+                                                {chartData.map((_, i) => <Cell key={i} fill={getBarColor("value", i, vertGradientUrl)} />)}
                                             </Bar>
                                         )}
                                     </BarChart>
@@ -320,11 +473,39 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                     )}
                 </div>
 
-                {/* Data transparency: show row count */}
-                <div className="px-4 pb-3 flex items-center justify-between text-[11px] text-slate-400">
-                    <span>Based on {chartData.length} data points</span>
-                    <span className="italic">{chart.description?.slice(0, 80)}...</span>
+                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 text-sm text-slate-700 dark:text-slate-300 prose prose-slate dark:prose-invert max-w-none">
+                    <Sparkles className="inline-block w-4 h-4 text-purple-500 mr-2 -mt-0.5" />
+                    <ReactMarkdown>{chart.description}</ReactMarkdown>
                 </div>
+
+                {isShowingData && (
+                    <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 max-h-[300px] overflow-auto">
+                        <table className="w-full text-left text-[11px] bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800">
+                            <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0">
+                                <tr>
+                                    <th className="p-2 border-b font-semibold">Unit</th>
+                                    {chart.yKeys?.length ? (
+                                        chart.yKeys.map(k => <th key={k} className="p-2 border-b font-semibold text-right">{k}</th>)
+                                    ) : (
+                                        <th className="p-2 border-b font-semibold text-right">Value</th>
+                                    )}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {chartData.map((row, i) => (
+                                    <tr key={i} className="border-b last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                        <td className="p-2 truncate max-w-[200px]" title={row.fullName}>{row.fullName}</td>
+                                        {chart.yKeys?.length ? (
+                                            chart.yKeys.map(k => <td key={k} className="p-2 text-right">{row[k]}</td>)
+                                        ) : (
+                                            <td className="p-2 text-right">{row.value}</td>
+                                        )}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         );
     };
@@ -336,8 +517,10 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-slate-900 dark:to-slate-900 rounded-t-xl">
                 <div className="flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-purple-500" />
-                    <h3 className="font-bold text-slate-800 dark:text-slate-100">AI Analyst</h3>
-                    <Badge className="bg-purple-100 text-purple-700 text-[10px]">Gemini Pro</Badge>
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-800 dark:text-slate-100">AI Analyst</h3>
+                        <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 text-[10px] uppercase tracking-widest border border-indigo-200/50 dark:border-indigo-800">Auto-Analyst Core</Badge>
+                    </div>
                 </div>
                 <div className="flex gap-2">
                     {messages.length > 0 && (
@@ -385,16 +568,36 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                 Ask questions about your survey data, request specific charts, or explore correlations. I'll analyze the live dataset and generate visualizations.
                             </p>
                         </div>
-                        <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                            {QUICK_PROMPTS.map((prompt, i) => (
-                                <button
-                                    key={i}
-                                    onClick={() => sendMessage(prompt)}
-                                    className="text-xs px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors text-slate-600 dark:text-slate-400"
-                                >
-                                    {prompt}
-                                </button>
-                            ))}
+                        <div className="flex flex-col items-center gap-4 w-full max-w-lg">
+                            <Button
+                                onClick={() => sendMessage(
+                                    "Analyze the global dataset and give me 3 distinct structural insights. " +
+                                    "I want you to automatically discover the most interesting correlations, anomalies, or trends across the units. " +
+                                    "For each insight, provide a chart configuration that proves your point."
+                                )}
+                                className="w-full sm:w-auto h-12 px-8 bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-lg shadow-purple-500/20 gap-2 transition-all hover:scale-105"
+                            >
+                                <Sparkles className="w-5 h-5" />
+                                <span className="font-semibold tracking-wide">Auto-Discover Connections</span>
+                            </Button>
+
+                            <div className="w-full flex items-center gap-3">
+                                <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
+                                <span className="text-xs font-medium text-slate-400 uppercase tracking-widest">OR ASK MANUALLY</span>
+                                <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 justify-center mt-2">
+                                {QUICK_PROMPTS.map((prompt, i) => (
+                                    <button
+                                        key={i}
+                                        onClick={() => sendMessage(prompt)}
+                                        className="text-[11px] px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors text-slate-600 dark:text-slate-400"
+                                    >
+                                        {prompt}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -412,24 +615,26 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                 </div>
                             )}
                             <div className={`text-sm leading-relaxed whitespace-pre-wrap ${msg.role === "user" ? "" : "text-slate-700 dark:text-slate-300"}`}>
-                                {formatMarkdown(msg.content)}
+                                {msg.role === "assistant" ? <BoxedMessageRenderer content={msg.content} /> : msg.content}
                             </div>
-                            {msg.chart && renderInlineChart(msg.chart, i)}
+                            {msg.charts?.map((chart, cIndex) => renderInlineChart(chart, cIndex, msg.content))}
                         </div>
                     </div>
                 ))}
 
                 {isLoading && (
                     <div className="flex justify-start">
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl rounded-bl-md px-4 py-4 shadow-sm">
-                            <div className="flex items-center gap-3">
-                                <div className="relative">
-                                    <div className="absolute inset-0 bg-purple-500 blur-md opacity-30 rounded-full animate-pulse" />
-                                    <Loader2 className="w-5 h-5 animate-spin text-purple-600 relative z-10" />
+                        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-[85%] px-4 py-3 self-start mr-auto shadow-sm">
+                            <div className="flex gap-2">
+                                <Sparkles className="w-5 h-5 text-purple-500 animate-pulse mt-0.5" />
+                                <div>
+                                    <div className="flex gap-1 mb-2">
+                                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" />
+                                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce delay-75" />
+                                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce delay-150" />
+                                    </div>
+                                    <p className="text-xs font-semibold text-slate-500 animate-pulse tracking-wide">Synthesizing connections...</p>
                                 </div>
-                                <span className="text-sm text-purple-600 font-medium animate-pulse">
-                                    Analyzing data with Gemini Pro...
-                                </span>
                             </div>
                         </div>
                     </div>

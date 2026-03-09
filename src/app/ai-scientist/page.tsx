@@ -12,12 +12,11 @@ import {
     Sparkles, Lightbulb, Loader2, Save, Trash2, MessageSquare,
     TrendingUp, ArrowLeft, ArrowRight, CheckCircle2, Copy, Edit3, Database
 } from "lucide-react";
-import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-    ResponsiveContainer, Legend, ScatterChart, Scatter,
-    PieChart, Pie, Cell
-} from "recharts";
-import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { BoxedMessageRenderer } from "@/components/analysis/BoxedMessageRenderer";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, ScatterChart, Scatter, PieChart, Pie } from 'recharts';
+import ReactMarkdown from 'react-markdown';
+import { toast } from 'sonner';
 import AIAnalystChat from "@/components/analysis/AIAnalystChat";
 import SuggestionHub from "@/components/executive/SuggestionHub";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
@@ -25,13 +24,16 @@ import { useActiveSurvey } from "@/context/SurveyContext";
 
 type ChartConfig = {
     id: string;
-    type: "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER";
+    type: "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER" | "LINE";
     title: string;
     description: string;
     xKey: string;
     yKey: string;
     yKeys?: string[];
     aggregation?: "AVG" | "COUNT" | "SUM";
+    fullExplanation?: string;
+    dataFilter?: Record<string, string>;
+    yLabelMap?: Record<string, string>;
 };
 
 type SavedChart = {
@@ -53,10 +55,14 @@ export default function AIScientistPage() {
     const [macroData, setMacroData] = useState<any[]>([]);
     const [savedCharts, setSavedCharts] = useState<SavedChart[]>([]);
     const [loadingData, setLoadingData] = useState(true);
+    const [hoveredSeries, setHoveredSeries] = useState<string | null>(null);
 
     // Saved charts pagination
     const [page, setPage] = useState(0);
     const CHARTS_PER_PAGE = 4;
+
+    // Cache metadata
+    const [cacheUpdated, setCacheUpdated] = useState<string | null>(null);
 
     // Refine mode
     const [refineChart, setRefineChart] = useState<ChartConfig | null>(null);
@@ -64,88 +70,75 @@ export default function AIScientistPage() {
 
     // Survey loading is now handled by SurveyContext
 
-    const loadWorkspace = useCallback(async () => {
-        setLoadingData(true);
+    const loadSavedCharts = useCallback(async (silent = false) => {
+        if (!silent) setLoadingData(true);
         try {
-            // Fetch macro data for chart rendering
-            const { data: unitsData } = await supabase
-                .from('organization_units')
-                .select('id, name, short_name, description');
-
-            const dataset: any[] = [];
-            for (const unit of (unitsData || [])) {
-                const { data: metrics, error: rpcErr } = await supabase.rpc('get_dashboard_metrics', {
-                    p_unit_id: unit.id,
-                    p_survey_id: selectedSurvey !== "all" ? parseInt(selectedSurvey, 10) : null
-                });
-
-                if (rpcErr) continue;
-
-                if (metrics) {
-                    const m = metrics as any;
-                    const totalSegments = m.total_segments ?? 0;
-                    if (totalSegments <= 0) continue;
-
-                    const categories = m.category_counts || [];
-                    const flat: any = {};
-                    let catPos = 0, catNeg = 0;
-
-                    if (Array.isArray(categories)) {
-                        categories.forEach((c: any) => {
-                            if (c.category_name) {
-                                const k = `category_${c.category_name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                                flat[k] = c.total || 0;
-                                flat[`${k}_pos`] = c.positive_count || 0;
-                                flat[`${k}_neg`] = c.negative_count || 0;
-                                catPos += c.positive_count || 0;
-                                catNeg += c.negative_count || 0;
-                            }
-                        });
-                    }
-
-                    const pos = (m.positive ?? 0) > 0 ? m.positive : catPos;
-                    const neg = (m.negative ?? 0) > 0 ? m.negative : catNeg;
-                    const neu = (m.neutral ?? 0) > 0 ? m.neutral : Math.max(0, totalSegments - pos - neg);
-
-                    dataset.push({
-                        unit_id: unit.id,
-                        unit_name: unit.name,
-                        unit_short_name: unit.short_name || unit.name,
-                        total_segments: totalSegments,
-                        positive: pos,
-                        neutral: neu,
-                        negative: neg,
-                        score: m.score ?? 0,
-                        ...flat
-                    });
-                }
-            }
-            setMacroData(dataset);
-
-            // Fetch saved charts
             let query = supabase
                 .from('saved_ai_charts')
                 .select('*')
                 .order('created_at', { ascending: false });
 
-            if (selectedSurvey !== "all") {
-                query = query.eq('survey_id', parseInt(selectedSurvey));
+            if (selectedSurvey && selectedSurvey !== "all") {
+                query = query.eq('survey_id', parseInt(selectedSurvey as string));
             } else {
                 query = query.is('survey_id', null);
             }
 
-            const { data: dbCharts } = await query;
+            const { data: dbCharts, error: qErr } = await query;
+            if (qErr) console.error("Saved charts query error:", qErr);
+            console.log(`[AIScientist] Loaded ${dbCharts?.length || 0} charts for survey ${selectedSurvey}`);
             setSavedCharts(dbCharts || []);
+        } catch (err) {
+            console.error("Saved charts load error:", err);
+        } finally {
+            if (!silent) setLoadingData(false);
+        }
+    }, [selectedSurvey]);
+
+    const loadWorkspace = useCallback(async () => {
+        setLoadingData(true);
+        try {
+            let dataset: any[] = [];
+
+            // Fetch macro data and cache timestamp from surveys table
+            if (selectedSurvey && selectedSurvey !== "all") {
+                const { data: surveyData, error: sErr } = await supabase
+                    .from('surveys')
+                    .select('ai_dataset_cache, ai_dataset_updated_at')
+                    .eq('id', parseInt(selectedSurvey as string, 10))
+                    .single();
+
+                if (sErr) {
+                    console.error("Failed to load survey cache:", sErr);
+                }
+
+                if (surveyData?.ai_dataset_cache) {
+                    dataset = surveyData.ai_dataset_cache;
+                }
+                setCacheUpdated(surveyData?.ai_dataset_updated_at || null);
+            } else {
+                setCacheUpdated(null);
+            }
+
+            setMacroData(dataset);
+            await loadSavedCharts(true);
         } catch (err) {
             console.error("Workspace load error:", err);
         } finally {
             setLoadingData(false);
         }
-    }, [selectedSurvey]);
+    }, [selectedSurvey, loadSavedCharts]);
 
     useEffect(() => {
         if (!loading) loadWorkspace();
     }, [loading, loadWorkspace]);
+
+    // Handle tab switching refreshes
+    useEffect(() => {
+        if (activeTab === "saved") {
+            loadSavedCharts(true);
+        }
+    }, [activeTab, loadSavedCharts]);
 
     // --- Chart Actions ---
     const deleteChart = async (id: string) => {
@@ -202,19 +195,40 @@ export default function AIScientistPage() {
             });
         });
 
-        return Object.entries(groups).map(([name, stats]: [string, any]) => {
-            const obj: any = { name, fullName: stats.fullName, value: config.aggregation === "AVG" ? +(stats.sum / stats.count).toFixed(2) : stats.sum };
-            config.yKeys?.forEach(k => { obj[k] = stats[k]; });
-            return obj;
-        }).sort((a, b) => b.value - a.value).slice(0, 15);
+        return Object.entries(groups)
+            .map(([name, stats]: [string, any]) => {
+                const obj: any = { name, fullName: stats.fullName, value: config.aggregation === "AVG" ? +(stats.sum / stats.count).toFixed(2) : stats.sum };
+                let hasRealData = false;
+
+                if (config.yKeys?.length) {
+                    config.yKeys.forEach(k => {
+                        obj[k] = stats[k];
+                        if (stats[k] !== 0 && stats[k] !== undefined && stats[k] !== null && !isNaN(stats[k])) {
+                            hasRealData = true;
+                        }
+                    });
+                } else {
+                    if (obj.value !== 0 && obj.value !== undefined && obj.value !== null && !isNaN(obj.value)) {
+                        hasRealData = true;
+                    }
+                }
+                obj._hasRealData = hasRealData;
+                return obj;
+            })
+            .filter(obj => obj._hasRealData)
+            .sort((a, b) => b.value - a.value).slice(0, 15);
     };
 
     const CustomTooltip = ({ active, payload, label }: any) => {
-        if (active && payload?.length) {
+        if (active && payload?.length && hoveredSeries) {
+            const itemsToShow = payload.filter((p: any) => p.dataKey === hoveredSeries);
+
+            if (itemsToShow.length === 0) return null;
+
             return (
                 <div className="bg-white dark:bg-slate-800 p-3 border rounded-lg shadow-xl text-sm">
                     <p className="font-semibold mb-1">{payload[0].payload.fullName || label}</p>
-                    {payload.map((e: any, i: number) => (
+                    {itemsToShow.map((e: any, i: number) => (
                         <div key={i} className="flex justify-between gap-4 text-xs">
                             <span style={{ color: e.color }}>{e.name}:</span>
                             <span className="font-medium">{e.value}</span>
@@ -226,47 +240,165 @@ export default function AIScientistPage() {
         return null;
     };
 
+    const [showDataForChart, setShowDataForChart] = useState<string | null>(null);
+
     const renderChart = (chart: ChartConfig) => {
         const data = prepareChartData(chart);
         if (data.length === 0) return <div className="flex items-center justify-center h-full text-slate-400 text-sm">No data</div>;
 
+        const isShowingData = showDataForChart === chart.id;
+
         return (
-            <ResponsiveContainer width="100%" height="100%">
-                {chart.type === "PIE" ? (
-                    <PieChart>
-                        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90}>
-                            {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip content={<CustomTooltip />} />
-                        <Legend wrapperStyle={{ fontSize: '11px' }} />
-                    </PieChart>
-                ) : chart.type === "SCATTER" ? (
-                    <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis type="number" dataKey="x" name={chart.xKey} tick={{ fontSize: 11 }} />
-                        <YAxis type="number" dataKey="y" name={chart.yKey} tick={{ fontSize: 11 }} />
-                        <Tooltip content={<CustomTooltip />} />
-                        <Scatter data={data} fill="#8b5cf6" />
-                    </ScatterChart>
-                ) : chart.type === "HORIZONTAL_BAR" ? (
-                    <BarChart data={data} layout="vertical" margin={{ left: 20, right: 30 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 10 }} />
-                        <Tooltip content={<CustomTooltip />} />
-                        {chart.yKeys?.length ? chart.yKeys.map((k, i) => <Bar key={k} dataKey={k} name={k} fill={COLORS[i % COLORS.length]} radius={[0, 4, 4, 0]} barSize={24} />) : <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={24}>{data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Bar>}
-                    </BarChart>
-                ) : (
-                    <BarChart data={data} margin={{ bottom: 50, top: 10 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-40} textAnchor="end" interval={0} />
-                        <YAxis tick={{ fontSize: 11 }} />
-                        <Tooltip content={<CustomTooltip />} />
-                        <Legend />
-                        {chart.yKeys?.length ? chart.yKeys.map((k, i) => <Bar key={k} dataKey={k} name={k} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} barSize={28} />) : <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={28}>{data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Bar>}
-                    </BarChart>
+            <div className="flex flex-col h-full">
+                <div className="flex justify-end mb-2 pr-4">
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-purple-200 text-purple-600 hover:bg-purple-50"
+                        onClick={() => setShowDataForChart(isShowingData ? null : chart.id)}
+                    >
+                        <Database className="w-3 h-3 mr-1" /> {isShowingData ? "Hide Data" : "View Source"}
+                    </Button>
+                </div>
+
+                <div className="flex-1 relative min-h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                        {chart.type === "PIE" ? (
+                            <PieChart>
+                                <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2}>
+                                    {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                </Pie>
+                                <Tooltip content={<CustomTooltip />} />
+                            </PieChart>
+                        ) : chart.type === "SCATTER" ? (
+                            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                <XAxis type="number" dataKey="x" name={chart.xKey} tick={{ fontSize: 11 }} />
+                                <YAxis type="number" dataKey="y" name={chart.yKey} tick={{ fontSize: 11 }} />
+                                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'transparent' }} />
+                                <Scatter data={data} fill="#8b5cf6" />
+                            </ScatterChart>
+                        ) : chart.type === "HORIZONTAL_BAR" ? (
+                            <BarChart data={data} layout="vertical" margin={{ left: 20, right: 30 }} barCategoryGap="15%" barGap={2}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                                <XAxis type="number" hide />
+                                <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'transparent' }} />
+                                {chart.yKeys?.length ? chart.yKeys.map((k, i) => (
+                                    <Bar
+                                        key={k}
+                                        dataKey={k}
+                                        name={chart.yLabelMap?.[k] || k}
+                                        fill={COLORS[i % COLORS.length]}
+                                        radius={[0, 4, 4, 0]}
+                                        onMouseEnter={() => setHoveredSeries(k)}
+                                        onMouseLeave={() => setHoveredSeries(null)}
+                                    />
+                                )) : (
+                                    <Bar
+                                        dataKey="value"
+                                        fill="#8b5cf6"
+                                        radius={[0, 4, 4, 0]}
+                                        onMouseEnter={() => setHoveredSeries("value")}
+                                        onMouseLeave={() => setHoveredSeries(null)}
+                                    >
+                                        {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                    </Bar>
+                                )}
+                            </BarChart>
+                        ) : chart.type === "LINE" ? (
+                            <LineChart data={data} margin={{ bottom: 50, top: 10 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={320} textAnchor="end" interval={0} axisLine={false} tickLine={false} scale="band" type="category" padding={{ left: 10, right: 10 }} />
+                                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                                <Tooltip content={<CustomTooltip />} />
+                                {chart.yKeys?.length ? chart.yKeys.map((k, i) => (
+                                    <Line
+                                        key={k}
+                                        type="monotone"
+                                        dataKey={k}
+                                        name={chart.yLabelMap?.[k] || k}
+                                        stroke={COLORS[i % COLORS.length]}
+                                        strokeWidth={3}
+                                        dot={{ r: 4 }}
+                                        activeDot={{ r: 6 }}
+                                        onMouseEnter={() => setHoveredSeries(k)}
+                                        onMouseLeave={() => setHoveredSeries(null)}
+                                    />
+                                )) : (
+                                    <Line
+                                        type="monotone"
+                                        dataKey="value"
+                                        stroke="#6366f1"
+                                        strokeWidth={3}
+                                        dot={{ r: 4 }}
+                                        activeDot={{ r: 6 }}
+                                        onMouseEnter={() => setHoveredSeries("value")}
+                                        onMouseLeave={() => setHoveredSeries(null)}
+                                    />
+                                )}
+                            </LineChart>
+                        ) : (
+                            <BarChart data={data} margin={{ bottom: 50, top: 10 }} barCategoryGap="10%" barGap={2}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={320} textAnchor="end" interval={0} axisLine={false} tickLine={false} scale="band" type="category" padding={{ left: 10, right: 10 }} />
+                                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                                {chart.yKeys?.length ? chart.yKeys.map((k, i) => (
+                                    <Bar
+                                        key={k}
+                                        dataKey={k}
+                                        name={chart.yLabelMap?.[k] || k}
+                                        fill={COLORS[i % COLORS.length]}
+                                        radius={[4, 4, 0, 0]}
+                                        onMouseEnter={() => setHoveredSeries(k)}
+                                        onMouseLeave={() => setHoveredSeries(null)}
+                                    />
+                                )) : (
+                                    <Bar
+                                        dataKey="value"
+                                        fill="#6366f1"
+                                        radius={[4, 4, 0, 0]}
+                                        onMouseEnter={() => setHoveredSeries("value")}
+                                        onMouseLeave={() => setHoveredSeries(null)}
+                                    >
+                                        {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                    </Bar>
+                                )}
+                            </BarChart>
+                        )}
+                    </ResponsiveContainer>
+                </div>
+
+                {isShowingData && (
+                    <div className="absolute inset-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm z-10 p-4 border border-slate-200 dark:border-slate-800 rounded-lg shadow-xl overflow-auto mt-8 h-[calc(100%-2rem)]">
+                        <table className="w-full text-left text-[11px] bg-white dark:bg-slate-900 rounded">
+                            <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0">
+                                <tr>
+                                    <th className="p-2 border-b font-semibold">Unit</th>
+                                    {chart.yKeys?.length ? (
+                                        chart.yKeys.map(k => <th key={k} className="p-2 border-b font-semibold text-right">{k}</th>)
+                                    ) : (
+                                        <th className="p-2 border-b font-semibold text-right">Value</th>
+                                    )}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.map((row: any, i: number) => (
+                                    <tr key={i} className="border-b last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                        <td className="p-2 truncate max-w-[200px]" title={row.fullName}>{row.fullName}</td>
+                                        {chart.yKeys?.length ? (
+                                            chart.yKeys.map(k => <td key={k} className="p-2 text-right">{row[k]}</td>)
+                                        ) : (
+                                            <td className="p-2 text-right">{row.value}</td>
+                                        )}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
-            </ResponsiveContainer>
+            </div>
         );
     };
 
@@ -287,10 +419,22 @@ export default function AIScientistPage() {
                 description="AI-powered conversational analysis, cross-correlation insights, and actionable suggestions."
                 actions={
                     activeSurvey ? (
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/30 rounded-lg border border-indigo-200 dark:border-indigo-800/40">
-                            <Database className="w-4 h-4 text-indigo-500" />
-                            <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">{activeSurvey.title}</span>
-                            {activeSurvey.year && <span className="text-xs text-slate-500">({activeSurvey.year})</span>}
+                        <div className="flex items-center gap-4">
+                            {cacheUpdated && (
+                                <div className="flex flex-col items-end gap-0.5">
+                                    <Badge variant="outline" className="bg-indigo-50/50 text-indigo-700 border-indigo-200 gap-1.5 px-3 py-1 shadow-sm font-medium">
+                                        <Database className="w-3.5 h-3.5" />
+                                        Context Built: {new Date(cacheUpdated).toLocaleDateString()}
+                                    </Badge>
+                                    <span className="text-[10px] text-slate-500 px-1 font-medium">
+                                        {macroData.length} Units Synthesized
+                                    </span>
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-950/30 rounded-lg border border-indigo-200 dark:border-indigo-800/40">
+                                <span className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">{activeSurvey.title}</span>
+                                {activeSurvey.year && <span className="text-xs font-medium text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded">({activeSurvey.year})</span>}
+                            </div>
                         </div>
                     ) : null
                 }
@@ -325,7 +469,7 @@ export default function AIScientistPage() {
                                     surveyId={surveyIdForApi}
                                     macroData={macroData}
                                     existingChart={refineChart || undefined}
-                                    onChartSaved={loadWorkspace}
+                                    onChartSaved={() => loadSavedCharts(true)}
                                 />
                             </Card>
                         )}
@@ -388,9 +532,40 @@ export default function AIScientistPage() {
                                                         <Sparkles className="w-5 h-5 text-purple-500" />
                                                         <h4 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">AI Insight</h4>
                                                     </div>
-                                                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-                                                        {chart.config.description}
-                                                    </p>
+                                                    <div className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed flex-grow prose prose-slate dark:prose-invert max-w-none">
+                                                        <ReactMarkdown>{chart.config.description}</ReactMarkdown>
+                                                    </div>
+                                                    <div className="flex flex-col gap-2 mt-4">
+                                                        {chart.config.fullExplanation && (
+                                                            <Dialog>
+                                                                <DialogTrigger asChild>
+                                                                    <Button variant="secondary" className="w-full text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50">
+                                                                        <MessageSquare className="w-3.5 h-3.5 mr-2" /> Read Full Explanation
+                                                                    </Button>
+                                                                </DialogTrigger>
+                                                                <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+                                                                    <DialogHeader>
+                                                                        <DialogTitle className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400">
+                                                                            <Sparkles className="w-5 h-5" /> AI Deep Dive Context
+                                                                        </DialogTitle>
+                                                                    </DialogHeader>
+                                                                    <div className="mt-4">
+                                                                        <BoxedMessageRenderer content={chart.config.fullExplanation} />
+                                                                    </div>
+                                                                </DialogContent>
+                                                            </Dialog>
+                                                        )}
+                                                        <Button
+                                                            variant="outline"
+                                                            className="w-full text-xs font-semibold border-purple-200 text-purple-600 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400 dark:hover:bg-purple-950/50"
+                                                            onClick={async () => {
+                                                                openRefineMode(chart.config);
+                                                                window.scrollTo({ top: 0, behavior: "smooth" });
+                                                            }}
+                                                        >
+                                                            <Edit3 className="w-3.5 h-3.5 mr-2" /> Discuss this Chart
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </Card>

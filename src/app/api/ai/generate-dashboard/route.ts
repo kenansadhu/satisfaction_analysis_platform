@@ -123,12 +123,13 @@ export async function POST(req: Request) {
         `;
 
     // 4. Call Gemini 3.1 Pro Preview
-    const parsed = await callGemini(prompt, {
-      jsonMode: true,
-      model: "gemini-3.1-pro-preview"
-    }) as any;
+    const rawResult = await callGemini(prompt, {
+      jsonMode: false,
+      model: "gemini-2.5-flash"
+    }) as string;
 
-    const blueprint = parsed.charts || parsed;
+    const parsedResult = JSON.parse(rawResult);
+    const blueprint = parsedResult.charts || parsedResult;
     let finalCharts = Array.isArray(blueprint) ? blueprint : [blueprint];
 
     // Normalize if Gemini wrapped the items in another 'chart' layer

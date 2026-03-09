@@ -19,7 +19,7 @@ import { OrganizationUnit } from "@/types";
 import {
     Save, Loader2, AlertTriangle, GraduationCap,
     FileText, Calendar, Info, Users, Columns3, Plus, Trash2,
-    Eye, Search, ChevronDown, ChevronRight
+    Eye, Search, ChevronDown, ChevronRight, BrainCircuit, CheckCircle2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +61,10 @@ export default function SurveyManagePage() {
     const [description, setDescription] = useState("");
     const [savingMeta, setSavingMeta] = useState(false);
 
+    // AI Dataset Cache
+    const [aiCacheUpdatedAt, setAiCacheUpdatedAt] = useState<string | null>(null);
+    const [buildingAiCache, setBuildingAiCache] = useState(false);
+
     // Column mappings
     const [columns, setColumns] = useState<ColumnMapping[]>([]);
     const [units, setUnits] = useState<OrganizationUnit[]>([]);
@@ -94,7 +98,7 @@ export default function SurveyManagePage() {
             setLoading(true);
             const { data } = await supabase
                 .from('surveys')
-                .select('title, year, description')
+                .select('title, year, description, ai_dataset_updated_at')
                 .eq('id', surveyId)
                 .single();
 
@@ -102,6 +106,7 @@ export default function SurveyManagePage() {
                 setTitle(data.title || "");
                 setYear(data.year || "");
                 setDescription(data.description || "");
+                setAiCacheUpdatedAt(data.ai_dataset_updated_at || null);
             }
             setLoading(false);
         };
@@ -507,6 +512,27 @@ export default function SurveyManagePage() {
         setSavingMeta(false);
     };
 
+    // --- Build AI Data Scientist Cache ---
+    const handleBuildAiCache = async () => {
+        setBuildingAiCache(true);
+        try {
+            const res = await fetch('/api/ai/cache-global-dataset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ surveyId })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to build AI cache");
+
+            toast.success(`AI Context Built! Cached ${data.count} units.`);
+            setAiCacheUpdatedAt(new Date().toISOString());
+        } catch (e: any) {
+            toast.error(e.message);
+        } finally {
+            setBuildingAiCache(false);
+        }
+    };
+
     // --- Inline edit helpers ---
     const updateColumn = (sourceColumn: string, field: keyof ColumnMapping, value: any) => {
         setColumns(prev => prev.map(c => {
@@ -830,7 +856,45 @@ export default function SurveyManagePage() {
                                 )}
                             </CardContent>
                         </Card>
+
+                        {/* AI Data Scientist Context Cache */}
+                        <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                            <div className="h-1 bg-gradient-to-r from-purple-500 to-fuchsia-500" />
+                            <CardContent className="p-6">
+                                <div className="flex items-start justify-between gap-6">
+                                    <div className="space-y-1.5">
+                                        <h3 className="text-base font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                                            <BrainCircuit className="w-5 h-5 text-purple-600" /> AI Data Scientist Context
+                                        </h3>
+                                        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-lg">
+                                            Compile and freeze the current analysis metrics into a single dataset. The AI Data Scientist uses this snapshot to instantly answer complex queries without loading the entire database.
+                                        </p>
+                                        {aiCacheUpdatedAt && (
+                                            <p className="text-xs text-green-600 dark:text-green-400 font-medium flex items-center gap-1 mt-2">
+                                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                                Context Built: {new Date(aiCacheUpdatedAt).toLocaleString()}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="flex-shrink-0 flex items-center justify-center min-w-[140px]">
+                                        <Button
+                                            onClick={handleBuildAiCache}
+                                            disabled={buildingAiCache}
+                                            className="w-full gap-2 bg-purple-600 hover:bg-purple-700 text-white"
+                                        >
+                                            {buildingAiCache ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <BrainCircuit className="w-4 h-4" />
+                                            )}
+                                            {aiCacheUpdatedAt ? "Re-Build Context" : "Build Context"}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
                     </TabsContent>
+
 
                     <TabsContent value="columns" className="space-y-8 mt-0">
                         {/* SECTION 2: Column Mapping */}

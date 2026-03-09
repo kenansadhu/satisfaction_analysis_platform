@@ -23,91 +23,38 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "No messages provided" }, { status: 400 });
         }
 
-        // 1. Build the live dataset (same as generate-dashboard)
-        const { data: unitsData } = await supabase
-            .from('organization_units')
-            .select('id, name, short_name, description');
-
-        if (!unitsData) throw new Error("Failed to load units.");
-
-        const globalDataset: any[] = [];
-        const availableKeys = new Set<string>([
+        // 1. Fetch the cached global dataset (replaces N+1 bottleneck)
+        let globalDataset: any[] = [];
+        let availableKeys = new Set<string>([
             'unit_name', 'unit_short_name', 'total_segments',
             'positive', 'neutral', 'negative', 'score'
         ]);
 
-        for (const unit of unitsData) {
-            const { data: metrics, error: rpcErr } = await supabase.rpc('get_dashboard_metrics', {
-                p_unit_id: unit.id,
-                p_survey_id: surveyId ? parseInt(surveyId, 10) : null
-            });
+        if (surveyId) {
+            const { data: surveyData, error: sErr } = await supabase
+                .from('surveys')
+                .select('ai_dataset_cache')
+                .eq('id', parseInt(surveyId, 10))
+                .single();
 
-            if (rpcErr) {
-                console.warn(`[chat-analyst] RPC error for unit ${unit.name}:`, rpcErr.message);
-                continue;
-            }
+            if (sErr) throw new Error("Failed to load survey cache: " + sErr.message);
 
-            if (metrics) {
-                const m = metrics as any;
-                // Log first unit's raw shape for debugging
-                if (globalDataset.length === 0) {
-                    console.log(`[chat-analyst] Raw RPC keys for ${unit.name}:`, Object.keys(m));
-                }
-
-                const totalSegments = m.total_segments ?? m.total ?? 0;
-                if (totalSegments <= 0) continue;
-
-                // Handle different possible field names from the RPC
-                const pos = m.positive ?? m.positive_count ?? m.sentiment_positive ?? 0;
-                const neg = m.negative ?? m.negative_count ?? m.sentiment_negative ?? 0;
-                const neu = m.neutral ?? m.neutral_count ?? m.sentiment_neutral ?? 0;
-                const scoreVal = m.score ?? m.sentiment_score ?? 0;
-
-                const categories = m.category_counts || [];
-                const flatCategories: any = {};
-                let categoryPosSum = 0;
-                let categoryNegSum = 0;
-
-                if (Array.isArray(categories)) {
-                    categories.forEach((c: any) => {
-                        const name = c.category_name;
-                        if (name) {
-                            const cleanKey = `category_${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                            flatCategories[cleanKey] = c.total || 0;
-                            flatCategories[`${cleanKey}_pos`] = c.positive_count || 0;
-                            flatCategories[`${cleanKey}_neg`] = c.negative_count || 0;
-                            categoryPosSum += c.positive_count || 0;
-                            categoryNegSum += c.negative_count || 0;
-
-                            availableKeys.add(cleanKey);
-                            availableKeys.add(`${cleanKey}_pos`);
-                            availableKeys.add(`${cleanKey}_neg`);
-                        }
+            if (surveyData?.ai_dataset_cache) {
+                globalDataset = surveyData.ai_dataset_cache;
+                // Read keys dynamically from the first valid object to preserve category transparency
+                if (globalDataset.length > 0) {
+                    Object.keys(globalDataset[0]).forEach(k => {
+                        if (k.startsWith('category_') || k.startsWith('likert_') || k.startsWith('binary_')) availableKeys.add(k);
                     });
                 }
-
-                // Use category sums as fallback when top-level counts are 0
-                const finalPos = pos > 0 ? pos : categoryPosSum;
-                const finalNeg = neg > 0 ? neg : categoryNegSum;
-                const finalNeu = neu > 0 ? neu : Math.max(0, totalSegments - finalPos - finalNeg);
-
-                globalDataset.push({
-                    unit_id: unit.id,
-                    unit_name: unit.name,
-                    unit_short_name: unit.short_name || unit.name,
-                    unit_description: unit.description || "No context.",
-                    total_segments: totalSegments,
-                    positive: finalPos,
-                    neutral: finalNeu,
-                    negative: finalNeg,
-                    score: scoreVal,
-                    ...flatCategories
-                });
+            } else {
+                return NextResponse.json({ error: "AI Context not built. Please build it in Survey Settings." }, { status: 400 });
             }
+        } else {
+            return NextResponse.json({ error: "No survey selected." }, { status: 400 });
         }
 
-        console.log(`[chat-analyst] Dataset built: ${globalDataset.length} units. Sample keys:`, globalDataset.length > 0 ? Object.keys(globalDataset[0]) : 'empty');
-        console.log(`[chat-analyst] Sample entry:`, globalDataset.length > 0 ? JSON.stringify(globalDataset[0]).slice(0, 300) : 'none');
+        console.log(`[chat-analyst] Cached Dataset loaded: ${globalDataset.length} units.`);
 
         // Also fetch quantitative averages 
         const quantData = await fetchQuantSummary(surveyId);
@@ -148,31 +95,50 @@ Start by acknowledging you see this chart and ask what they'd like to change.
 ` : ''}
 
 CHART OUTPUT FORMAT:
-When generating or modifying a chart, include a JSON block wrapped in <chart_config>...</chart_config> tags.
+When generating charts, include a JSON block wrapped in <charts_config>...</charts_config> tags. 
+**PRO TIP: Combine related points into a single chart!** Do not generate 9 different charts with 1 line each. If you are comparing 3 different 'likert' metrics or measuring positive vs negative segments, combine them into one single chart using the \`yKeys\` array instead of \`yKey\`.
+
 The chart config MUST use ONLY keys from the available keys list above.
 Format:
-<chart_config>
-{
-    "id": "chart_[unique]",
-    "type": "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER",
-    "title": "Chart Title",
-    "description": "AI insight about what this visualization reveals",
-    "xKey": "unit_name",
-    "yKey": "score",
-    "yKeys": ["positive", "negative"],
-    "aggregation": "AVG" | "COUNT" | "SUM"
-}
-</chart_config>
+<charts_config>
+[
+    {
+        "id": "chart_[unique]",
+        "type": "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER" | "LINE",
+        "title": "Chart Title",
+        "description": "AI insight about what this visualization reveals",
+        "xKey": "unit_name",
+        "yKey": "score", 
+        "yKeys": ["likert_Quality", "likert_Speed", "likert_Cost"], 
+        "aggregation": "AVG" | "COUNT" | "SUM"
+    }
+]
+</charts_config>
 
 IMPORTANT RULES:
 - xKey, yKey, yKeys MUST exactly match keys from the available keys list
-- For BAR charts comparing multiple metrics, use yKeys array (NOT yKey)
+- When comparing MULTIPLE metrics across units (e.g. 3 different Likert scores), you MUST use a "BAR" or "LINE" chart and provide an array of strings in \`yKeys\`. Do not use \`yKey\` if using \`yKeys\`.
 - For SCATTER, use xKey and yKey (two numeric metrics)
 - Always include a "description" with a deep insight
 - If the user just asks a question (no chart needed), respond with text only
-- Be conversational, insightful, and helpful
-- Reference specific data points from the dataset to support your claims
-- If you do NOT need to generate a chart, do NOT include <chart_config> tags
+- If you do NOT need to generate a chart, do NOT include <charts_config> tags
+- Do NOT generate charts with only 1 data point if they can be combined. Group them logically (e.g., all 'likert_' academic scores, or 'positive' vs 'negative' segments).
+
+CRITICAL FORMATTING DIRECTIVES (YOU WILL BE PENALIZED FOR IGNORING THESE):
+1. **NO CORNY ROLEPLAY**: Absolutely omit conversational filler, greetings, or roleplay preambles. Output strict, direct, and actionable insights. NEVER refer to yourself as "Gemini" or mention your AI model name.
+2. **MANDATORY ENCAPSULATION**: YOU MUST WRAP EVERY SINGLE THEMATIC POINT OR EXPLANATION IN A \`<box title="Your Title Here">\` TAG. 
+    - Provide a short 1-2 sentence high-level summary paragraph at the very beginning BEFORE your boxes.
+3. **MANDATORY TYPOGRAPHY**: You MUST format text entities using these EXACT Markdown rules so our parser can style them:
+    - Verbatim Student Quotes: Blockquotes > "quote here"
+    - Dataset Column/Category Names: Inline Code \`category_Facilities_neg\`
+    - Faculty Names: Bold **Faculty of Medicine**
+    - Organization Unit Names: Italics *IT Department (ITD)*
+    - Exact Score Values (Likert/Binary): Bold **3.42** or **85%**
+    - Qualitative Volume/Segment Counts: Italics *1,420 segments*
+4. **CROSS-UNIT FOCUS**: Focus exclusively on structural connections, correlations, and comparisons between MULTIPLE units. DO NOT generate single-unit deep dives (e.g., do not spend a whole box analyzing just the IT Department). The user has a separate analysis tool for single units. Pay close attention to the \`unit_description\` variable to understand the context and faculty mappings behind each unit.
+5. **CHART RULE**: Charts MUST compare MULTIPLE units (e.g., \`xKey: "unit_name"\`). Never generate a chart that plots "Categories" as the axis for a single unit. Never hallucinate nested "transform" JSON objects in the chart config.
+6. **SEPARATE QUANT/QUAL**: You must analyze quantitative Likert scores (the \`likert_X\` keys, which are 1-4 scale KPIs) and binary scores (\`binary_X\` keys, 0-1 scale) alongside qualitative sentiments (the \`category_X\` keys). Explicitly state what is quantitative and what is qualitative sentiment.
+7. **DATA-FIRST**: Cite specific metrics (both exact quantitative averages out of 4 or 1, and exact sentiment \`total_segments\`) from the dataset to support your claims. Do not hallucinate numbers. Understand that \`likert_\` are average scores out of 4, while \`binary_\` represent percentages (0 to 1).
 
 CONVERSATION SO FAR:
 ${conversationHistory}
@@ -182,25 +148,45 @@ Respond as the ASSISTANT. Be helpful and insightful.`;
         // 4. Call Gemini Pro
         const rawResponse = await callGemini(systemPrompt, {
             jsonMode: false, // We want mixed text + chart responses
-            model: "gemini-3.1-pro-preview"
+            model: "gemini-2.5-flash"
         }) as string;
 
-        // 5. Parse response — extract chart config if present
+        // 5. Parse response — extract charts config if present
         let reply = rawResponse;
-        let chart = null;
+        let charts: any[] = [];
 
-        const chartMatch = rawResponse.match(/<chart_config>([\s\S]*?)<\/chart_config>/);
-        if (chartMatch) {
+        // Catch multiple <charts_config> tags using a global regex
+        const chartRegex = /<charts_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/charts_config>/gi;
+        let match;
+
+        while ((match = chartRegex.exec(rawResponse)) !== null) {
             try {
-                chart = JSON.parse(chartMatch[1].trim());
-                // Remove the chart config from the text reply
-                reply = rawResponse.replace(/<chart_config>[\s\S]*?<\/chart_config>/, '').trim();
+                const parsed = JSON.parse(match[1].trim());
+                if (Array.isArray(parsed)) {
+                    charts.push(...parsed);
+                } else {
+                    charts.push(parsed);
+                }
             } catch (e) {
-                console.warn("Failed to parse chart config from AI response");
+                console.warn("Failed to parse a charts config block from AI response");
             }
         }
 
-        return NextResponse.json({ reply, chart, dataset: globalDataset });
+        // Completely remove all tags and their contents from the text reply
+        reply = reply.replace(/<charts_config>[\s\S]*?<\/charts_config>/gi, '').trim();
+
+        // Handle legacy single chart tag if AI hallucinates it
+        const legacyRegex = /<chart_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/chart_config>/gi;
+        while ((match = legacyRegex.exec(rawResponse)) !== null) {
+            try {
+                charts.push(JSON.parse(match[1].trim()));
+            } catch (e) {
+                console.warn("Failed to parse a legacy chart_config block");
+            }
+        }
+        reply = reply.replace(/<chart_config>[\s\S]*?<\/chart_config>/gi, '').trim();
+
+        return NextResponse.json({ reply, charts, dataset: globalDataset });
 
     } catch (error) {
         return handleAIError(error);
