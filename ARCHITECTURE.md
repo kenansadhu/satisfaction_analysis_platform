@@ -3,6 +3,9 @@
 > **⚠️ AI AGENTS: Read this file FIRST before making ANY changes.**
 > This is the single source of truth for the project's structure, data flow, and component relationships.
 > After every change, you **MUST** update the relevant section of this document.
+> 
+> **🛑 STRICT DELETION POLICY:**
+> **NEVER** decide to delete records, surveys, or database entities on your own. Even if you identify duplicates or safe-to-delete items, you MUST present the options to the user and explicitly ask for confirmation before taking ANY destructive action.
 
 **Last Updated:** 2026-03-05
 **Tech Stack:** Next.js 16 • React 19 • TypeScript • Supabase (PostgreSQL) • Google Gemini AI • TailwindCSS 4 • Radix UI • Recharts • Framer Motion
