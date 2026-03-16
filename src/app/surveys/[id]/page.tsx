@@ -1,37 +1,45 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, BrainCircuit, MessageSquare, Users, BarChart3, ChevronRight, Loader2, Trash2, Archive, FileSpreadsheet, CheckCircle2, Settings, PieChart } from "lucide-react";
+import {
+    ArrowRight, BrainCircuit, Users, BarChart3, CheckCircle2,
+    Settings, PieChart, Clock, Loader2, CircleDashed, Sparkles,
+    Search, Filter
+} from "lucide-react";
 import Link from "next/link";
-import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 
-type UnitStat = {
+type AnalysisStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+
+type UnitCard = {
     unit_id: number;
     unit_name: string;
-    unit_desc?: string; // Needed for context
-    comment_count: number;
-    analyzed_count: number;
+    unit_short_name: string | null;
+    unit_desc: string | null;
+    analysis_status: AnalysisStatus;
 };
 
 export default function SurveyDetailPage() {
     const params = useParams();
     const surveyId = params.id as string;
+    const router = useRouter();
 
     const [surveyTitle, setSurveyTitle] = useState("");
     const [surveyYear, setSurveyYear] = useState<number | null>(null);
     const [totalRespondents, setTotalRespondents] = useState(0);
-    const [totalDataPoints, setTotalDataPoints] = useState(0);
-    const [unitStats, setUnitStats] = useState<UnitStat[]>([]);
+    const [units, setUnits] = useState<UnitCard[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [statusFilter, setStatusFilter] = useState<AnalysisStatus | "ALL">("ALL");
 
     // Global Analysis State
     const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false);
@@ -47,10 +55,11 @@ export default function SurveyDetailPage() {
     async function loadSurveyData() {
         setIsLoading(true);
 
-        // === PHASE 1: Get survey info and ALL respondent IDs (paginated) ===
-        const [surveyRes, unitsRes] = await Promise.all([
+        // === Fast parallel fetch: survey info + units + respondent count ===
+        const [surveyRes, unitsRes, respCountRes] = await Promise.all([
             supabase.from('surveys').select('title, year').eq('id', surveyId).single(),
-            supabase.from('organization_units').select('id, name, description').order('name'),
+            supabase.from('organization_units').select('id, name, short_name, description, analysis_status').order('name'),
+            supabase.from('respondents').select('id', { count: 'exact', head: true }).eq('survey_id', surveyId),
         ]);
 
         if (surveyRes.data) {
@@ -58,102 +67,18 @@ export default function SurveyDetailPage() {
             setSurveyYear(surveyRes.data.year || null);
         }
 
-        let allRespIds: string[] = [];
-        let hasMoreResps = true;
-        let page = 0;
-        const PAGE_SIZE = 1000;
+        setTotalRespondents(respCountRes.count || 0);
 
-        while (hasMoreResps) {
-            const { data, error } = await supabase
-                .from('respondents')
-                .select('id')
-                .eq('survey_id', surveyId)
-                .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-            if (error) {
-                console.error("Error fetching respondents page:", error);
-                break;
-            }
-
-            if (data && data.length > 0) {
-                allRespIds = [...allRespIds, ...data.map(r => r.id)];
-                hasMoreResps = data.length === PAGE_SIZE;
-                page++;
-            } else {
-                hasMoreResps = false;
-            }
+        if (unitsRes.data) {
+            setUnits(unitsRes.data.map((u: any) => ({
+                unit_id: u.id,
+                unit_name: u.name,
+                unit_short_name: u.short_name || null,
+                unit_desc: u.description || null,
+                analysis_status: (u.analysis_status || "NOT_STARTED") as AnalysisStatus,
+            })));
         }
 
-        setTotalRespondents(allRespIds.length);
-        const respIds = allRespIds;
-
-        // === PHASE 2: Controlled Parallel Aggregation — Speed + Safety ===
-        let totalDP = 0;
-        const totalByUnit = new Map<number, number>();
-        const commentsByUnit = new Map<number, number>();
-        const analyzedByUnit = new Map<number, number>();
-
-        const AGG_CHUNK = 250;
-        const CONCURRENCY_LIMIT = 5; // Fetch up to 5 chunks in parallel at once
-
-        for (let i = 0; i < respIds.length; i += AGG_CHUNK * CONCURRENCY_LIMIT) {
-            const batchPromises = [];
-            for (let j = 0; j < CONCURRENCY_LIMIT; j++) {
-                const start = i + (j * AGG_CHUNK);
-                if (start >= respIds.length) break;
-                const chunk = respIds.slice(start, start + AGG_CHUNK);
-                batchPromises.push(
-                    supabase.rpc('get_respondent_group_counts', {
-                        p_respondent_ids: chunk
-                    })
-                );
-            }
-
-            const results = await Promise.all(batchPromises);
-
-            for (const { data: rows, error: batchErr } of results) {
-                if (batchErr) {
-                    console.warn(`[survey detail counts] Aggregation batch failed:`, batchErr.message);
-                    continue;
-                }
-
-                for (const row of (rows || [])) {
-                    const uId = parseInt(row.out_unit_id);
-                    const tCount = parseInt(row.total_count) || 0;
-                    const cCount = parseInt(row.comment_count) || 0;
-                    const aCount = parseInt(row.analyzed_count) || 0;
-
-                    totalDP += tCount;
-                    totalByUnit.set(uId, (totalByUnit.get(uId) || 0) + tCount);
-                    commentsByUnit.set(uId, (commentsByUnit.get(uId) || 0) + cCount);
-                    analyzedByUnit.set(uId, (analyzedByUnit.get(uId) || 0) + aCount);
-                }
-            }
-        }
-
-        setTotalDataPoints(totalDP);
-
-        const units = unitsRes.data;
-        if (units) {
-            const stats = units.map((unit: { id: number; name: string; description: string | null }) => {
-                const commentCount = commentsByUnit.get(unit.id) || 0;
-                const analyzedCount = analyzedByUnit.get(unit.id) || 0;
-                return {
-                    unit_id: unit.id,
-                    unit_name: unit.name,
-                    unit_desc: unit.description || undefined,
-                    comment_count: commentCount,
-                    analyzed_count: analyzedCount,
-                };
-            });
-
-            // Show units that have at least one total data point
-            const sortedStats = stats
-                .filter(s => (totalByUnit.get(s.unit_id) || 0) > 0)
-                .sort((a: UnitStat, b: UnitStat) => a.unit_name.localeCompare(b.unit_name));
-
-            setUnitStats(sortedStats);
-        }
         setIsLoading(false);
     }
 
@@ -168,39 +93,33 @@ export default function SurveyDetailPage() {
         setGlobalProgress(0);
         addGlobalLog("🚀 Initializing Global AI Engine...");
 
-        // Pre-fetch respondent IDs
         const { data: resps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
         const respIds = (resps || []).map((r: any) => r.id);
         addGlobalLog(`📋 Survey has ${respIds.length.toLocaleString()} respondents`);
 
-        const unitsToProcess = unitStats.filter(u => u.comment_count > 0);
+        const unitsToProcess = units.filter(u => u.analysis_status !== "COMPLETED");
         let unitsDone = 0;
 
         try {
             for (const unit of unitsToProcess) {
                 if (stopGlobalRef.current) { addGlobalLog("🛑 Stopped by user."); break; }
-
                 addGlobalLog(`\n📂 Unit: ${unit.unit_name}`);
 
-                // 1. Check categories exist
-                const { data: categories } = await supabase.from('analysis_categories').select('id, name, keywords').eq('unit_id', unit.unit_id);
+                const { data: categories } = await supabase.from('analysis_categories').select('id, name').eq('unit_id', unit.unit_id);
                 if (!categories || categories.length === 0) {
-                    addGlobalLog(`⚠️ SKIPPED: No categories built for ${unit.unit_name}`);
+                    addGlobalLog(`⚠️ SKIPPED: No categories for ${unit.unit_name}`);
                     unitsDone++;
                     setGlobalProgress(Math.round((unitsDone / unitsToProcess.length) * 100));
                     continue;
                 }
-                addGlobalLog(`   ✅ ${categories.length} categories loaded`);
 
-                // 2. Count pending comments (requires_analysis = true)
-                let pendingCount = 0;
                 const CHUNK = 50;
+                let pendingCount = 0;
                 for (let i = 0; i < respIds.length; i += CHUNK) {
                     const chunk = respIds.slice(i, i + CHUNK);
                     const { count } = await supabase.from('raw_feedback_inputs')
                         .select('*', { count: 'exact', head: true })
                         .eq('target_unit_id', unit.unit_id)
-                        .eq('is_quantitative', false)
                         .eq('requires_analysis', true)
                         .in('respondent_id', chunk);
                     pendingCount += (count || 0);
@@ -214,35 +133,20 @@ export default function SurveyDetailPage() {
                 }
 
                 addGlobalLog(`   ⏳ ${pendingCount} comments to analyze...`);
-
-                // 3. Process in batches of 50 using process-queue API
                 let processed = 0;
                 const BATCH_SIZE = 50;
                 while (processed < pendingCount) {
                     if (stopGlobalRef.current) { addGlobalLog("🛑 Stopped by user."); break; }
-
                     const response = await fetch('/api/ai/process-queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            unitId: unit.unit_id,
-                            surveyId: parseInt(surveyId),
-                            batchSize: BATCH_SIZE
-                        })
+                        body: JSON.stringify({ unitId: unit.unit_id, surveyId: parseInt(surveyId), batchSize: BATCH_SIZE })
                     });
-
                     const result = await response.json();
-                    if (result.error) {
-                        addGlobalLog(`   ❌ Error: ${result.error}`);
-                        break;
-                    }
-
+                    if (result.error) { addGlobalLog(`   ❌ Error: ${result.error}`); break; }
                     processed += (result.processed || 0);
                     addGlobalLog(`   ✅ Batch done: ${processed}/${pendingCount}`);
-
                     if (result.remaining === 0 || result.processed === 0) break;
-
-                    // Brief pause between batches
                     await new Promise(r => setTimeout(r, 1000));
                 }
 
@@ -262,9 +166,42 @@ export default function SurveyDetailPage() {
         }
     };
 
-    const overallProgress = unitStats.length > 0
-        ? Math.round((unitStats.reduce((acc: number, u: UnitStat) => acc + u.analyzed_count, 0) / unitStats.reduce((acc: number, u: UnitStat) => acc + (u.comment_count || 1), 0)) * 100)
-        : 0;
+    // --- Derived stats ---
+    const completedCount = units.filter(u => u.analysis_status === "COMPLETED").length;
+    const inProgressCount = units.filter(u => u.analysis_status === "IN_PROGRESS").length;
+    const notStartedCount = units.filter(u => u.analysis_status === "NOT_STARTED").length;
+    const overallProgress = units.length > 0 ? Math.round((completedCount / units.length) * 100) : 0;
+
+    const filteredUnits = units.filter(u => {
+        const matchesSearch = u.unit_name.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesStatus = statusFilter === "ALL" || u.analysis_status === statusFilter;
+        return matchesSearch && matchesStatus;
+    });
+
+    // --- Status helpers ---
+    const statusConfig = {
+        COMPLETED: {
+            label: "Complete",
+            icon: CheckCircle2,
+            badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+            bar: "from-emerald-500 to-teal-500",
+            glow: "hover:border-emerald-200",
+        },
+        IN_PROGRESS: {
+            label: "In Progress",
+            icon: Clock,
+            badge: "bg-amber-50 text-amber-700 border-amber-200",
+            bar: "from-amber-400 to-orange-400",
+            glow: "hover:border-amber-200",
+        },
+        NOT_STARTED: {
+            label: "Not Started",
+            icon: CircleDashed,
+            badge: "bg-slate-100 text-slate-500 border-slate-200",
+            bar: "from-slate-300 to-slate-400",
+            glow: "hover:border-slate-300",
+        },
+    };
 
     return (
         <PageShell>
@@ -279,7 +216,7 @@ export default function SurveyDetailPage() {
                         )}
                     </span>
                 }
-                description={`${totalRespondents.toLocaleString()} respondents • ${totalDataPoints.toLocaleString()} data points`}
+                description={`${totalRespondents.toLocaleString()} respondents`}
                 backHref="/surveys"
                 backLabel="Surveys"
                 actions={
@@ -319,94 +256,208 @@ export default function SurveyDetailPage() {
                     </DialogContent>
                 </Dialog>
 
-                {/* --- LOADING SKELETON --- */}
-                {isLoading && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {[1, 2, 3].map(i => (
-                            <Card key={i} className="border-slate-200 overflow-hidden">
-                                <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
-                                <CardHeader><div className="h-5 w-32 bg-slate-200 rounded animate-pulse" /></CardHeader>
-                                <CardContent><div className="h-16 w-full bg-slate-100 rounded animate-pulse" /></CardContent>
-                            </Card>
-                        ))}
-                    </div>
-                )}
-
-
-                {/* --- ANALYSIS CONSOLE & UNIT GRID --- */}
+                {/* --- SUMMARY BANNER --- */}
                 {!isLoading && (
-                    <div className="animate-in fade-in duration-700 space-y-8">
-                        <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white border-none shadow-lg">
-                            <CardHeader><CardTitle className="flex items-center gap-2"><BrainCircuit className="w-6 h-6" /> AI Analysis Console</CardTitle><CardDescription className="text-blue-100">Global Processing Status</CardDescription></CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    <div className="flex justify-between text-sm font-medium"><span>Overall Progress</span><span>{overallProgress}%</span></div>
-                                    <Progress value={overallProgress} className="h-2 bg-blue-400/30" />
-                                    <Button
-                                        variant="secondary"
-                                        className="w-full text-blue-700 font-semibold shadow-sm"
-                                        onClick={handleRunGlobalAnalysis}
-                                        disabled={true}
-                                        title="Global analysis is not yet activated. Contact admin to enable."
-                                    >
-                                        {overallProgress === 100 ? "Re-Run Analysis" : "Run Global Analysis"}
-                                        <span className="ml-2 text-xs font-normal opacity-60">(Coming Soon)</span>
-                                    </Button>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-slate-500" /> Qualitative Feedback by Unit</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {unitStats.map((unit) => {
-                                    const progress = unit.comment_count > 0 ? Math.min(100, Math.round((unit.analyzed_count / unit.comment_count) * 100)) : 0;
-                                    const isComplete = progress === 100;
-                                    return (
-                                        <Card key={unit.unit_id} className="hover:shadow-lg transition-all duration-200 border-slate-200 h-full overflow-hidden hover:-translate-y-0.5">
-                                            <div className="h-1 bg-gradient-to-r from-purple-500 to-indigo-500" />
-                                            <CardHeader className="pb-3">
-                                                <div className="flex justify-between items-start">
-                                                    <div>
-                                                        <CardTitle className="text-lg font-semibold text-slate-800">{unit.unit_name}</CardTitle>
-                                                        <CardDescription className="text-xs">{unit.comment_count.toLocaleString()} qualitative items</CardDescription>
-                                                    </div>
-                                                </div>
-                                            </CardHeader>
-                                            <CardContent className="space-y-3">
-                                                <div className="space-y-2">
-                                                    <div className="flex justify-between text-xs text-slate-500"><span>Analysis Progress</span><span>{progress}%</span></div>
-                                                    <Progress value={progress} className="h-1.5" />
-                                                    {isComplete
-                                                        ? <span className="inline-flex items-center text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Complete</span>
-                                                        : <span className="inline-flex items-center text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{progress === 0 ? "Not Started" : "In Progress"}</span>
-                                                    }
-                                                </div>
-                                                <div className="flex gap-2 pt-1">
-                                                    <Link href={`/surveys/${surveyId}/unit/${unit.unit_id}`} className="flex-1">
-                                                        <Button variant="outline" size="sm" className="w-full text-xs gap-1.5 border-slate-200 hover:border-blue-300 hover:text-blue-600">
-                                                            <BrainCircuit className="w-3.5 h-3.5" /> Analysis Workspace
-                                                        </Button>
-                                                    </Link>
-                                                    {unit.analyzed_count > 0 && (
-                                                        <Link href={`/surveys/${surveyId}/unit/${unit.unit_id}?tab=insights`}>
-                                                            <Button variant="outline" size="sm" className="text-xs gap-1.5 border-indigo-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300">
-                                                                <PieChart className="w-3.5 h-3.5" /> Insights
-                                                            </Button>
-                                                        </Link>
-                                                    )}
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    );
-                                })}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 animate-in fade-in duration-500">
+                        {/* Completed */}
+                        <div className="relative overflow-hidden bg-white border border-emerald-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600 shrink-0">
+                                <CheckCircle2 className="w-5 h-5" />
                             </div>
+                            <div>
+                                <p className="text-2xl font-bold text-slate-900">{completedCount}</p>
+                                <p className="text-sm text-slate-500">Analysis Complete</p>
+                            </div>
+                            <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/50 via-transparent to-transparent pointer-events-none" />
+                        </div>
+
+                        {/* In Progress */}
+                        <div className="relative overflow-hidden bg-white border border-amber-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="p-3 rounded-xl bg-amber-50 text-amber-600 shrink-0">
+                                <Clock className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <p className="text-2xl font-bold text-slate-900">{inProgressCount}</p>
+                                <p className="text-sm text-slate-500">In Progress</p>
+                            </div>
+                            <div className="absolute inset-0 bg-gradient-to-br from-amber-50/50 via-transparent to-transparent pointer-events-none" />
+                        </div>
+
+                        {/* Not Started */}
+                        <div className="relative overflow-hidden bg-white border border-slate-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="p-3 rounded-xl bg-slate-100 text-slate-500 shrink-0">
+                                <CircleDashed className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <p className="text-2xl font-bold text-slate-900">{notStartedCount}</p>
+                                <p className="text-sm text-slate-500">Not Yet Started</p>
+                            </div>
+                            <div className="absolute inset-0 bg-gradient-to-br from-slate-50/50 via-transparent to-transparent pointer-events-none" />
                         </div>
                     </div>
                 )}
 
-            </div>
+                {/* --- OVERALL PROGRESS STRIP --- */}
+                {!isLoading && units.length > 0 && (
+                    <div className="bg-gradient-to-r from-indigo-600 via-blue-600 to-purple-600 rounded-2xl p-6 text-white shadow-lg animate-in fade-in duration-700">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
+                                    <Sparkles className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <p className="font-semibold text-white">Analysis Coverage</p>
+                                    <p className="text-blue-100 text-sm">{completedCount} of {units.length} units fully analyzed</p>
+                                </div>
+                            </div>
+                            <span className="text-3xl font-bold">{overallProgress}%</span>
+                        </div>
+                        <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-white rounded-full transition-all duration-1000"
+                                style={{ width: `${overallProgress}%` }}
+                            />
+                        </div>
+                    </div>
+                )}
 
+                {/* --- SEARCH & FILTER BAR --- */}
+                {!isLoading && units.length > 0 && (
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center animate-in fade-in duration-700">
+                        <div className="relative flex-1 max-w-xs">
+                            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                            <Input
+                                placeholder="Search units..."
+                                className="pl-9 bg-white border-slate-200"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            {(["ALL", "COMPLETED", "IN_PROGRESS", "NOT_STARTED"] as const).map(s => (
+                                <button
+                                    key={s}
+                                    onClick={() => setStatusFilter(s)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                                        statusFilter === s
+                                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                                            : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                                    }`}
+                                >
+                                    {s === "ALL" ? "All" : s === "COMPLETED" ? "Complete" : s === "IN_PROGRESS" ? "In Progress" : "Not Started"}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* --- LOADING SKELETON --- */}
+                {isLoading && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {[1, 2, 3, 4, 5, 6].map(i => (
+                            <div key={i} className="bg-white rounded-2xl border border-slate-100 overflow-hidden animate-pulse">
+                                <div className="h-1.5 bg-gradient-to-r from-slate-200 to-slate-100" />
+                                <div className="p-5 space-y-3">
+                                    <div className="flex justify-between items-center">
+                                        <div className="h-4 w-32 bg-slate-200 rounded" />
+                                        <div className="h-5 w-16 bg-slate-100 rounded-full" />
+                                    </div>
+                                    <div className="h-3 w-full bg-slate-100 rounded" />
+                                    <div className="h-8 w-full bg-slate-100 rounded-lg mt-4" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* --- UNIT CARD GRID --- */}
+                {!isLoading && filteredUnits.length === 0 && (
+                    <div className="text-center py-16 text-slate-400">
+                        <CircleDashed className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                        <p className="font-medium">No units match your filters</p>
+                        <p className="text-sm mt-1">Try adjusting the search or status filter.</p>
+                    </div>
+                )}
+
+                {!isLoading && filteredUnits.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                        {filteredUnits.map((unit) => {
+                            const cfg = statusConfig[unit.analysis_status];
+                            const StatusIcon = cfg.icon;
+
+                            return (
+                                <div
+                                    key={unit.unit_id}
+                                    className="group block cursor-pointer"
+                                    onClick={() => router.push(`/surveys/${surveyId}/unit/${unit.unit_id}`)}
+                                >
+                                    <div className={`relative bg-white rounded-2xl border border-slate-200 overflow-hidden h-full transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${cfg.glow}`}>
+                                        {/* Top color bar */}
+                                        <div className={`h-1.5 bg-gradient-to-r ${cfg.bar}`} />
+
+                                        <div className="p-5 flex flex-col h-[calc(100%-6px)]">
+                                            {/* Header row */}
+                                            <div className="flex items-start justify-between gap-2 mb-3">
+                                                <div className="flex-1 min-w-0">
+                                                    <h3 className="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors line-clamp-2 leading-snug">
+                                                        {unit.unit_name}
+                                                    </h3>
+                                                    {unit.unit_short_name && (
+                                                        <span className="inline-block mt-1 text-xs text-slate-400 font-medium bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+                                                            {unit.unit_short_name}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <Badge className={`shrink-0 text-xs border px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${cfg.badge}`}>
+                                                    <StatusIcon className="w-3 h-3" />
+                                                    {cfg.label}
+                                                </Badge>
+                                            </div>
+
+                                            {/* Description */}
+                                            {unit.unit_desc && (
+                                                <p className="text-xs text-slate-400 line-clamp-2 mb-4 leading-relaxed">
+                                                    {unit.unit_desc}
+                                                </p>
+                                            )}
+
+                                            {/* Spacer */}
+                                            <div className="flex-1" />
+
+                                            {/* Footer actions */}
+                                            <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-2">
+                                                <span className="text-xs text-slate-400 flex items-center gap-1.5">
+                                                    <BrainCircuit className="w-3.5 h-3.5" />
+                                                    {unit.analysis_status === "COMPLETED"
+                                                        ? "Fully analyzed"
+                                                        : unit.analysis_status === "IN_PROGRESS"
+                                                            ? "Analysis running"
+                                                            : "Pending analysis"}
+                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                    {unit.analysis_status === "COMPLETED" && (
+                                                        <Link
+                                                            href={`/surveys/${surveyId}/unit/${unit.unit_id}?tab=insights`}
+                                                            onClick={e => e.stopPropagation()}
+                                                            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg transition-colors"
+                                                        >
+                                                            <PieChart className="w-3 h-3" /> Insights
+                                                        </Link>
+                                                    )}
+                                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 group-hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg transition-colors">
+                                                        Open <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+            </div>
         </PageShell>
     );
 }

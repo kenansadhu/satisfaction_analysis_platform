@@ -1,7 +1,7 @@
 # Student Voice Platform — Pending Tasks
 
 > **Status:** Active
-> **Last Updated:** February 25, 2026
+> **Last Updated:** March 13, 2026
 
 This document lists all pending tasks consolidated from previous audits.
 
@@ -67,3 +67,10 @@ This document lists all pending tasks consolidated from previous audits.
 ### 2. Cache Build Lack of Resume
 - **Description:** Clicking "Build Cache" always restarts from column 1/116.
 - **Goal:** Modify `buildUniqueValuesCache` to check if a column is already cached in `survey_column_cache` and skip it, allowing for a "resume" behavior after network failures.
+### 3. Qualitative Count Inflation & Data Cleanup (Survey 6)
+- **Problem:** Some units (e.g., Layanan Keuangan) show inflated qualitative counts (77k+ items). 
+- **Cause:** Quantitative rating columns in Survey 6 were imported with `requires_analysis = true`.
+- **Solution:** 
+    - [ ] **Refine Code Logic:** Update `page.tsx` and `route.ts` to filter by `requires_analysis = true AND is_quantitative = false`.
+    - [ ] **Optimize RPC:** Update `get_respondent_group_counts` to use the same consolidated logic.
+    - [ ] **Data Cleanup:** Run `cleanup_survey_6.js` (to be created) to set `requires_analysis = false` for all quantitative items in Survey 6.

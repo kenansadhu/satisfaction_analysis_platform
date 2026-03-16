@@ -60,36 +60,28 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         addLog(`🚀 Triggering Background Analysis Job for Unit ${unitId} ...`);
 
         try {
-            // 1. Check if there's already a running job
-            const { data: existingJob } = await supabase
+            // Mark unit as IN_PROGRESS
+            await supabase
+                .from('organization_units')
+                .update({ analysis_status: 'IN_PROGRESS' })
+                .eq('id', unitId);
+
+            // 2. Cancel stale jobs and start fresh
+            // Mark any existing PROCESSING/PENDING jobs as CANCELLED to prevent stale counter reuse
+            await supabase
                 .from('analysis_jobs')
-                .select('id, status')
+                .update({ status: 'CANCELLED' })
                 .eq('unit_id', unitId)
-                .in('status', ['PROCESSING', 'PENDING'])
-                .order('created_at', { ascending: false })
-                .limit(1)
+                .in('status', ['PROCESSING', 'PENDING']);
+
+            const { data: newJob, error: jobErr } = await supabase
+                .from('analysis_jobs')
+                .insert({ unit_id: unitId, survey_id: surveyId || null, status: 'PENDING' })
+                .select('id')
                 .single();
 
-            let activeJobId = existingJob?.id;
-
-            // 2. Start a new job if none exists
-            if (!activeJobId) {
-                const { data: newJob, error: jobErr } = await supabase
-                    .from('analysis_jobs')
-                    .insert({ unit_id: unitId, survey_id: surveyId || null, status: 'PENDING' })
-                    .select('id')
-                    .single();
-
-                if (jobErr) throw jobErr;
-                activeJobId = newJob.id;
-
-                // Trigger Background Worker
-                await fetch('/api/ai/process-queue', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ jobId: activeJobId, unitId, surveyId })
-                });
-            }
+            if (jobErr) throw jobErr;
+            let activeJobId = newJob.id;
 
             setJobId(activeJobId);
             addLog("Job initialized. Starting batch processing...");
@@ -169,12 +161,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                     if (jobInfo) {
                         const realProcessed = jobInfo.processed_items || 0;
                         setProcessedCount(realProcessed);
-                        // Update total if the job tracked more items than our initial count
-                        if (jobInfo.total_items && jobInfo.total_items > initialTotal) {
-                            setTotalPending(jobInfo.total_items);
-                        }
-                        // Ensure total is at least as large as processed
-                        setTotalPending(prev => Math.max(prev, realProcessed));
+
                         if (jobInfo.status === 'STOPPED') {
                             addLog(`🛑 Job Stopped by system.`);
                             break;
@@ -198,6 +185,12 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
             if (!stopRef.current) {
                 addLog("✅ All batches complete!");
+                // Mark unit as COMPLETED
+                await supabase
+                    .from('organization_units')
+                    .update({ analysis_status: 'COMPLETED' })
+                    .eq('id', unitId);
+                addLog("🏁 Unit status set to COMPLETED.");
                 setIsAnalyzing(false);
                 setJobId(null);
             }
@@ -301,6 +294,12 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                     .in('id', batchIds);
             }
         }
+
+        // Reset unit status back to NOT_STARTED
+        await supabase
+            .from('organization_units')
+            .update({ analysis_status: 'NOT_STARTED' })
+            .eq('id', unitId);
 
         addLog("✅ Reset Complete.");
         setTotalPending(0);

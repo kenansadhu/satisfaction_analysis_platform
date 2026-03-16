@@ -113,6 +113,60 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
             // 'total' perfectly reflects the current queue size
             setPendingCount(total || 0);
 
+            // === Self-healing: if 0 pending, check if segments exist and backfill status ===
+            if (total === 0) {
+                // Get raw input IDs for this unit (scoped to survey if provided)
+                let inputIds: number[] = [];
+                if (respIds.length > 0) {
+                    const CHUNK_SIZE = 200;
+                    for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
+                        const chunk = respIds.slice(i, i + CHUNK_SIZE);
+                        const { data: inputs } = await supabase
+                            .from('raw_feedback_inputs')
+                            .select('id')
+                            .eq('target_unit_id', unitId)
+                            .eq('is_quantitative', false)
+                            .in('respondent_id', chunk)
+                            .limit(5); // We only need to confirm at least one exists
+                        if (inputs && inputs.length > 0) {
+                            inputIds = inputs.map((r: any) => r.id);
+                            break;
+                        }
+                    }
+                } else {
+                    const { data: inputs } = await supabase
+                        .from('raw_feedback_inputs')
+                        .select('id')
+                        .eq('target_unit_id', unitId)
+                        .eq('is_quantitative', false)
+                        .limit(5);
+                    inputIds = (inputs || []).map((r: any) => r.id);
+                }
+
+                if (inputIds.length > 0) {
+                    const { count: segCount } = await supabase
+                        .from('feedback_segments')
+                        .select('id', { count: 'exact', head: true })
+                        .in('raw_input_id', inputIds);
+
+                    if ((segCount || 0) > 0) {
+                        // Unit has segments but status is stale — silently correct it
+                        const { data: unitData } = await supabase
+                            .from('organization_units')
+                            .select('analysis_status')
+                            .eq('id', unitId)
+                            .single();
+
+                        if (unitData && unitData.analysis_status !== 'COMPLETED') {
+                            await supabase
+                                .from('organization_units')
+                                .update({ analysis_status: 'COMPLETED' })
+                                .eq('id', unitId);
+                        }
+                    }
+                }
+            }
+
         } catch (e: any) {
             console.error("Error fetching pending count:", e);
             setPendingCount(0);

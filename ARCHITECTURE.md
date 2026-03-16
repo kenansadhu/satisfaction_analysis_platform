@@ -7,7 +7,7 @@
 > **🛑 STRICT DELETION POLICY:**
 > **NEVER** decide to delete records, surveys, or database entities on your own. Even if you identify duplicates or safe-to-delete items, you MUST present the options to the user and explicitly ask for confirmation before taking ANY destructive action.
 
-**Last Updated:** 2026-03-05
+**Last Updated:** 2026-03-15
 **Tech Stack:** Next.js 16 • React 19 • TypeScript • Supabase (PostgreSQL) • Google Gemini AI • TailwindCSS 4 • Radix UI • Recharts • Framer Motion
 
 ---
@@ -83,8 +83,9 @@ feedback_segments  ← AI-generated analysis results
 
 ### 2.1 RPC Functions
 `get_respondent_group_counts(p_respondent_ids BIGINT[])`
-- **Purpose**: Aggregates total counts, comment counts, and analyzed counts for a batch of respondents. 
-- **Benefit**: Shifts heavy `raw_feedback_inputs` scans from the browser to the database. Essential for handling 8.6k+ surveys within Supabase's 10s timeout.
+- **Purpose**: Aggregates total counts, qualitative items (comment counts), and analyzed counts for a batch of respondents.
+- **Update**: Qualitative items are now identified by `requires_analysis = true` or the existence of tags in `feedback_segments`, bypassing the `is_quantitative` flag to allow flexible analysis of mixed-type data.
+- **Benefit**: Shifts heavy `raw_feedback_inputs` and `feedback_segments` scans to the database. Essential for handling 8.6k+ surveys within Supabase's 10s timeout.
 
 analysis_jobs  ← tracks batch processing state
   ├─ id (PK)
@@ -333,7 +334,7 @@ SurveyDetailPage or AnalysisEngine triggers startAnalysis(unitId, surveyId)
   → Client-driven batch processing loop:
       1. POST /api/ai/process-queue { jobId, unitId, surveyId }
       2. process-queue route:
-         a. Fetches next batch of unanalyzed comments (requires_analysis = true)
+         a. Fetches next batch of unanalyzed qualitative comments (requires_analysis = true AND is_quantitative = false)
          b. Fetches the unit's taxonomy (categories + subcategories)
          c. Calls callGemini() with comment batch + taxonomy
          d. AI returns segments with sentiment, category, subcategory, is_suggestion
@@ -461,6 +462,11 @@ INSTITUTION_NAME=              # Optional: defaults to "the institution"
 
 | Date | What Changed | Files Modified |
 |------|-------------|----------------|
+| 2026-03-15 | **Survey Detail Page Redesign (Option 1)**: Removed the slow/buggy `get_respondent_group_counts` RPC aggregation loop from `surveys/[id]/page.tsx`. Replaced qualitative count + progress bar with a fast `analysis_status` badge sourced directly from `organization_units`. Added summary stat cards (Complete / In Progress / Not Started), an overall progress banner, and a search + filter bar. Unit cards redesigned with status-driven color coding, short name badge, description preview, and direct link to Insights for completed units. Page load now requires only 3 parallel fast queries instead of chunked RPC iteration. | `surveys/[id]/page.tsx` |
+| 2026-03-15 | **analysis_status Lifecycle Fix**: `organization_units.analysis_status` was never written to by any code despite being the source of truth for unit status badges. Fixed by adding DB writes to `AnalysisContext`: `IN_PROGRESS` on `startAnalysis`, `COMPLETED` when the queue drains cleanly, `NOT_STARTED` on `resetAnalysis`. Added a **self-healing routine** in `AnalysisEngine.fetchPendingCount`: when 0 items are pending, it checks for existing `feedback_segments` and silently backfills `COMPLETED` for units analyzed before this fix (e.g. HOPE). | `AnalysisContext.tsx`, `AnalysisEngine.tsx` |
+|------|-------------|----------------|
+| 2026-03-13 | **Analysis Flow & Build Fix**: Resolved `the name 'q' is defined multiple times` build error. Fixed unit analysis loop picking up quantitative data (added `is_quantitative: false` filter). Eliminated stale job reuse and progress counter inflation. Removed duplicate stale API directory. | `process-queue/route.ts`, `AnalysisContext.tsx` |
+| 2026-03-13 | **Qualitative Logic & Performance Fix**: Decoupled qualitative counts from `is_quantitative` flag; now relies on `requires_analysis` and segment existence. Optimized `get_respondent_group_counts` using a CTE to fix `ERR_HTTP2_PROTOCOL_ERROR` on large datasets. Throttled frontend aggregation concurrency to 2 for better stability. | `surveys/[id]/page.tsx`, `process-queue/route.ts`, `get_respondent_group_counts` [RPC] |
 | 2026-03-09 | **AI Scientist Polish & Data Integrity**: Fixed **Chart Alignment drift** using `scale="band"` and categorical padding. Optimized **Vertical Space** by moving legends into tooltips. Implemented **Sentiment Data Retry**: Added 3-attempt retry logic to `get_qual_summary_by_unit` RPC calls in cache route. Fixed **Save to Dashboard**: Refactored `AIScientistPage` to allow background refreshes of saved charts without unmounting the AI Chat (preserving session state). | `page.tsx`, `AIAnalystChat.tsx`, `cache-global-dataset/route.ts` |
 | 2026-03-06 | **Final Dashboard Optimization**: Removed Data Hygiene logic (preventing timeouts). Implemented **Controlled Parallel Aggregation**: 5x parallel batches of 250 respondent IDs via `get_respondent_group_counts`. Aligned RPC to `BIGINT[]`. Reduced load time from ∞ → ~5s for 8.6k dataset. | `surveys/[id]/page.tsx`, `get_respondent_group_counts` [NEW RPC] |
 | 2026-03-05 | **Column Mapping UX overhaul**: Replaced table layout with expandable card rows. Full column names (no truncation), inline Unit/Type/Transform selectors, inline custom mapping controls. Added `survey_column_cache` table: user-triggered "Build Cache" button persists unique values (max 20/col) for instant loading on subsequent visits. | `manage/page.tsx`, `survey_column_cache` [NEW TABLE] |

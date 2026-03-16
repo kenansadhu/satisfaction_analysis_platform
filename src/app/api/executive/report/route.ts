@@ -127,6 +127,7 @@ export async function GET(req: NextRequest) {
         // exclude binary (0/1) columns by checking max value.
         type ColumnAccum = {
             maxScore: number;
+            rule: string | null;
             campusData: Map<string, { sum: number; count: number }>;
         };
         const unitColumnAccum = new Map<number, Map<string, ColumnAccum>>();
@@ -136,7 +137,7 @@ export async function GET(req: NextRequest) {
             const chunk = respIds.slice(i, i + CHUNK);
             const rows = await fetchAll(() =>
                 supabase.from('raw_feedback_inputs')
-                    .select('respondent_id, target_unit_id, source_column, numerical_score')
+                    .select('respondent_id, target_unit_id, source_column, numerical_score, score_rule')
                     .in('respondent_id', chunk)
                     .eq('is_quantitative', true)
                     .not('numerical_score', 'is', null),
@@ -152,9 +153,11 @@ export async function GET(req: NextRequest) {
 
                 if (!unitColumnAccum.has(unitId)) unitColumnAccum.set(unitId, new Map());
                 const colMap = unitColumnAccum.get(unitId)!;
-                if (!colMap.has(col)) colMap.set(col, { maxScore: 0, campusData: new Map() });
+                if (!colMap.has(col)) colMap.set(col, { maxScore: 0, rule: row.score_rule, campusData: new Map() });
                 const colAcc = colMap.get(col)!;
                 if (score > colAcc.maxScore) colAcc.maxScore = score;
+                // Update rule if it was null previously
+                if (!colAcc.rule && row.score_rule) colAcc.rule = row.score_rule;
 
                 if (!colAcc.campusData.has(campus)) colAcc.campusData.set(campus, { sum: 0, count: 0 });
                 const entry = colAcc.campusData.get(campus)!;
@@ -163,9 +166,10 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        // Phase 2: Aggregate, excluding binary (0/1) columns
+        // Phase 2: Aggregate, excluding binary or "wrong" Likert columns (max score <= 1)
         for (const [unitId, colMap] of unitColumnAccum) {
             for (const [_col, colAcc] of colMap) {
+                // If max score is 1 or less, it's either Boolean (0/1) or invalid Likert, skip it
                 if (colAcc.maxScore <= 1) continue;
 
                 if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());

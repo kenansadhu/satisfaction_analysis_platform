@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Plus, Trash2, Play, Sparkles, CheckCircle2, Save, X, RefreshCw, Lock, Info, ArrowRight, ExternalLink, AlertTriangle } from "lucide-react";
+import { Loader2, Plus, Trash2, Play, Sparkles, CheckCircle2, Save, X, RefreshCw, Lock, Info, ArrowRight, ExternalLink, AlertTriangle, Table2 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -573,8 +573,18 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
             {/* Section 2: Discover Categories */}
             <Card>
                 <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2"><RefreshCw className="w-5 h-5 text-blue-600" /> 2. Discover Categories</CardTitle>
-                    <CardDescription>AI will read {totalComments.toLocaleString()} comments in batches to build a taxonomy.</CardDescription>
+                    <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                            <CardTitle className="text-lg flex items-center gap-2"><RefreshCw className="w-5 h-5 text-blue-600" /> 2. Discover Categories</CardTitle>
+                            <CardDescription>AI will read {totalComments.toLocaleString()} comments in batches to build a taxonomy.</CardDescription>
+                        </div>
+                        <Link
+                            href={`/surveys/${surveyId}/unit/${unitId}/columns`}
+                            className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-indigo-600 transition-colors bg-slate-100 hover:bg-indigo-50 px-3 py-2 rounded-lg border border-slate-200"
+                        >
+                            <Table2 className="w-4 h-4" /> View Source Columns
+                        </Link>
+                    </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
                     {!isProcessing ? (

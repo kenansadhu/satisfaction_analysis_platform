@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Papa from "papaparse";
-import { Upload, CheckCircle, Search, ArrowRight, MapPin, Building2, GraduationCap, Filter, Loader2, Save, CalendarDays, Eye, AlertTriangle, ArrowLeft, Sparkles, User, Info, BarChart3, List, Tag } from "lucide-react";
+import { Upload, CheckCircle, Search, ArrowRight, MapPin, Building2, GraduationCap, Filter, Loader2, Save, CalendarDays, Eye, AlertTriangle, ArrowLeft, Sparkles, User, Info, BarChart3, List, Tag, FileSpreadsheet, Layers, ShieldCheck } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
@@ -44,33 +47,82 @@ function ColumnSelector({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="p-2 bg-blue-50 rounded-md"><Icon className="w-5 h-5 text-blue-600" /></div>
-        <div><h3 className="font-semibold text-slate-800">{title}</h3><p className="text-sm text-slate-500">{description}</p></div>
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-blue-500/10 dark:bg-blue-500/20 rounded-xl">
+            <Icon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100">{title}</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{description}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <Input
+              placeholder="Search columns..."
+              className="pl-10 h-10 w-[200px] md:w-[300px] bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+            />
+          </div>
+          <Button
+            variant={showSelectedOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowSelectedOnly(!showSelectedOnly)}
+            className={`gap-2 h-10 rounded-lg font-bold ${showSelectedOnly ? "bg-blue-600" : "border-slate-200 dark:border-slate-800"}`}
+          >
+            <Filter className={`w-4 h-4 ${showSelectedOnly ? "text-white" : "text-slate-400"}`} />
+            {showSelectedOnly ? `Selected (${selected.length})` : "Filter Selected"}
+          </Button>
+        </div>
       </div>
-      <div className="flex gap-2">
-        <div className="relative flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input placeholder={`Search columns...`} className="pl-9" value={localSearch} onChange={(e) => setLocalSearch(e.target.value)} /></div>
-        <Button variant={showSelectedOnly ? "default" : "outline"} onClick={() => setShowSelectedOnly(!showSelectedOnly)} className="gap-2"><Filter className="w-4 h-4" /> {showSelectedOnly ? "Show All" : "Selected Only"}</Button>
-      </div>
-      <div className="h-[300px] overflow-y-auto border rounded-md p-3 bg-slate-50 grid grid-cols-2 gap-2 content-start">
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto p-1 custom-scrollbar">
         {filteredHeaders.map(h => (
-          <div key={h} onClick={() => toggleItem(h)} className={`cursor-pointer p-2 rounded border text-sm flex items-center gap-2 select-none transition-all h-fit ${selected.includes(h) ? "bg-blue-50 border-blue-500 ring-1 ring-blue-500 shadow-sm" : "bg-white hover:border-blue-300"}`}>
-            <div className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center ${selected.includes(h) ? "bg-blue-500 border-blue-500" : "border-slate-300 bg-white"}`}>{selected.includes(h) && <CheckCircle className="w-3 h-3 text-white" />}</div>
-            <span className="truncate text-slate-700 font-medium" title={h}>{h}</span>
+          <div
+            key={h}
+            onClick={() => toggleItem(h)}
+            className={`group cursor-pointer p-3 rounded-xl border-2 transition-all duration-200 flex items-center gap-3 select-none ${selected.includes(h)
+              ? "bg-blue-50/50 border-blue-500 dark:bg-blue-900/10 dark:border-blue-500 shadow-md ring-1 ring-blue-500/20"
+              : "bg-white dark:bg-slate-900/50 border-slate-100 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-800 hover:shadow-sm"
+              }`}
+          >
+            <div className={`shrink-0 w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-colors ${selected.includes(h)
+              ? "bg-blue-500 border-blue-500"
+              : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              }`}>
+              {selected.includes(h) && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+            </div>
+            <span className={`truncate text-sm font-semibold transition-colors ${selected.includes(h) ? "text-blue-700 dark:text-blue-300" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"
+              }`} title={h}>
+              {h}
+            </span>
           </div>
         ))}
+        {filteredHeaders.length === 0 && (
+          <div className="col-span-full py-20 text-center space-y-2">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 rotate-12 inline-block rounded-3xl border border-slate-100 dark:border-slate-800">
+              <Search className="w-8 h-8 text-slate-300" />
+            </div>
+            <p className="text-slate-400 font-medium tracking-tight">No columns found matching your search</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export default function ImportPage() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState(1);
   const [headers, setHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<any[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [surveyTitle, setSurveyTitle] = useState("");
+  const [surveyDescription, setSurveyDescription] = useState("");
 
   const [locationCols, setLocationCols] = useState<string[]>([]);
   const [facultyCols, setFacultyCols] = useState<string[]>([]);
@@ -112,6 +164,14 @@ export default function ImportPage() {
       samples: allValues.slice(0, 5)
     };
   }, [previewHeader, csvData]);
+
+  // --- Helper for Custom Mapping on the Card ---
+  const getUniqueValuesForHeader = (header: string) => {
+    const allValues = csvData
+      .map(row => row[header])
+      .filter(v => v && v.trim() !== "" && v !== "-" && v !== "N/A");
+    return Array.from(new Set(allValues)).slice(0, 20); // Limit to 20 for safety
+  };
 
   // --- 1. UPLOAD ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -155,13 +215,13 @@ export default function ImportPage() {
       const headersToMap = headers.filter(h => !isIdentity(h));
 
       headersToMap.forEach(h => {
-        samples[h] = csvData.map(row => row[h]).filter(v => v).slice(0, 4);
+        samples[h] = Array.from(new Set(csvData.map(row => row[h]).filter(v => v))).slice(0, 20);
       });
 
       const response = await fetch('/api/ai/map-columns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headers: headersToMap, samples, units })
+        body: JSON.stringify({ headers: headersToMap, samples, units, surveyDescription })
       });
 
       const data = await response.json();
@@ -205,7 +265,7 @@ export default function ImportPage() {
   const handleStartImport = async () => {
     setIsProcessing(true);
     try {
-      const { data: survey, error: surveyError } = await supabase.from('surveys').insert({ title: surveyTitle }).select().single();
+      const { data: survey, error: surveyError } = await supabase.from('surveys').insert({ title: surveyTitle, description: surveyDescription }).select().single();
       if (surveyError) throw surveyError;
       const surveyId = survey.id;
 
@@ -243,33 +303,35 @@ export default function ImportPage() {
               requires_analysis: config.type === "TEXT", // Only open text needs AI
               numerical_score: null,
               score_rule: config.type === "SCORE" ? (config.rule || "NUMBER") : null,
-              custom_mapping: config.type === "SCORE" && config.rule === "CUSTOM_MAPPING" ? config.customMapping : null
+              custom_mapping: config.type === "SCORE" && (config.rule === "CUSTOM_MAPPING" || config.rule === "LIKERT" || config.rule === "BOOLEAN") ? config.customMapping : null
             };
 
-            // --- TRANSFORMATIONS ---
+            // --- TRANSFORMATIONS (Updated to prioritize mapping overrides) ---
             if (config.type === "SCORE") {
-              if (config.rule === "LIKERT") {
-                // Extract "4" from "4 = Puas"
-                const match = rawValue.match(/^(\d+)/);
-                if (match) payload.numerical_score = parseInt(match[1]);
-              } else if (config.rule === "BOOLEAN") {
-                const lower = rawValue.toLowerCase();
-                if (lower === "ya" || lower === "yes" || lower === "true") payload.numerical_score = 1;
-                else payload.numerical_score = 0;
-              } else if (config.rule === "NUMBER") {
-                const parsed = parseFloat(rawValue);
-                if (!isNaN(parsed)) payload.numerical_score = parsed;
-              } else if (config.rule === "TEXT_SCALE") {
-                // Custom Scale for Frequency/Agreement
-                // 4-point text scale mapping
-                const lower = rawValue.toLowerCase();
-                if (lower.includes("tidak pernah") || lower.includes("sangat tidak") || lower.includes("never")) payload.numerical_score = 1;
-                else if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) payload.numerical_score = 2;
-                else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) payload.numerical_score = 3;
-                else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) payload.numerical_score = 4;
-              } else if (config.rule === "CUSTOM_MAPPING" && config.customMapping) {
-                const mapped = config.customMapping[rawValue];
-                if (mapped !== undefined) payload.numerical_score = mapped;
+              const mappedValue = config.customMapping?.[rawValue];
+
+              if (mappedValue !== undefined) {
+                // Priority 1: Use the explicit mapping from the UI (Data Translation Layer)
+                payload.numerical_score = mappedValue;
+              } else {
+                // Priority 2: Fallback to heuristic rules
+                if (config.rule === "LIKERT") {
+                  const match = rawValue.match(/^(\d+)/);
+                  if (match) payload.numerical_score = parseInt(match[1]);
+                } else if (config.rule === "BOOLEAN") {
+                  const lower = rawValue.toLowerCase();
+                  if (lower === "ya" || lower === "yes" || lower === "true") payload.numerical_score = 1;
+                  else payload.numerical_score = 0;
+                } else if (config.rule === "NUMBER") {
+                  const parsed = parseFloat(rawValue);
+                  if (!isNaN(parsed)) payload.numerical_score = parsed;
+                } else if (config.rule === "TEXT_SCALE") {
+                  const lower = rawValue.toLowerCase();
+                  if (lower.includes("tidak pernah") || lower.includes("sangat tidak") || lower.includes("never")) payload.numerical_score = 1;
+                  else if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) payload.numerical_score = 2;
+                  else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) payload.numerical_score = 3;
+                  else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) payload.numerical_score = 4;
+                }
               }
             }
 
@@ -294,249 +356,688 @@ export default function ImportPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Import Wizard"
-        description={`Step ${step}: ${step === 1 ? "Upload" : step === 2 ? "Identity" : step === 3 ? "Column Studio" : "Validation"}`}
+        title={<div className="flex items-center gap-3"><div className="p-2 bg-blue-500/20 rounded-lg"><FileSpreadsheet className="w-6 h-6 text-blue-400" /></div> Import Wizard</div>}
+        description={step === 1 ? "Start by uploading your survey data" : step === 2 ? "Define column identities" : step === 3 ? "Map columns to organization units" : "Final validation before import"}
         backHref="/surveys"
         backLabel="Dashboard"
-        actions={
-          <div className="flex gap-2">{[1, 2, 3, 4].map(s => <div key={s} className={`w-3 h-3 rounded-full transition-colors ${step >= s ? "bg-blue-400 shadow-sm shadow-blue-400/50" : "bg-white/20"}`} />)}</div>
-        }
       />
 
-      <div className="max-w-7xl mx-auto px-8 py-10 space-y-8">
+      <div className="max-w-7xl mx-auto px-6 md:px-8 py-8 space-y-8">
+        {/* PROGRESS TRACKER */}
+        <div className="relative mb-12">
+          <div className="absolute top-1/2 left-0 w-full h-0.5 bg-slate-200 dark:bg-slate-800 -translate-y-1/2" />
+          <div className="relative flex justify-between">
+            {[
+              { id: 1, label: "Upload", icon: Upload },
+              { id: 2, label: "Identity", icon: User },
+              { id: 3, label: "Mapping", icon: Layers },
+              { id: 4, label: "Validate", icon: ShieldCheck }
+            ].map((s) => (
+              <div key={s.id} className="flex flex-col items-center gap-3 relative z-10">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500 ${step >= s.id ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-110" : "bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 text-slate-400"
+                  }`}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <span className={`text-xs font-bold uppercase tracking-wider ${step >= s.id ? "text-blue-600 dark:text-blue-400" : "text-slate-400"}`}>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
 
-        {/* STEP 1: UPLOAD */}
-        {step === 1 && (
-          <Card>
-            <CardHeader><CardTitle>Survey Details</CardTitle><CardDescription>Name your survey and upload the raw CSV.</CardDescription></CardHeader>
-            <CardContent className="space-y-4">
-              <Input value={surveyTitle} onChange={e => setSurveyTitle(e.target.value)} placeholder="e.g. Survey Kepuasan 2025" className="text-lg py-6" />
-              <Card className="border-dashed border-2 bg-slate-50/50"><CardContent className="flex flex-col items-center justify-center py-20 space-y-6">{csvData.length > 0 ? (<div className="text-center space-y-4"><div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center"><CheckCircle className="w-8 h-8 text-green-600" /></div><div><h3 className="text-xl font-bold">CSV Ready!</h3><p className="text-slate-500">{csvData.length} rows found.</p></div></div>) : (<><Upload className="w-12 h-12 text-slate-300" /><div className="text-center space-y-2"><h3 className="text-xl font-semibold">Upload Survey CSV</h3><input type="file" accept=".csv" onChange={handleFileUpload} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 cursor-pointer max-w-xs mx-auto" /></div></>)}</CardContent></Card>
-              <div className="flex justify-end"><Button size="lg" disabled={!surveyTitle || csvData.length === 0} onClick={() => setStep(2)}>Next: Define Identity <ArrowRight className="w-4 h-4 ml-2" /></Button></div>
-            </CardContent>
-          </Card>
-        )}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={step}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+          >
 
-        {/* STEP 2: IDENTITY */}
-        {step === 2 && (
-          <Card>
-            <CardHeader><div className="flex justify-between items-center"><div><CardTitle>Define Student Identity</CardTitle><CardDescription>Identify the columns for Location, Faculty, Major, and Entry Year.</CardDescription></div><Button variant="secondary" className="gap-2 bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100" onClick={handleAutoIdentityMap} disabled={isAiMapping}>{isAiMapping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} AI Auto-Detect</Button></div></CardHeader>
-            <CardContent>
-              <Tabs defaultValue="location" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 mb-6"><TabsTrigger value="location">Location {locationCols.length > 0 && `(${locationCols.length})`}</TabsTrigger><TabsTrigger value="faculty">Faculty {facultyCols.length > 0 && `(${facultyCols.length})`}</TabsTrigger><TabsTrigger value="major">Major {majorCols.length > 0 && `(${majorCols.length})`}</TabsTrigger><TabsTrigger value="year">Entry Year {yearCols.length > 0 && `(${yearCols.length})`}</TabsTrigger></TabsList>
-                <TabsContent value="location"><ColumnSelector allHeaders={headers} title="Location Columns" description="Select columns indicating Campus." icon={MapPin} selected={locationCols} setSelected={setLocationCols} /></TabsContent>
-                <TabsContent value="faculty"><ColumnSelector allHeaders={headers} title="Faculty Columns" description="Select columns indicating Faculty Name." icon={Building2} selected={facultyCols} setSelected={setFacultyCols} /></TabsContent>
-                <TabsContent value="major"><ColumnSelector allHeaders={headers} title="Study Program Columns" description="Select columns indicating Major/Prodi." icon={GraduationCap} selected={majorCols} setSelected={setMajorCols} /></TabsContent>
-                <TabsContent value="year"><ColumnSelector allHeaders={headers} title="Entry Year Columns" description="Select columns indicating Tahun Masuk/Batch." icon={CalendarDays} selected={yearCols} setSelected={setYearCols} /></TabsContent>
-              </Tabs>
-              <div className="flex justify-between mt-6 border-t pt-4"><Button variant="outline" onClick={() => setStep(1)}><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button><Button onClick={() => setStep(3)} className="bg-blue-600 hover:bg-blue-700">Next: Column Studio <ArrowRight className="w-4 h-4 ml-2" /></Button></div>
-            </CardContent>
-          </Card>
-        )}
+            {/* STEP 1: UPLOAD */}
+            {step === 1 && (
+              <Card className="border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
+                <div className="h-1.5 bg-gradient-to-r from-blue-600 to-indigo-600" />
+                <CardHeader>
+                  <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                    <FileSpreadsheet className="w-6 h-6 text-blue-600" />
+                    Survey Details
+                  </CardTitle>
+                  <CardDescription>Name your survey and upload the raw CSV data for processing.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-8 p-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Survey Title</label>
+                        <Input
+                          value={surveyTitle}
+                          onChange={e => setSurveyTitle(e.target.value)}
+                          placeholder="e.g. Student Satisfaction 2025"
+                          className="text-lg py-6 font-semibold bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-blue-500/20"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Survey Context (AI Description)</label>
+                        <Textarea
+                          value={surveyDescription}
+                          onChange={e => setSurveyDescription(e.target.value)}
+                          placeholder="Optional: Describe the survey context (e.g., 'This is a year-end survey for all engineering students regarding lab facilities'). This helps the AI map columns accurately."
+                          className="min-h-[150px] bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-blue-500/20 resize-none"
+                        />
+                      </div>
+                    </div>
 
-        {/* STEP 3: COLUMN STUDIO */}
-        {step === 3 && (
-          <div className="space-y-4">
-            <Card className="bg-slate-50 border-slate-200"><CardHeader className="pb-2"><CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2"><User className="w-4 h-4" /> Student Identity Columns (Mapped)</CardTitle></CardHeader><CardContent className="flex flex-wrap gap-2">{headers.filter(isIdentity).map(h => (<Badge key={h} variant="secondary" className="text-slate-600 bg-white border-slate-300">{h}</Badge>))}</CardContent></Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between"><div><CardTitle>Column Studio</CardTitle><CardDescription>Assign types: <b>Text</b> (Open Comments), <b>Score</b> (Quantitative), or <b>Category</b> (Filters).</CardDescription></div><div className="flex gap-2"><Button variant="secondary" onClick={handleAutoMapColumns} disabled={isAiMapping} className="gap-2 bg-purple-100 text-purple-700 hover:bg-purple-200">{isAiMapping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} AI Auto-Detect</Button></div></CardHeader>
-              <CardContent>
-                <div className="flex gap-2 mb-4"><Search className="w-4 h-4 text-slate-400 mt-3 absolute ml-3" /><Input placeholder="Filter headers..." className="pl-9" value={filterText} onChange={e => setFilterText(e.target.value)} /></div>
-                <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2 custom-scrollbar">
-                  {headers.filter(h => !isIdentity(h) && h.toLowerCase().includes(filterText.toLowerCase())).map(h => {
-                    const config = columnConfigs[h] || { type: "IGNORE", unitId: "" };
-                    const samples = getSamples(h);
-
-                    return (
-                      <Card key={h} className={`transition-all border-l-4 ${config.type === "SCORE" ? "border-l-blue-500 bg-blue-50/20" :
-                          config.type === "TEXT" ? "border-l-green-500 bg-green-50/20" :
-                            config.type === "CATEGORY" ? "border-l-purple-500 bg-purple-50/20" :
-                              "border-l-slate-300 opacity-70"
+                    <div className="flex flex-col h-full">
+                      <label className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Data Source (.CSV)</label>
+                      <Card className={`flex-1 border-dashed border-2 transition-all duration-300 relative group ${csvData.length > 0
+                        ? "bg-green-50/30 border-green-200 dark:bg-green-950/10 dark:border-green-900"
+                        : "bg-slate-50 border-slate-200 dark:bg-slate-900/30 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500"
                         }`}>
-                        <CardContent className="p-4">
-                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                            {/* Column Name & Preview */}
-                            <div className="md:col-span-4 space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-slate-800 break-words line-clamp-2" title={h}>{h}</span>
-                                <Button variant="ghost" size="icon" onClick={() => setPreviewHeader(h)} className="h-6 w-6"><Eye className="w-3 h-3" /></Button>
+                        <CardContent className="flex flex-col items-center justify-center h-full py-12 space-y-6">
+                          {csvData.length > 0 ? (
+                            <div className="text-center space-y-4 animate-in zoom-in duration-300">
+                              <div className="mx-auto w-20 h-20 bg-green-100 dark:bg-green-900/40 rounded-3xl flex items-center justify-center shadow-inner">
+                                <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />
                               </div>
-                              <div className="flex flex-wrap gap-1">
-                                {samples.map((s, idx) => (
-                                  <span key={idx} className="text-[10px] bg-white border px-1.5 py-0.5 rounded text-slate-500 truncate max-w-[80px]">{s}</span>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Unit Selector */}
-                            <div className="md:col-span-3">
-                              <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Assigned Unit</label>
-                              <Select value={config.unitId} onValueChange={(val) => updateConfig(h, 'unitId', val)}>
-                                <SelectTrigger className="h-9 bg-white shadow-sm border-slate-200">
-                                  <SelectValue placeholder="Select Unit..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {units.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            {/* Type Selector */}
-                            <div className="md:col-span-2">
-                              <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Data Type</label>
-                              <Select value={config.type} onValueChange={(val) => updateConfig(h, 'type', val)}>
-                                <SelectTrigger className="h-9 bg-white shadow-sm border-slate-200">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="SCORE">Score (Quantitative)</SelectItem>
-                                  <SelectItem value="TEXT">Text (AI Analysis)</SelectItem>
-                                  <SelectItem value="CATEGORY">Category (Filter)</SelectItem>
-                                  <SelectItem value="IGNORE">Ignore</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            {/* Rule / Transformation */}
-                            <div className="md:col-span-3">
-                              {config.type === "SCORE" ? (
-                                <>
-                                  <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Scoring Rule</label>
-                                  <Select value={config.rule || "NUMBER"} onValueChange={(val) => updateConfig(h, 'rule', val)}>
-                                    <SelectTrigger className="h-9 bg-white shadow-sm border-slate-200">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="LIKERT">Likert (1-4)</SelectItem>
-                                      <SelectItem value="BOOLEAN">Yes/No (1/0)</SelectItem>
-                                      <SelectItem value="CUSTOM_MAPPING">Custom Mapping</SelectItem>
-                                      <SelectItem value="NUMBER">Raw Number</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </>
-                              ) : config.type === "TEXT" ? (
-                                <div className="mt-6 flex items-center gap-2 text-[10px] font-bold text-green-600 bg-green-100/50 p-2 rounded border border-green-200">
-                                  <Sparkles className="w-3 h-3" /> AI Analysis Enabled
+                              <div>
+                                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 italic">File Loaded!</h3>
+                                <div className="flex items-center justify-center gap-2 text-slate-500 mt-1">
+                                  <Badge variant="secondary" className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">{csvData.length} Rows</Badge>
+                                  <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">{headers.length} Columns</Badge>
                                 </div>
-                              ) : config.type === "CATEGORY" ? (
-                                <div className="mt-6 flex items-center gap-2 text-[10px] font-bold text-purple-600 bg-purple-100/50 p-2 rounded border border-purple-200">
-                                  <Tag className="w-3 h-3" /> Demographic Filter
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          {/* Custom Mapping Section (Visible if rule is CUSTOM_MAPPING) */}
-                          {config.type === "SCORE" && config.rule === "CUSTOM_MAPPING" && (
-                            <div className="mt-4 pt-4 border-t border-slate-200/50 bg-white/50 p-3 rounded-md">
-                              <div className="flex items-center justify-between mb-2">
-                                <h4 className="text-xs font-bold text-slate-600 flex items-center gap-1"><List className="w-3 h-3" /> Active Mapping</h4>
-                                <Button variant="ghost" size="sm" onClick={() => setPreviewHeader(h)} className="h-6 text-[10px]">Update Levels</Button>
                               </div>
-                              <div className="flex flex-wrap gap-2">
-                                {Object.entries(config.customMapping || {}).map(([val, score]) => (
-                                  <Badge key={val} variant="outline" className="bg-white gap-2 py-1">
-                                    <span className="text-slate-500">{val}:</span>
-                                    <span className="font-bold text-blue-600">{score === null ? "NA" : score}</span>
-                                  </Badge>
-                                ))}
-                                {Object.keys(config.customMapping || {}).length === 0 && (
-                                  <p className="text-[10px] text-slate-400 italic">No levels mapped yet. Click 'Update Levels' to begin.</p>
-                                )}
-                              </div>
+                              <Button variant="ghost" size="sm" onClick={() => { setCsvData([]); setHeaders([]); }} className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Replace File</Button>
                             </div>
+                          ) : (
+                            <>
+                              <div className="w-20 h-20 bg-white dark:bg-slate-800 rounded-3xl flex items-center justify-center shadow-sm border border-slate-100 dark:border-slate-700 group-hover:scale-110 transition-transform duration-300">
+                                <Upload className="w-10 h-10 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                              </div>
+                              <div className="text-center space-y-2">
+                                <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-200">Drop your survey file here</h3>
+                                <p className="text-sm text-slate-400 mb-4">Only CSV files are supported</p>
+                                <input
+                                  type="file"
+                                  ref={fileInputRef}
+                                  accept=".csv"
+                                  onChange={handleFileUpload}
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                />
+                                <Button
+                                  variant="outline"
+                                  className="relative z-10 font-bold border-slate-300 dark:border-slate-700"
+                                  onClick={() => fileInputRef.current?.click()}
+                                >
+                                  Choose File
+                                </Button>
+                              </div>
+                            </>
                           )}
                         </CardContent>
                       </Card>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-between mt-6 border-t pt-4"><Button variant="outline" onClick={() => setStep(2)}><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button><Button onClick={() => setStep(4)} className="bg-blue-600 hover:bg-blue-700">Next: Validate <ArrowRight className="w-4 h-4 ml-2" /></Button></div>
-              </CardContent>
-            </Card>
+                    </div>
+                  </div>
 
-            {/* SMART PREVIEW DIALOG */}
-            <Dialog open={!!previewHeader} onOpenChange={() => setPreviewHeader(null)}>
-              <DialogContent className="max-w-xl">
-                <DialogHeader><DialogTitle>Data Preview: {previewStats?.isCategorical ? "Categorical Data" : "Text Data"}</DialogTitle><DialogDescription>Column: <span className="font-semibold text-slate-800">{previewHeader}</span></DialogDescription></DialogHeader>
-                <div className="space-y-4">
-                  <div className="flex gap-4 text-sm"><div className="bg-slate-100 px-3 py-2 rounded">Total Valid Rows: <b>{previewStats?.totalValid}</b></div><div className="bg-blue-50 text-blue-700 px-3 py-2 rounded">Unique Values: <b>{previewStats?.uniqueCount}</b></div></div>
-                  {previewStats?.isCategorical ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Found Distinct Levels:</div>
-                        {previewHeader && columnConfigs[previewHeader]?.type === "SCORE" && columnConfigs[previewHeader]?.rule !== "CUSTOM_MAPPING" && (
-                          <Button variant="outline" size="sm" onClick={() => updateConfig(previewHeader, 'rule', 'CUSTOM_MAPPING')} className="h-7 text-xs">Switch to Custom Mapping</Button>
-                        )}
+                  <div className="flex justify-end pt-6 border-t border-slate-100 dark:border-slate-800">
+                    <Button
+                      size="lg"
+                      disabled={!surveyTitle || csvData.length === 0}
+                      onClick={() => setStep(2)}
+                      className="px-10 py-7 text-lg bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-500/20 group h-auto"
+                    >
+                      Continue to Mapping
+                      <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* STEP 2: IDENTITY */}
+            {step === 2 && (
+              <Card className="border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
+                <div className="h-1.5 bg-gradient-to-r from-purple-600 to-blue-600" />
+                <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                        <User className="w-6 h-6 text-purple-600" />
+                        Student Identity
+                      </CardTitle>
+                      <CardDescription>Select columns that identify the student's background.</CardDescription>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      className="gap-2 bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800 shadow-sm"
+                      onClick={handleAutoIdentityMap}
+                      disabled={isAiMapping}
+                    >
+                      {isAiMapping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      AI Auto-Detect Identity
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-8">
+                  <Tabs defaultValue="location" className="w-full">
+                    <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl flex w-full h-12 items-center justify-center overflow-hidden">
+                      <TabsTrigger value="location" className="flex-1 rounded-none flex items-center justify-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm transition-all font-bold text-slate-500 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400">
+                        <MapPin className="w-4 h-4 text-blue-500" />
+                        <span className="hidden sm:inline">Location</span>
+                        {locationCols.length > 0 && <Badge className="ml-1 bg-blue-500 px-1.5 h-4 text-[10px] font-black">{locationCols.length}</Badge>}
+                      </TabsTrigger>
+                      <TabsTrigger value="faculty" className="flex-1 rounded-none flex items-center justify-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm transition-all font-bold text-slate-500 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400">
+                        <Building2 className="w-4 h-4 text-indigo-500" />
+                        <span className="hidden sm:inline">Faculty</span>
+                        {facultyCols.length > 0 && <Badge className="ml-1 bg-indigo-500 px-1.5 h-4 text-[10px] font-black">{facultyCols.length}</Badge>}
+                      </TabsTrigger>
+                      <TabsTrigger value="major" className="flex-1 rounded-none flex items-center justify-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm transition-all font-bold text-slate-500 data-[state=active]:text-purple-600 dark:data-[state=active]:text-purple-400">
+                        <GraduationCap className="w-4 h-4 text-purple-500" />
+                        <span className="hidden sm:inline">Program</span>
+                        {majorCols.length > 0 && <Badge className="ml-1 bg-purple-500 px-1.5 h-4 text-[10px] font-black">{majorCols.length}</Badge>}
+                      </TabsTrigger>
+                      <TabsTrigger value="year" className="flex-1 rounded-none flex items-center justify-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm transition-all font-bold text-slate-500 data-[state=active]:text-amber-600 dark:data-[state=active]:text-amber-400">
+                        <CalendarDays className="w-4 h-4 text-amber-500" />
+                        <span className="hidden sm:inline">Year</span>
+                        {yearCols.length > 0 && <Badge className="ml-1 bg-amber-500 px-1.5 h-4 text-[10px] font-black">{yearCols.length}</Badge>}
+                      </TabsTrigger>
+                    </TabsList>
+
+                    <div className="bg-white/40 dark:bg-slate-900/40 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 min-h-[450px]">
+                      <TabsContent value="location" className="mt-0"><ColumnSelector allHeaders={headers} title="Campus Location" description="Which column contains the campus or city?" icon={MapPin} selected={locationCols} setSelected={setLocationCols} /></TabsContent>
+                      <TabsContent value="faculty" className="mt-0"><ColumnSelector allHeaders={headers} title="Faculty / School" description="Which column contains the faculty name?" icon={Building2} selected={facultyCols} setSelected={setFacultyCols} /></TabsContent>
+                      <TabsContent value="major" className="mt-0"><ColumnSelector allHeaders={headers} title="Study Program" description="Which column contains the major or prodi?" icon={GraduationCap} selected={majorCols} setSelected={setMajorCols} /></TabsContent>
+                      <TabsContent value="year" className="mt-0"><ColumnSelector allHeaders={headers} title="Entry Year" description="Which column contains the enrollment year?" icon={CalendarDays} selected={yearCols} setSelected={setYearCols} /></TabsContent>
+                    </div>
+                  </Tabs>
+
+                  <div className="flex justify-between mt-10 border-t border-slate-100 dark:border-slate-800 pt-8">
+                    <Button variant="outline" size="lg" onClick={() => setStep(1)} className="px-8 border-slate-300 dark:border-slate-700">
+                      <ArrowLeft className="w-4 h-4 mr-2" />
+                      Back to Start
+                    </Button>
+                    <Button
+                      size="lg"
+                      onClick={() => setStep(3)}
+                      className="px-10 bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-500/20"
+                    >
+                      Next: Column Studio
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* STEP 3: COLUMN STUDIO */}
+            {step === 3 && (
+              <div className="space-y-6">
+                <Card className="bg-slate-900 dark:bg-slate-950 border-slate-800 overflow-hidden shadow-2xl">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -mr-16 -mt-16" />
+                  <CardHeader className="pb-4 relative z-10">
+                    <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-blue-500" />
+                      Locked Identity Columns
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-2 pb-6 relative z-10">
+                    {headers.filter(isIdentity).map(h => (
+                      <Badge key={h} className="text-[10px] font-bold py-1.5 px-3 bg-white/5 border-white/10 text-white backdrop-blur-md">
+                        {h}
+                      </Badge>
+                    ))}
+                    {headers.filter(isIdentity).length === 0 && <span className="text-slate-500 text-xs italic">No identity columns defined.</span>}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
+                  <div className="h-1.5 bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600" />
+                  <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div>
+                        <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                          <Layers className="w-6 h-6 text-indigo-600" />
+                          Column Studio
+                        </CardTitle>
+                        <CardDescription>Assign how each column should be processed and which unit it belongs to.</CardDescription>
                       </div>
-                      {previewHeader && columnConfigs[previewHeader]?.rule === "CUSTOM_MAPPING" ? (
-                        <div className="grid gap-2 border rounded-md p-3 bg-slate-50 max-h-[400px] overflow-y-auto">
-                          {previewStats?.uniqueValues.map((v, i) => (
-                            <div key={i} className="flex items-center justify-between gap-4">
-                              <span className="text-sm font-medium text-slate-700 break-all">{v || "(empty)"}</span>
-                              <Select
-                                value={columnConfigs[previewHeader]?.customMapping?.[v] !== undefined ? (columnConfigs[previewHeader].customMapping![v] === null ? "NA" : columnConfigs[previewHeader].customMapping![v]?.toString()) : "NA"}
-                                onValueChange={val => handleUpdateCustomMapping(previewHeader, v, val === "NA" ? null : parseInt(val))}
+                      <div className="flex gap-3">
+                        <div className="relative group">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                          <Input
+                            placeholder="Filter headers..."
+                            className="pl-10 h-10 w-[200px] md:w-[250px] bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                            value={filterText}
+                            onChange={e => setFilterText(e.target.value)}
+                          />
+                        </div>
+                        <Button
+                          variant="secondary"
+                          onClick={handleAutoMapColumns}
+                          disabled={isAiMapping}
+                          className="gap-2 bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800 shadow-sm h-10 px-4 font-bold transition-all hover:scale-105 active:scale-95"
+                        >
+                          {isAiMapping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                          <span className="hidden sm:inline">AI Auto-Map All</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="max-h-[800px] overflow-y-auto p-8 space-y-6 custom-scrollbar bg-slate-50/50 dark:bg-slate-950/30">
+                      {headers.filter(h => !isIdentity(h) && h.toLowerCase().includes(filterText.toLowerCase())).map(h => {
+                        const config = columnConfigs[h] || { type: "IGNORE", unitId: "" };
+                        const samples = getSamples(h);
+
+                        return (
+                          <Card key={h} className={`group transition-all duration-300 border-0 shadow-sm hover:shadow-md ring-1 ring-slate-200 dark:ring-slate-800 overflow-hidden ${config.type === "SCORE" ? "bg-gradient-to-r from-blue-50 to-white dark:from-blue-950/20 dark:to-slate-900" :
+                            config.type === "TEXT" ? "bg-gradient-to-r from-green-50 to-white dark:from-green-950/20 dark:to-slate-900" :
+                              config.type === "CATEGORY" ? "bg-gradient-to-r from-purple-50 to-white dark:from-purple-950/20 dark:to-slate-900" :
+                                "bg-white dark:bg-slate-900/50 opacity-80"
+                            }`}>
+                            <div className={`h-full w-1 absolute left-0 top-0 transition-colors duration-500 ${config.type === "SCORE" ? "bg-blue-500" :
+                              config.type === "TEXT" ? "bg-green-500" :
+                                config.type === "CATEGORY" ? "bg-purple-500" :
+                                  "bg-slate-300 dark:bg-slate-700"
+                              }`} />
+
+                            <CardContent className="p-6">
+                              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                                {/* Column Name & Preview */}
+                                <div className="lg:col-span-4 space-y-4">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="space-y-1">
+                                      <h4 className="font-bold text-slate-800 dark:text-slate-100 break-words line-clamp-2 leading-tight" title={h}>{h}</h4>
+                                      <p className="text-[10px] text-slate-400 font-medium uppercase tracking-[0.1em]">Input Feature Column</p>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => setPreviewHeader(h)}
+                                      className="h-8 w-8 hover:bg-white dark:hover:bg-slate-800 text-slate-400 hover:text-blue-500 transition-colors"
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/50">
+                                    {samples.map((s, idx) => (
+                                      <Badge key={idx} variant="outline" className="text-[9px] font-medium bg-white/50 dark:bg-slate-950/50 border-slate-100 dark:border-slate-800 px-2 py-0.5 truncate max-w-[120px]">
+                                        {s}
+                                      </Badge>
+                                    ))}
+                                    {samples.length === 0 && <span className="text-[10px] italic text-slate-400">No data found</span>}
+                                  </div>
+                                </div>
+
+                                {/* Controls */}
+                                <div className="lg:col-span-8">
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                                    {/* Unit Selector */}
+                                    <div className="space-y-2">
+                                      <label className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                                        <Building2 className="w-3 h-3 text-blue-500" /> assigned unit
+                                      </label>
+                                      <Select value={config.unitId} onValueChange={(val) => updateConfig(h, 'unitId', val)}>
+                                        <SelectTrigger className="h-10 bg-white dark:bg-slate-950 shadow-sm border-slate-200 dark:border-slate-800 rounded-lg font-semibold text-slate-700 dark:text-slate-300">
+                                          <SelectValue placeholder="Target Dept..." />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[300px]">
+                                          {units.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+
+                                    {/* Type Selector */}
+                                    <div className="space-y-2">
+                                      <label className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                                        <BarChart3 className="w-3 h-3 text-green-500" /> processing type
+                                      </label>
+                                      <Select value={config.type} onValueChange={(val) => updateConfig(h, 'type', val)}>
+                                        <SelectTrigger className="h-10 bg-white dark:bg-slate-950 shadow-sm border-slate-200 dark:border-slate-800 rounded-lg font-semibold text-slate-700 dark:text-slate-300">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="SCORE">Quantitative (Score)</SelectItem>
+                                          <SelectItem value="TEXT">Qualitative (Text AI)</SelectItem>
+                                          <SelectItem value="CATEGORY">Category (Filter)</SelectItem>
+                                          <Separator className="my-1 opacity-50" />
+                                          <SelectItem value="IGNORE">Ignore Column</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+
+                                    {/* Rule / Transformation */}
+                                    <div className="space-y-2">
+                                      {config.type === "SCORE" ? (
+                                        <>
+                                          <label className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                                            <Tag className="w-3 h-3 text-purple-500" /> scoring rule
+                                          </label>
+                                          <Select value={config.rule || "NUMBER"} onValueChange={(val) => updateConfig(h, 'rule', val)}>
+                                            <SelectTrigger className="h-10 bg-white dark:bg-slate-950 shadow-sm border-slate-200 dark:border-slate-800 rounded-lg font-black text-blue-600 dark:text-blue-400">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="LIKERT">Likert Scale (1-4)</SelectItem>
+                                              <SelectItem value="BOOLEAN">Boolean (Yes/No)</SelectItem>
+                                              <SelectItem value="NUMBER">Raw Numerical</SelectItem>
+                                              <SelectItem value="TEXT_SCALE">Auto Text Scale</SelectItem>
+                                              <SelectItem value="CUSTOM_MAPPING">Custom Advanced Mapping</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </>
+                                      ) : config.type === "TEXT" ? (
+                                        <div className="h-10 flex items-center gap-2 text-[10px] mt-6 font-black text-green-700 dark:text-green-400 bg-green-100/50 dark:bg-green-950/30 px-3 rounded-lg border border-green-200/50 dark:border-green-800/50 uppercase tracking-tighter">
+                                          <Sparkles className="w-3.5 h-3.5 animate-pulse" /> Analysis Layer Active
+                                        </div>
+                                      ) : config.type === "CATEGORY" ? (
+                                        <div className="h-10 flex items-center gap-2 text-[10px] mt-6 font-black text-purple-700 dark:text-purple-400 bg-purple-100/50 dark:bg-purple-950/30 px-3 rounded-lg border border-purple-200/50 dark:border-purple-800/50 uppercase tracking-tighter">
+                                          <Tag className="w-3.5 h-3.5" /> Filtering Token
+                                        </div>
+                                      ) : (
+                                        <div className="h-10 flex items-center gap-2 text-[10px] mt-6 font-black text-slate-400 bg-slate-100/50 dark:bg-slate-800/30 px-3 rounded-lg border border-slate-200 dark:border-slate-800/50 uppercase tracking-tighter">
+                                          Skipped during import
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Mapping Translation Section */}
+                              {config.type === "SCORE" && (config.rule === "CUSTOM_MAPPING" || config.rule === "LIKERT" || config.rule === "BOOLEAN") && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800"
+                                >
+                                  <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                                        <List className="w-4 h-4 text-blue-600" />
+                                      </div>
+                                      <div>
+                                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight transition-colors">Data Translation Layer</h4>
+                                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Verifying weighting for discovered answer levels</p>
+                                      </div>
+                                    </div>
+                                    <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase tracking-widest px-2 py-1 border border-blue-200 dark:border-blue-800">
+                                      {config.rule === "CUSTOM_MAPPING" ? "Advanced Config" : "Auto-Generated Mapping"}
+                                    </Badge>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {getUniqueValuesForHeader(h)
+                                      .sort((a, b) => {
+                                        const scoreA = config.customMapping?.[a];
+                                        const scoreB = config.customMapping?.[b];
+                                        const getWeight = (s: number | null | undefined) => {
+                                          if (s === null) return -1;
+                                          if (s === undefined) return -2;
+                                          return s;
+                                        };
+                                        return getWeight(scoreB) - getWeight(scoreA);
+                                      })
+                                      .map((val) => (
+                                        <div key={val} className="group/item flex flex-col gap-1.5 p-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl hover:shadow-md transition-all duration-200">
+                                          <span className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase truncate px-1" title={val || "(empty)"}>
+                                            {val || "(empty)"}
+                                          </span>
+                                          <Select
+                                            value={config.customMapping?.[val] !== undefined ? (config.customMapping[val] === null ? "NA" : config.customMapping[val]?.toString()) : "NA"}
+                                            onValueChange={selectedVal => handleUpdateCustomMapping(h, val, selectedVal === "NA" ? null : parseInt(selectedVal))}
+                                          >
+                                            <SelectTrigger className="h-9 bg-slate-50/50 dark:bg-slate-900 border-0 ring-1 ring-slate-200 dark:ring-slate-800 text-xs font-black text-blue-700 dark:text-blue-400 focus:ring-blue-500/50">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="4" className="text-sm font-bold border-l-4 border-l-blue-600">4</SelectItem>
+                                              <SelectItem value="3" className="text-sm font-semibold border-l-4 border-l-blue-400">3</SelectItem>
+                                              <SelectItem value="2" className="text-sm font-medium border-l-4 border-l-amber-400">2</SelectItem>
+                                              <SelectItem value="1" className="text-sm border-l-4 border-l-red-400">1</SelectItem>
+                                              <SelectItem value="0" className="text-sm border-l-4 border-l-slate-400">0</SelectItem>
+                                              <Separator className="my-1" />
+                                              <SelectItem value="NA" className="text-sm font-bold border-l-4 border-l-slate-300 dark:border-l-slate-700">NA</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      ))}
+                                    {getUniqueValuesForHeader(h).length === 0 && (
+                                      <p className="text-xs text-slate-400 italic py-4">Scanning CSV for answer levels...</p>
+                                    )}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex justify-between items-center p-8 border-t border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30">
+                      <Button variant="outline" size="lg" onClick={() => setStep(2)} className="px-8 border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:bg-slate-50">
+                        <ArrowLeft className="w-4 h-4 mr-2" />
+                        Revisit Identities
+                      </Button>
+                      <Button
+                        size="lg"
+                        onClick={() => setStep(4)}
+                        className="px-10 bg-indigo-600 hover:bg-indigo-700 shadow-xl shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
+                      >
+                        Proceed to Validation
+                        <ArrowRight className="w-4 h-4 ml-2" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* SMART PREVIEW DIALOG (Redesigning for better clarity) */}
+                <Dialog open={!!previewHeader} onOpenChange={() => setPreviewHeader(null)}>
+                  <DialogContent className="max-w-4xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-0 overflow-hidden shadow-2xl">
+                    <div className="h-2 bg-blue-600 w-full" />
+                    <DialogHeader className="p-6 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-3 mb-1">
+                        <div className="p-2 bg-blue-500/10 rounded-lg">
+                          <Eye className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <DialogTitle className="text-xl font-bold tracking-tight">Dataset Deep Dive</DialogTitle>
+                      </div>
+                      <DialogDescription className="font-medium text-slate-500 truncate mr-8">
+                        Scanning raw data for column: <span className="text-slate-900 dark:text-slate-100 font-bold">{previewHeader}</span>
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="p-8 space-y-8">
+                      <div className="grid grid-cols-2 gap-6">
+                        <div className="p-6 rounded-3xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center text-center">
+                          <span className="text-4xl font-black text-slate-800 dark:text-slate-100 tracking-tighter">{previewStats?.totalValid}</span>
+                          <span className="text-[10px] uppercase font-black text-slate-400 tracking-widest mt-1">Valid Records Found</span>
+                        </div>
+                        <div className="p-6 rounded-3xl bg-blue-50/50 dark:bg-blue-900/20 border border-blue-100/50 dark:border-blue-900/50 flex flex-col items-center justify-center text-center ring-1 ring-blue-500/10">
+                          <span className="text-4xl font-black text-blue-600 dark:text-blue-400 tracking-tighter">{previewStats?.uniqueCount}</span>
+                          <span className="text-[10px] uppercase font-black text-blue-400 tracking-widest mt-1">Distinct Variations</span>
+                        </div>
+                      </div>
+
+                      {previewStats?.isCategorical ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between px-2">
+                            <h5 className="text-sm font-black text-slate-700 dark:text-slate-300 uppercase tracking-wide">Discovered Levels</h5>
+                            {previewHeader && columnConfigs[previewHeader]?.type === "SCORE" && columnConfigs[previewHeader]?.rule !== "CUSTOM_MAPPING" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => updateConfig(previewHeader, 'rule', 'CUSTOM_MAPPING')}
+                                className="h-7 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                               >
-                                <SelectTrigger className="w-[120px] h-8 bg-white"><SelectValue placeholder="Map to..." /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="1">1</SelectItem>
-                                  <SelectItem value="2">2</SelectItem>
-                                  <SelectItem value="3">3</SelectItem>
-                                  <SelectItem value="4">4</SelectItem>
-                                  <SelectItem value="0">0</SelectItem>
-                                  <SelectItem value="NA">NA / Ignore</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ))}
+                                <Sparkles className="w-3.5 h-3.5 mr-1" /> Enhance with Custom Mapping
+                              </Button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[450px] overflow-y-auto p-3 bg-slate-100/50 dark:bg-slate-950/50 rounded-2xl border border-slate-200 dark:border-slate-800 custom-scrollbar">
+                            {previewStats?.uniqueValues.map((v, i) => (
+                              <div key={i} className="flex items-center justify-center p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-bold text-slate-700 dark:text-slate-300 hover:border-blue-300 transition-colors">
+                                {v || <span className="text-slate-400 italic">(Empty Entry)</span>}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       ) : (
-                        <div className="flex flex-wrap gap-2">{previewStats?.uniqueValues.map(v => <Badge key={v} variant="outline" className="text-sm py-1 px-3 bg-white">{v}</Badge>)}</div>
+                        <div className="space-y-4">
+                          <h5 className="text-sm font-black text-slate-700 dark:text-slate-300 uppercase tracking-wide px-2">Data Sample (First 20 Unique Rows)</h5>
+                          <div className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar shadow-inner">
+                            {previewStats?.samples.map((val, i) => (
+                              <div key={i} className="relative pl-6 py-2 last:border-0 border-b border-slate-200 dark:border-slate-800/50">
+                                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-slate-200 dark:bg-slate-700" />
+                                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 leading-relaxed italic line-clamp-3">"{val}"</p>
+                              </div>
+                            ))}
+                            {previewStats?.samples.length === 0 && <p className="text-slate-400 text-xs text-center py-10 italic">No samples available</p>}
+                          </div>
+                        </div>
                       )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sample Entries:</div>
-                      <div className="bg-slate-50 p-4 rounded-md space-y-2 text-sm text-slate-700 max-h-[300px] overflow-y-auto">{previewStats?.samples.map((val, i) => <div key={i} className="border-b border-slate-200 pb-2 last:border-0">{val}</div>)}</div>
-                    </div>
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-        )}
 
-        {/* STEP 4: VALIDATION */}
-        {step === 4 && (
-          <Card>
-            <CardHeader><CardTitle>Final Validation</CardTitle><CardDescription>Review column assignments by Department before importing.</CardDescription></CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {units.map(u => {
-                  const textCols = Object.entries(columnConfigs).filter(([h, c]) => c.unitId === u.id.toString() && c.type === "TEXT");
-                  const scoreCols = Object.entries(columnConfigs).filter(([h, c]) => c.unitId === u.id.toString() && c.type === "SCORE");
-                  const catCols = Object.entries(columnConfigs).filter(([h, c]) => c.unitId === u.id.toString() && c.type === "CATEGORY");
-
-                  if (textCols.length === 0 && scoreCols.length === 0 && catCols.length === 0) return null;
-
-                  return (
-                    <div key={u.id} className="border rounded-md p-4 bg-white shadow-sm">
-                      <div className="font-bold text-slate-800 mb-2 border-b pb-2">{u.name}</div>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between items-center text-green-700"><span>Open Text (AI)</span><Badge variant="outline" className="bg-green-50 text-green-700">{textCols.length}</Badge></div>
-                        <div className="flex justify-between items-center text-blue-700"><span>Scores (Stats)</span><Badge variant="outline" className="bg-blue-50 text-blue-700">{scoreCols.length}</Badge></div>
-                        <div className="flex justify-between items-center text-purple-700"><span>Categories (Filter)</span><Badge variant="outline" className="bg-purple-50 text-purple-700">{catCols.length}</Badge></div>
-                        {textCols.length === 0 && <div className="text-xs text-amber-500 flex items-center gap-1 mt-2 bg-amber-50 p-1 rounded"><AlertTriangle className="w-3 h-3" /> Warning: No text comments mapped.</div>}
+                      <div className="pt-2">
+                        <Button onClick={() => setPreviewHeader(null)} className="w-full h-14 rounded-2xl bg-slate-900 dark:bg-slate-100 dark:text-slate-900 font-black tracking-[0.2em] uppercase text-xs shadow-xl shadow-slate-900/10">
+                          Close Deep Dive
+                        </Button>
                       </div>
                     </div>
-                  )
-                })}
+                  </DialogContent>
+                </Dialog>
               </div>
-              {isProcessing ? (<div className="py-8 flex flex-col items-center justify-center space-y-4 border-t mt-4"><div className="flex justify-between w-full max-w-md text-sm font-medium"><span>{statusMessage}</span><span>{progress}%</span></div><Progress value={progress} className="w-full max-w-md h-3" /></div>) : (<div className="flex justify-between mt-8 border-t pt-4"><Button variant="outline" onClick={() => setStep(3)}><ArrowLeft className="w-4 h-4 mr-2" /> Back to Config</Button><Button size="lg" className="bg-green-600 hover:bg-green-700 shadow-lg" onClick={handleStartImport}><Save className="w-4 h-4 mr-2" /> Confirm & Import Data</Button></div>)}
-            </CardContent>
-          </Card>
-        )}
+            )}
+
+            {/* STEP 4: VALIDATION */}
+            {step === 4 && (
+              <div className="space-y-8 animate-in zoom-in-95 duration-500">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <Card className="bg-blue-600 text-white shadow-xl shadow-blue-500/20 border-0 overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><FileSpreadsheet className="w-24 h-24" /></div>
+                    <CardContent className="p-8 space-y-2 relative z-10">
+                      <p className="text-blue-100 text-xs font-black uppercase tracking-widest">Total Records</p>
+                      <h3 className="text-4xl font-black">{csvData.length} <span className="text-lg font-medium opacity-80 italic">Rows</span></h3>
+                      <p className="text-sm text-blue-100/80 font-bold">across {headers.length} raw columns</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-slate-900 text-white shadow-xl border-0 overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><Layers className="w-24 h-24 text-indigo-400" /></div>
+                    <CardContent className="p-8 space-y-2 relative z-10">
+                      <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Processing Layer</p>
+                      <h3 className="text-4xl font-black">{Object.values(columnConfigs).filter(c => c.type !== 'IGNORE').length} <span className="text-lg font-medium opacity-80 italic">Selected</span></h3>
+                      <p className="text-sm text-slate-400 font-bold">mapped to telemetry types</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-4 opacity-5"><Building2 className="w-24 h-24 text-slate-400" /></div>
+                    <CardContent className="p-8 space-y-2 relative z-10">
+                      <p className="text-slate-500 text-xs font-black uppercase tracking-widest">Organization Scope</p>
+                      <h3 className="text-4xl font-black text-slate-900 dark:text-slate-100">
+                        {new Set(Object.values(columnConfigs).filter(c => c.unitId).map(c => c.unitId)).size}
+                        <span className="text-lg font-medium opacity-80 italic ml-2 text-slate-500">Units</span>
+                      </h3>
+                      <p className="text-sm text-slate-500 font-bold">receiving fresh data flow</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <Card className="border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
+                  <div className="h-1.5 bg-gradient-to-r from-green-600 to-emerald-600" />
+                  <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30">
+                    <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                      <ShieldCheck className="w-6 h-6 text-green-600" />
+                      Final Data Validation
+                    </CardTitle>
+                    <CardDescription>Review the department breakdown below before starting the import process.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-8 space-y-8">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {units.map(u => {
+                        const textCols = Object.entries(columnConfigs).filter(([h, c]) => c.unitId === u.id.toString() && c.type === "TEXT");
+                        const scoreCols = Object.entries(columnConfigs).filter(([h, c]) => c.unitId === u.id.toString() && c.type === "SCORE");
+                        const catCols = Object.entries(columnConfigs).filter(([h, c]) => c.unitId === u.id.toString() && c.type === "CATEGORY");
+
+                        if (textCols.length === 0 && scoreCols.length === 0 && catCols.length === 0) return null;
+
+                        return (
+                          <div key={u.id} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-950/40 hover:bg-white dark:hover:bg-slate-950 transition-all group">
+                            <h4 className="font-black text-slate-800 dark:text-slate-100 flex items-center justify-between mb-4 truncate pr-2">
+                              {u.name}
+                              <Building2 className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                            </h4>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-blue-600 dark:text-blue-400 font-bold uppercase tracking-tighter flex items-center gap-1.5">
+                                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> {scoreCols.length} Scores
+                                </span>
+                                <span className="text-green-600 dark:text-green-400 font-bold uppercase tracking-tighter flex items-center gap-1.5">
+                                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full" /> {textCols.length} Comments
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100 dark:border-slate-800/50">
+                                <span className="text-purple-600 dark:text-purple-400 font-bold uppercase tracking-tighter flex items-center gap-1.5">
+                                  <div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> {catCols.length} Categories
+                                </span>
+                                {textCols.length === 0 && (
+                                  <span className="text-amber-500 text-[9px] font-bold flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" /> NO TEXT
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="bg-blue-50/50 dark:bg-blue-900/10 p-6 rounded-2xl border border-blue-100 dark:border-blue-900 flex items-start gap-4">
+                      <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
+                        <Info className="w-6 h-6 text-blue-600" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide">Ready for Deployment</p>
+                        <p className="text-sm text-blue-700 dark:text-blue-400">By finalizing, you will create a new survey "<span className="font-black italic">{surveyTitle}</span>" and ingest {csvData.length} response rows. This action correctly maps all student identity columns.</p>
+                      </div>
+                    </div>
+
+                    {isProcessing ? (
+                      <div className="py-10 space-y-6 border-t border-slate-100 dark:border-slate-800">
+                        <div className="flex justify-between items-center px-2">
+                          <div className="flex items-center gap-3">
+                            <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                            <span className="text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight">{statusMessage}</span>
+                          </div>
+                          <span className="text-sm font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800">{progress}%</span>
+                        </div>
+                        <Progress value={progress} className="h-4 bg-slate-100 dark:bg-slate-800 overflow-hidden rounded-full ring-1 ring-slate-200 dark:ring-slate-800" />
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row justify-between items-center gap-6 pt-6 border-t border-slate-100 dark:border-slate-800">
+                        <Button variant="outline" size="lg" onClick={() => setStep(3)} className="w-full sm:w-auto px-8 border-slate-300 dark:border-slate-700 font-bold">
+                          <ArrowLeft className="w-4 h-4 mr-2" />
+                          Back to Config
+                        </Button>
+                        <Button
+                          size="lg"
+                          onClick={handleStartImport}
+                          className="w-full sm:w-auto px-16 py-8 text-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-2xl shadow-blue-500/40 group relative overflow-hidden h-auto"
+                        >
+                          <div className="absolute inset-0 bg-white/10 translate-y-full hover:translate-y-0 transition-transform duration-300" />
+                          <span className="flex items-center gap-3">
+                            <Save className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                            Verify & Finalize Import
+                          </span>
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </PageShell>
   );
