@@ -7,7 +7,7 @@ import { computeSentimentScore } from "@/lib/utils";
  * 
  * Fetches side-by-side executive metrics for two surveys, including:
  * - Sentiment scores per unit
- * - UPH Index (1-4 scale) per unit via RPC 
+ * - Satisfaction Index (1-4 scale) per unit via RPC 
  * - Enrollment-based response rates
  * - Campus participation
  * - Category-level segment counts per unit
@@ -50,9 +50,9 @@ export async function GET(req: Request) {
             fetchCategoryComparison(idA, idB),
         ]);
 
-        // Process RPC results into UPH Index per unit
-        const quantA = buildUPHIndex(rpcA.data);
-        const quantB = buildUPHIndex(rpcB.data);
+        // Process RPC results into Satisfaction Index per unit
+        const quantA = buildSatisfactionIndex(rpcA.data);
+        const quantB = buildSatisfactionIndex(rpcB.data);
 
         return NextResponse.json({
             surveyA: {
@@ -84,7 +84,7 @@ export async function GET(req: Request) {
 
 // --- Helper Functions ---
 
-function buildUPHIndex(rpcResult: any) {
+function buildSatisfactionIndex(rpcResult: any) {
     const unitCampusScores: any[] = rpcResult?.unit_campus_scores || [];
 
     // Per-unit averages

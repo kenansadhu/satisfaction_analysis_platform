@@ -210,7 +210,7 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                                 {globalSatisfactionIndex?.toFixed(2) || "N/A"}
                             </div>
                             <div className="pb-1.5">
-                                <div className="text-white font-semibold text-lg">UPH Index</div>
+                                <div className="text-white font-semibold text-lg">Satisfaction Index</div>
                                 <div className="text-blue-300/60 text-xs">Overall satisfaction (1-4 scale)</div>
                             </div>
                         </div>

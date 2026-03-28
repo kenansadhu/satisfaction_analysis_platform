@@ -40,13 +40,13 @@ export default async function HomePage() {
                 AI-Powered Analytics Platform
               </div>
               <h1 className="text-4xl font-bold text-white tracking-tight">
-                UPH Survey Platform<br />
+                Student Voice Platform<br />
                 <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
                   AI Analytics and Insights
                 </span>
               </h1>
               <p className="text-slate-400 text-lg max-w-md">
-                For LP2MU UPH
+                Transforming raw student feedback into actionable intelligence
               </p>
             </div>
             <div className="flex gap-3">

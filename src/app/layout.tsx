@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SSI UPH Analytics",
-  description: "Helping LP2MU by transforming raw student feedback into actionable intelligence.",
+  title: "Student Voice Platform",
+  description: "Transforming raw student feedback into actionable intelligence.",
 };
 
 import { AnalysisProvider } from "@/context/AnalysisControlContext";

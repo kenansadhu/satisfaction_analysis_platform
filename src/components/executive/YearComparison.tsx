@@ -245,7 +245,7 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <HeadlineMetric
                             icon={Target} iconBg="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400"
-                            label="UPH Index" yearA={yearA} yearB={yearB}
+                            label="Satisfaction Index" yearA={yearA} yearB={yearB}
                             valueA={data.surveyA.uphIndex ?? 0} valueB={data.surveyB.uphIndex ?? 0}
                             format={v => v > 0 ? v.toFixed(2) : "N/A"}
                         />
@@ -293,7 +293,7 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
                                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
                                     <div className="flex items-center gap-2 mb-5">
                                         <BarChart3 className="w-4 h-4 text-blue-600" />
-                                        <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">UPH Index per Unit (1–4 Scale)</h3>
+                                        <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">Satisfaction Index per Unit (1–4 Scale)</h3>
                                     </div>
                                     <div className="h-72">
                                         <ResponsiveContainer width="100%" height="100%">
