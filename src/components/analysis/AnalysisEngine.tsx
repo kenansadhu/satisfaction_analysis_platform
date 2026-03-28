@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Play, Pause, Database, CheckCircle2, AlertCircle, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { useAnalysis } from "@/context/AnalysisContext";
+import { useAnalysisControl } from "@/context/AnalysisControlContext";
+import { useAnalysisProgress } from "@/context/AnalysisProgressContext";
 
 export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; surveyId?: string }) {
     // Hooks
@@ -17,11 +18,13 @@ export default function AnalysisEngine({ unitId, surveyId }: { unitId: string; s
         isAnalyzing,
         currentUnitId,
         progress,
-        logs,
         startAnalysis,
         stopAnalysis,
         resetAnalysis
-    } = useAnalysis();
+    } = useAnalysisControl();
+
+    // Volatile: logs re-render only AnalysisEngine, not the whole tree
+    const { logs } = useAnalysisProgress();
 
     // Local Data State (Visuals only)
     const [categories, setCategories] = useState<any[]>([]);

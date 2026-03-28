@@ -19,7 +19,8 @@ export const metadata: Metadata = {
   description: "Helping LP2MU by transforming raw student feedback into actionable intelligence.",
 };
 
-import { AnalysisProvider } from "@/context/AnalysisContext";
+import { AnalysisProvider } from "@/context/AnalysisControlContext";
+import { AnalysisProgressProvider } from "@/context/AnalysisProgressContext";
 import { SurveyProvider } from "@/context/SurveyContext";
 
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -41,11 +42,13 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <SurveyProvider>
-            <AnalysisProvider>
-              <AppShell>
-                {children}
-              </AppShell>
-            </AnalysisProvider>
+            <AnalysisProgressProvider>
+              <AnalysisProvider>
+                <AppShell>
+                  {children}
+                </AppShell>
+              </AnalysisProvider>
+            </AnalysisProgressProvider>
           </SurveyProvider>
         </ThemeProvider>
         <Toaster richColors position="top-right" closeButton toastOptions={{ className: 'print:hidden' }} />
