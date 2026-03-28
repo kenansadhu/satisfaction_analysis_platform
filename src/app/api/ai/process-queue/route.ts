@@ -1,17 +1,18 @@
 import { callGemini, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { processQueueSchema } from "@/lib/validators";
 
 export const maxDuration = 60; // 60 seconds max
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const { jobId, unitId, surveyId, skipIds = [] } = body;
-
-        if (!jobId || !unitId) {
-            return NextResponse.json({ error: "Missing jobId or unitId" }, { status: 400 });
+        const parsed = processQueueSchema.safeParse(body);
+        if (!parsed.success) {
+            return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 });
         }
+        const { jobId, unitId, surveyId, skipIds } = parsed.data;
 
         // 1. Fetch Job
         const { data: job, error: jobErr } = await supabase.from('analysis_jobs').select('*').eq('id', jobId).single();
@@ -119,7 +120,7 @@ export async function POST(req: Request) {
 
         // Include unit descriptions for intelligent cross-tagging
         const unitsList = (allUnits || [])
-            .filter((u: any) => u.id !== parseInt(unitId))
+            .filter((u: any) => u.id !== parseInt(String(unitId)))
             .map((u: any) => `- "${u.name}"${u.description ? `: ${u.description}` : ""}`)
             .join("\n");
 
@@ -194,7 +195,7 @@ export async function POST(req: Request) {
 
         // 6. Call Gemini (using default model from ai.ts)
         const aiResponse = await callGemini(prompt, { jsonMode: true });
-        const parsed = typeof aiResponse === 'string' ? JSON.parse(aiResponse) : aiResponse;
+        const aiParsed = typeof aiResponse === 'string' ? JSON.parse(aiResponse) : aiResponse;
 
         // 7. Save to Database
         let segmentsToInsert: any[] = [];
@@ -203,8 +204,8 @@ export async function POST(req: Request) {
         // Anti-Hallucination: track unique segments per input to avoid duplicates
         let seenSegmentsPerInput = new Map<number, Set<string>>();
 
-        if (Array.isArray(parsed)) {
-            parsed.forEach((res: any) => {
+        if (Array.isArray(aiParsed)) {
+            aiParsed.forEach((res: any) => {
                 const inputId = res.raw_input_id;
                 processedInputIds.add(inputId);
 

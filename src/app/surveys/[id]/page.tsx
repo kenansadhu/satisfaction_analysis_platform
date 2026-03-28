@@ -113,6 +113,7 @@ export default function SurveyDetailPage() {
                     continue;
                 }
 
+                // Count pending items — filter BOTH requires_analysis AND is_quantitative
                 const CHUNK = 50;
                 let pendingCount = 0;
                 for (let i = 0; i < respIds.length; i += CHUNK) {
@@ -121,6 +122,7 @@ export default function SurveyDetailPage() {
                         .select('*', { count: 'exact', head: true })
                         .eq('target_unit_id', unit.unit_id)
                         .eq('requires_analysis', true)
+                        .eq('is_quantitative', false)  // Bug #3: was missing this filter
                         .in('respondent_id', chunk);
                     pendingCount += (count || 0);
                 }
@@ -132,22 +134,54 @@ export default function SurveyDetailPage() {
                     continue;
                 }
 
+                // Bug #1 FIX: Create a real analysis_jobs record before calling process-queue
+                // process-queue route REQUIRES a jobId to function
+                await supabase.from('organization_units').update({ analysis_status: 'IN_PROGRESS' }).eq('id', unit.unit_id);
+                await supabase.from('analysis_jobs').update({ status: 'CANCELLED' }).eq('unit_id', unit.unit_id).in('status', ['PROCESSING', 'PENDING']);
+                const { data: newJob, error: jobErr } = await supabase
+                    .from('analysis_jobs')
+                    .insert({ unit_id: unit.unit_id, survey_id: parseInt(surveyId), status: 'PENDING' })
+                    .select('id')
+                    .single();
+
+                if (jobErr || !newJob) {
+                    addGlobalLog(`   ❌ Failed to create job for ${unit.unit_name}: ${jobErr?.message}`);
+                    unitsDone++;
+                    setGlobalProgress(Math.round((unitsDone / unitsToProcess.length) * 100));
+                    continue;
+                }
+
+                const activeJobId = newJob.id;
                 addGlobalLog(`   ⏳ ${pendingCount} comments to analyze...`);
-                let processed = 0;
-                const BATCH_SIZE = 50;
-                while (processed < pendingCount) {
-                    if (stopGlobalRef.current) { addGlobalLog("🛑 Stopped by user."); break; }
+
+                let hasMore = true;
+                const sessionProcessedIds: number[] = [];
+
+                while (hasMore && !stopGlobalRef.current) {
                     const response = await fetch('/api/ai/process-queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ unitId: unit.unit_id, surveyId: parseInt(surveyId), batchSize: BATCH_SIZE })
+                        body: JSON.stringify({
+                            jobId: activeJobId,
+                            unitId: unit.unit_id,
+                            surveyId: parseInt(surveyId),
+                            skipIds: sessionProcessedIds.slice(-50)
+                        })
                     });
                     const result = await response.json();
                     if (result.error) { addGlobalLog(`   ❌ Error: ${result.error}`); break; }
-                    processed += (result.processed || 0);
-                    addGlobalLog(`   ✅ Batch done: ${processed}/${pendingCount}`);
-                    if (result.remaining === 0 || result.processed === 0) break;
-                    await new Promise(r => setTimeout(r, 1000));
+                    if (result.processedIds) sessionProcessedIds.push(...result.processedIds);
+                    hasMore = result.hasMore;
+                    addGlobalLog(`   ✅ Batch done: ${sessionProcessedIds.length}/${pendingCount}`);
+                    if (hasMore) await new Promise(r => setTimeout(r, 1000));
+                }
+
+                if (!stopGlobalRef.current) {
+                    await supabase.from('organization_units').update({ analysis_status: 'COMPLETED' }).eq('id', unit.unit_id);
+                    await supabase.from('analysis_jobs').update({ status: 'COMPLETED' }).eq('id', activeJobId);
+                } else {
+                    await supabase.from('organization_units').update({ analysis_status: 'NOT_STARTED' }).eq('id', unit.unit_id);
+                    await supabase.from('analysis_jobs').update({ status: 'STOPPED' }).eq('id', activeJobId);
                 }
 
                 unitsDone++;
@@ -165,6 +199,7 @@ export default function SurveyDetailPage() {
             setIsAnalyzingGlobal(false);
         }
     };
+
 
     // --- Derived stats ---
     const completedCount = units.filter(u => u.analysis_status === "COMPLETED").length;

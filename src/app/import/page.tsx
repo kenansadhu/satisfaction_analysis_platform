@@ -264,22 +264,28 @@ export default function ImportPage() {
   // --- 4. IMPORT EXECUTION (UPDATED) ---
   const handleStartImport = async () => {
     setIsProcessing(true);
+    let surveyId: number | null = null;
     try {
       const { data: survey, error: surveyError } = await supabase.from('surveys').insert({ title: surveyTitle, description: surveyDescription }).select().single();
       if (surveyError) throw surveyError;
-      const surveyId = survey.id;
+      surveyId = survey.id;
 
       const BATCH_SIZE = 50;
       let processedRows = 0;
 
       for (let i = 0; i < csvData.length; i += BATCH_SIZE) {
         const chunk = csvData.slice(i, i + BATCH_SIZE);
+
+        // Use a unique hash as key so we don't rely on DB return order
+        const hashToRow = new Map<string, any>();
         const respondentsPayload = chunk.map((row, idx) => {
+          const hash = `row_${i + idx}_${Date.now()}`;
+          hashToRow.set(hash, row);
           const loc = locationCols.find(c => row[c]) ? row[locationCols.find(c => row[c])!] : "Unknown";
           const fac = facultyCols.find(c => row[c]) ? row[facultyCols.find(c => row[c])!] : "Unknown";
           const maj = majorCols.find(c => row[c]) ? row[majorCols.find(c => row[c])!] : "Unknown";
           const year = yearCols.find(c => row[c]) ? row[yearCols.find(c => row[c])!] : "Unknown";
-          return { survey_id: surveyId, location: loc, faculty: fac, study_program: maj, entry_year: year, student_hash: `temp_${i + idx}` };
+          return { survey_id: surveyId, location: loc, faculty: fac, study_program: maj, entry_year: year, student_hash: hash };
         });
 
         const { data: insertedRespondents, error: respError } = await supabase.from('respondents').insert(respondentsPayload).select('id, student_hash');
@@ -287,8 +293,9 @@ export default function ImportPage() {
 
         const feedbackPayload: any[] = [];
         insertedRespondents!.forEach(resp => {
-          const originalIdx = parseInt(resp.student_hash!.split('_')[1]);
-          const row = csvData[originalIdx];
+          // Safe lookup via Map — no reliance on insertion order
+          const row = hashToRow.get(resp.student_hash!);
+          if (!row) return;
           Object.entries(columnConfigs).forEach(([header, config]) => {
             if (config.type === "IGNORE" || !config.unitId) return;
             const rawValue = row[header];
@@ -323,8 +330,8 @@ export default function ImportPage() {
                   if (lower === "ya" || lower === "yes" || lower === "true") payload.numerical_score = 1;
                   else payload.numerical_score = 0;
                 } else if (config.rule === "NUMBER") {
-                  const parsed = parseFloat(rawValue);
-                  if (!isNaN(parsed)) payload.numerical_score = parsed;
+                  const numParsed = parseFloat(rawValue);
+                  if (!isNaN(numParsed)) payload.numerical_score = numParsed;
                 } else if (config.rule === "TEXT_SCALE") {
                   const lower = rawValue.toLowerCase();
                   if (lower.includes("tidak pernah") || lower.includes("sangat tidak") || lower.includes("never")) payload.numerical_score = 1;
@@ -348,8 +355,16 @@ export default function ImportPage() {
       }
       setStatusMessage("Import Complete!");
       setTimeout(() => window.location.href = "/surveys", 1000);
-    } catch (e: any) { toast.error(e.message); setIsProcessing(false); }
+    } catch (e: any) {
+      toast.error(e.message);
+      // Rollback: cascade delete will clean up respondents + feedback if survey was created
+      if (surveyId) {
+        await supabase.from('surveys').delete().eq('id', surveyId);
+      }
+      setIsProcessing(false);
+    }
   };
+
 
   const isIdentity = (h: string) => locationCols.includes(h) || facultyCols.includes(h) || majorCols.includes(h) || yearCols.includes(h);
 

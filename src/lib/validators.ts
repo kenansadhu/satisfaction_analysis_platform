@@ -51,6 +51,14 @@ export const mapColumnsSchema = z.object({
         id: z.number(),
         name: z.string(),
     })),
+    surveyDescription: z.string().optional(),
+});
+
+export const processQueueSchema = z.object({
+    jobId: z.union([z.string(), z.number()]),
+    unitId: z.union([z.string(), z.number()]),
+    surveyId: z.union([z.string(), z.number()]).optional(),
+    skipIds: z.array(z.number()).optional().default([]),
 });
 
 export const mapIdentitySchema = z.object({

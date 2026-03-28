@@ -211,6 +211,15 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             await supabase.from('analysis_jobs').update({ status: 'STOPPED' }).eq('id', jobId);
             setJobId(null);
         }
+
+        // Reset unit status so it doesn't appear stuck at IN_PROGRESS after a pause
+        if (currentUnitId) {
+            await supabase
+                .from('organization_units')
+                .update({ analysis_status: 'NOT_STARTED' })
+                .eq('id', currentUnitId);
+            addLog("🔄 Unit status reset to NOT_STARTED.");
+        }
     };
 
     const resetAnalysis = async (unitId: string, surveyId?: string) => {

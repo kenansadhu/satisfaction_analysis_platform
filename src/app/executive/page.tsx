@@ -104,8 +104,8 @@ export default function ExecutiveDashboard() {
                     activeSurvey ? (
                         <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-lg border border-indigo-200/50 dark:border-indigo-800/40">
                             <Database className="w-4 h-4 text-indigo-400" />
-                            <span className="text-sm font-medium text-indigo-200">{activeSurvey.title}</span>
-                            {activeSurvey.year && <span className="text-xs text-slate-400">({activeSurvey.year})</span>}
+                            <span className="text-sm font-medium text-indigo-700 dark:text-indigo-200">{activeSurvey.title}</span>
+                            {activeSurvey.year && <span className="text-xs text-slate-500 dark:text-slate-400">({activeSurvey.year})</span>}
                         </div>
                     ) : null
                 }
