@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { computeSentimentScore } from "@/lib/utils";
 
 export async function POST(req: Request) {
     try {
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
         // 1.6 Fetch all quantitative inputs for these respondents
         const quantRows: any[] = [];
         if (respIds.length > 0) {
-            const CHUNK_SIZE = 50;
+            const CHUNK_SIZE = 400;
             for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
                 const chunk = respIds.slice(i, i + CHUNK_SIZE);
                 let qPage = 0;
@@ -180,8 +181,8 @@ export async function POST(req: Request) {
             const finalNeg = neg > 0 ? neg : catNeg;
             const finalNeu = neu > 0 ? neu : Math.max(0, totalSegments - finalPos - finalNeg);
 
-            // Compute Net Sentiment Score (-100 to 100)
-            const computedScore = parseFloat((((finalPos - finalNeg) / Math.max(1, finalPos + finalNeg + finalNeu)) * 100).toFixed(1));
+            // Compute Sentiment Score (0-100 weighted positivity — same formula as executive/metrics)
+            const computedScore = computeSentimentScore(finalPos, finalNeu, finalNeg);
 
             // Build quantitative averages
             const flatQuant: Record<string, number> = {};

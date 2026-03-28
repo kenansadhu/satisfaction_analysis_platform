@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { computeSentimentScore } from "@/lib/utils";
 
 export async function GET(request: Request) {
     try {
@@ -52,7 +53,7 @@ export async function GET(request: Request) {
         const stats = orgUnits.map(unit => {
             const unitStats = unitTotals.get(unit.id);
             if (unitStats && unitStats.total > 0) {
-                const score = Math.round(((unitStats.positive * 100) + (unitStats.neutral * 50)) / unitStats.total);
+                const score = computeSentimentScore(unitStats.positive, unitStats.neutral, unitStats.negative);
                 return { id: unit.id, name: unit.name, ...unitStats, score };
             }
             return { id: unit.id, name: unit.name, total: 0, positive: 0, neutral: 0, negative: 0, score: 0 };

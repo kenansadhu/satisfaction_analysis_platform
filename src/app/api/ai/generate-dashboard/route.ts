@@ -16,58 +16,35 @@ export async function POST(req: Request) {
 
     const { surveyId } = validation.data;
 
-    // 1. Fetch Aggregated Data across ALL units
-    const { data: unitsData, error: unitsError } = await supabase
-      .from('organization_units')
-      .select('id, name, description');
-
-    if (unitsError || !unitsData) throw new Error("Failed to load units.");
-
-    const globalDataset: any[] = [];
-    const availableKeys = new Set<string>(['unit_name', 'total_segments', 'positive', 'neutral', 'negative', 'score']);
-
-    // Gather macro-level metrics per unit
-    for (const unit of unitsData) {
-      const { data: metrics } = await supabase.rpc('get_dashboard_metrics', {
-        p_unit_id: unit.id,
-        p_survey_id: surveyId ? parseInt(surveyId.toString(), 10) : null
-      });
-
-      if (metrics && (metrics as any).total_segments > 0) {
-        const categories = (metrics as any).category_counts || [];
-        const flatCategories: any = {};
-
-        if (Array.isArray(categories)) {
-          categories.forEach(c => {
-            const name = c.category_name;
-            if (name) {
-              const cleanKey = `category_${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-              flatCategories[cleanKey] = c.total || 0;
-              flatCategories[`${cleanKey}_pos`] = c.positive_count || 0;
-              flatCategories[`${cleanKey}_neg`] = c.negative_count || 0;
-
-              availableKeys.add(cleanKey);
-              availableKeys.add(`${cleanKey}_pos`);
-              availableKeys.add(`${cleanKey}_neg`);
-            }
-          });
-        }
-
-        globalDataset.push({
-          unit_id: unit.id,
-          unit_name: unit.name,
-          unit_description: unit.description || "No specific context provided.",
-          total_segments: (metrics as any).total_segments,
-          positive: (metrics as any).positive,
-          neutral: (metrics as any).neutral,
-          negative: (metrics as any).negative,
-          score: (metrics as any).score,
-          ...flatCategories
-        });
-      }
+    // Read from the pre-built cache (same source as chat-analyst) — single DB call instead of N+1 RPCs
+    if (!surveyId) {
+      return NextResponse.json({ error: "surveyId is required for dashboard generation" }, { status: 400 });
     }
 
-    if (globalDataset.length === 0) throw new Error("No data found across any units.");
+    const { data: surveyData, error: sErr } = await supabase
+      .from('surveys')
+      .select('ai_dataset_cache')
+      .eq('id', parseInt(surveyId.toString(), 10))
+      .single();
+
+    if (sErr || !surveyData?.ai_dataset_cache) {
+      return NextResponse.json(
+        { error: "AI Context not built yet. Please build it in Survey Settings before generating the dashboard." },
+        { status: 400 }
+      );
+    }
+
+    const globalDataset: any[] = surveyData.ai_dataset_cache;
+    if (globalDataset.length === 0) {
+      return NextResponse.json({ error: "No data found in cache. Please rebuild the AI context." }, { status: 400 });
+    }
+
+    // Derive available keys from the first cached row
+    const availableKeys = new Set<string>(['unit_name', 'unit_short_name', 'total_segments', 'positive', 'neutral', 'negative', 'score']);
+    Object.keys(globalDataset[0]).forEach(k => {
+      if (k.startsWith('category_') || k.startsWith('likert_') || k.startsWith('binary_')) availableKeys.add(k);
+    });
+
 
     // 2. Prepare AI Context
     const datasetContext = {

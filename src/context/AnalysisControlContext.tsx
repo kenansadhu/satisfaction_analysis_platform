@@ -199,8 +199,24 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         }
 
         if (currentUnitId) {
-            await supabase.from('organization_units').update({ analysis_status: 'NOT_STARTED' }).eq('id', currentUnitId);
-            addLog("🔄 Unit status reset to NOT_STARTED.");
+            // Check if any items were actually analyzed (requires_analysis = false means processed).
+            // If yes → keep IN_PROGRESS (yellow bar) so user knows there's partial data.
+            // If none were processed → reset to NOT_STARTED (grey).
+            const { count: analyzedCount } = await supabase
+                .from('raw_feedback_inputs')
+                .select('id', { count: 'exact', head: true })
+                .eq('target_unit_id', currentUnitId)
+                .eq('is_quantitative', false)
+                .eq('requires_analysis', false);
+
+            const newStatus = (analyzedCount && analyzedCount > 0) ? 'IN_PROGRESS' : 'NOT_STARTED';
+            await supabase.from('organization_units').update({ analysis_status: newStatus }).eq('id', currentUnitId);
+
+            if (newStatus === 'IN_PROGRESS') {
+                addLog(`⏸️ Analysis paused. ${analyzedCount} items analyzed so far — unit stays yellow.`);
+            } else {
+                addLog("🔄 No items analyzed yet. Unit status reset to NOT_STARTED.");
+            }
         }
     };
 

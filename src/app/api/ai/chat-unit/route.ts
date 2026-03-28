@@ -23,22 +23,20 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Missing unitId or prompt" }, { status: 400 });
         }
 
-        // --- STATE-AWARE DATA FETCHING (PRECISE ISOLATION) ---
         const execReportType = surveyId ? `executive_${surveyId}` : 'executive';
-        const [unitRes, respRes, reportRes] = await Promise.all([
+        const [unitRes, reportRes, surveyRespsResult] = await Promise.all([
             supabase.from('organization_units').select('name, description').eq('id', unitId).single(),
-            supabase.from('respondents').select('id', { count: 'exact', head: true }).eq('survey_id', surveyId),
-            supabase.from('unit_ai_reports').select('content').eq('unit_id', unitId).eq('report_type', execReportType).maybeSingle()
+            supabase.from('unit_ai_reports').select('content').eq('unit_id', unitId).eq('report_type', execReportType).maybeSingle(),
+            supabase.from('respondents').select('id').eq('survey_id', surveyId)
         ]);
 
+        const surveyResps = surveyRespsResult.data;
         const unitName = unitRes.data?.name || "Unknown Unit";
         const unitDescription = unitRes.data?.description || "";
-        const totalSurveyPopulation = respRes.count || 0;
+        const totalSurveyPopulation = surveyResps?.length || 0;
         const executiveReport = reportRes.data?.content?.report;
 
-        // FETCH SURVEY CONTEXT (ISOLATION)
-        const { data: surveyResps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
-        const surveyRespIds = (surveyResps || []).map(r => r.id);
+        const surveyRespIds = (surveyResps || []).map((r: any) => r.id);
 
         // FETCH RAW DATA (QUAL + QUANT + FACULTY ORIGIN)
         const { data: rawInputs } = await supabase

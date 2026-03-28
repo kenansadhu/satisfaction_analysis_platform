@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { computeSentimentScore } from "@/lib/utils";
 
 /**
  * GET /api/executive/compare?surveyIdA=1&surveyIdB=2
@@ -136,9 +137,7 @@ async function fetchSurveyMetrics(surveyId: number) {
             const neu = row.neutral_count || 0;
             const neg = row.negative_count || 0;
             const total = pos + neu + neg;
-            const score = total > 0
-                ? Math.round(((pos * 1.0 + neu * 0.5) / total) * 100)
-                : 0;
+            const score = computeSentimentScore(pos, neu, neg);
 
             unitScores.push({
                 unit_id: row.unit_id,
