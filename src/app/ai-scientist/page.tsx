@@ -249,7 +249,7 @@ export default function AIScientistPage() {
         const isShowingData = showDataForChart === chart.id;
 
         return (
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col h-full relative">
                 <div className="flex justify-end mb-2 pr-4">
                     <Button
                         size="sm"

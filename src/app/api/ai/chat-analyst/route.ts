@@ -207,19 +207,26 @@ async function fetchQuantSummary(surveyId?: string) {
 
         if (respIds.length === 0) return { totalQuantitativeResponses: 0 };
 
-        let totalQuant = 0;
         const CHUNK = 400;
-        for (let i = 0; i < respIds.length; i += CHUNK) {
-            const chunk = respIds.slice(i, i + CHUNK);
-            const { count } = await supabase
-                .from('raw_feedback_inputs')
-                .select('*', { count: 'exact', head: true })
-                .eq('is_quantitative', true)
-                .not('numerical_score', 'is', null)
-                .gte('numerical_score', 1)
-                .lte('numerical_score', 4)
-                .in('respondent_id', chunk);
-            totalQuant += count || 0;
+        const MAX_CONCURRENT = 5;
+        let totalQuant = 0;
+
+        for (let batchStart = 0; batchStart < respIds.length; batchStart += CHUNK * MAX_CONCURRENT) {
+            const chunks: number[][] = [];
+            for (let i = batchStart; i < Math.min(batchStart + CHUNK * MAX_CONCURRENT, respIds.length); i += CHUNK) {
+                chunks.push(respIds.slice(i, i + CHUNK));
+            }
+            const counts = await Promise.all(chunks.map(chunk =>
+                supabase.from('raw_feedback_inputs')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('is_quantitative', true)
+                    .not('numerical_score', 'is', null)
+                    .gte('numerical_score', 1)
+                    .lte('numerical_score', 4)
+                    .in('respondent_id', chunk)
+                    .then(({ count }) => count || 0)
+            ));
+            totalQuant += counts.reduce((a, b) => a + b, 0);
         }
         return { totalQuantitativeResponses: totalQuant };
     } else {

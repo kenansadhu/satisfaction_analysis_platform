@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep *)",
+      "mcp__claude_ai_Supabase__list_projects"
+    ]
+  }
+}

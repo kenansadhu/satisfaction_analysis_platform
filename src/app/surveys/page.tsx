@@ -8,17 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Trash2, ArrowRight, BarChart3, Calendar, Plus, Users, FolderOpen, Settings } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowRight, Calendar, Plus, Users, FolderOpen, Settings } from "lucide-react";
 import { format } from "date-fns";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Survey } from "@/types";
 
 export default function SurveysPage() {
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
   useEffect(() => {
     fetchSurveys();
@@ -47,20 +44,13 @@ export default function SurveysPage() {
         title: s.title,
         created_at: s.created_at,
         year: s.year,
-        respondents: [{ count: count || 0 }] // Match the type definition
+        respondents: [{ count: count || 0 }]
       };
     }));
 
     setSurveys(enrichedSurveys);
     setIsLoading(false);
   }
-
-  const handleDelete = async (id: number) => {
-    const { error } = await supabase.from('surveys').delete().eq('id', id);
-    if (error) toast.error("Error deleting: " + error.message);
-    else fetchSurveys();
-    setDeleteTarget(null);
-  };
 
   return (
     <PageShell>
@@ -134,37 +124,23 @@ export default function SurveysPage() {
                     <span className="text-sm text-slate-400">Respondents</span>
                   </div>
                 </CardContent>
-                <CardFooter className="flex justify-between border-t bg-slate-50/50 pt-4">
-                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleteTarget(survey.id)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                  <div className="flex gap-2">
-                    <Link href={`/surveys/${survey.id}/manage`}>
-                      <Button size="sm" variant="ghost" className="gap-1.5 text-slate-500 hover:text-blue-600">
-                        <Settings className="w-3.5 h-3.5" /> Manage
-                      </Button>
-                    </Link>
-                    <Link href={`/surveys/${survey.id}`}>
-                      <Button size="sm" variant="outline" className="gap-2 group-hover:border-blue-300 group-hover:text-blue-600">
-                        Analyze Project <ArrowRight className="w-4 h-4" />
-                      </Button>
-                    </Link>
-                  </div>
+                <CardFooter className="flex justify-end gap-2 border-t bg-slate-50/50 pt-4">
+                  <Link href={`/surveys/${survey.id}/manage`}>
+                    <Button size="sm" variant="ghost" className="gap-1.5 text-slate-500 hover:text-blue-600">
+                      <Settings className="w-3.5 h-3.5" /> Manage
+                    </Button>
+                  </Link>
+                  <Link href={`/surveys/${survey.id}`}>
+                    <Button size="sm" variant="outline" className="gap-2 group-hover:border-blue-300 group-hover:text-blue-600">
+                      Analyze Project <ArrowRight className="w-4 h-4" />
+                    </Button>
+                  </Link>
                 </CardFooter>
               </Card>
             ))}
           </div>
         )}
       </div>
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete Survey?"
-        description="This will permanently delete all student data and analysis for this survey. This action cannot be undone."
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-      />
     </PageShell>
   );
 }

@@ -55,11 +55,12 @@ export default function SurveyDetailPage() {
     async function loadSurveyData() {
         setIsLoading(true);
 
-        // === Fast parallel fetch: survey info + units + respondent count ===
-        const [surveyRes, unitsRes, respCountRes] = await Promise.all([
+        // === Fast parallel fetch: survey info + units + respondent count + per-survey jobs ===
+        const [surveyRes, unitsRes, respCountRes, jobsRes] = await Promise.all([
             supabase.from('surveys').select('title, year').eq('id', surveyId).single(),
-            supabase.from('organization_units').select('id, name, short_name, description, analysis_status').order('name'),
+            supabase.from('organization_units').select('id, name, short_name, description').order('name'),
             supabase.from('respondents').select('id', { count: 'exact', head: true }).eq('survey_id', surveyId),
+            supabase.from('analysis_jobs').select('unit_id, status').eq('survey_id', parseInt(surveyId)),
         ]);
 
         if (surveyRes.data) {
@@ -70,12 +71,24 @@ export default function SurveyDetailPage() {
         setTotalRespondents(respCountRes.count || 0);
 
         if (unitsRes.data) {
+            // Derive per-survey status from analysis_jobs (not the global organization_units.analysis_status)
+            const surveyStatusMap = new Map<number, AnalysisStatus>();
+            for (const job of (jobsRes.data || [])) {
+                const unitId = job.unit_id as number;
+                const current = surveyStatusMap.get(unitId);
+                if (job.status === 'COMPLETED') {
+                    surveyStatusMap.set(unitId, 'COMPLETED');
+                } else if ((job.status === 'PROCESSING' || job.status === 'PENDING') && current !== 'COMPLETED') {
+                    surveyStatusMap.set(unitId, 'IN_PROGRESS');
+                }
+            }
+
             setUnits(unitsRes.data.map((u: any) => ({
                 unit_id: u.id,
                 unit_name: u.name,
                 unit_short_name: u.short_name || null,
                 unit_desc: u.description || null,
-                analysis_status: (u.analysis_status || "NOT_STARTED") as AnalysisStatus,
+                analysis_status: surveyStatusMap.get(u.id) || 'NOT_STARTED',
             })));
         }
 

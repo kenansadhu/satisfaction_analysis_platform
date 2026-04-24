@@ -538,7 +538,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                     <div>
                         <p className="text-sm font-medium text-amber-800 dark:text-amber-200">No analyzed data for this survey</p>
                         <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-                            This survey hasn't been analyzed yet. Switch to a survey with completed analysis (e.g. SSI 2025), or go to <strong>Surveys → Analyze</strong> to process this survey first.
+                            AI context hasn't been built for this survey yet. Go to <strong>Surveys → Manage → Build AI Context</strong> to generate it, then return here.
                         </p>
                     </div>
                 </div>

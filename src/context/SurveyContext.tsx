@@ -91,8 +91,9 @@ export function SurveyProvider({ children }: { children: ReactNode }) {
             if (storedValid) {
                 setActiveSurveyIdState(stored);
             } else {
-                const withData = checks.find(s => s.hasData);
-                const defaultId = (withData || checks[0]).id.toString();
+                // Default to the most recently created survey (first in DESC order), not the first with data.
+                // This ensures a newly imported survey is selected by default rather than the old analyzed one.
+                const defaultId = checks[0].id.toString();
                 setActiveSurveyIdState(defaultId);
                 if (typeof window !== "undefined") localStorage.setItem("activeSurveyId", defaultId);
             }

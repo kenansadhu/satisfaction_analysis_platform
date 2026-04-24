@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+export const maxDuration = 60;
+
 // Helper: paginate through all rows (Supabase default limit = 1000)
 async function fetchAll(queryFactory: () => any, label?: string): Promise<any[]> {
     const PAGE = 1000;
@@ -133,16 +135,8 @@ export async function GET(req: NextRequest) {
         const unitColumnAccum = new Map<number, Map<string, ColumnAccum>>();
 
         const CHUNK = 400;
-        for (let i = 0; i < respIds.length; i += CHUNK) {
-            const chunk = respIds.slice(i, i + CHUNK);
-            const rows = await fetchAll(() =>
-                supabase.from('raw_feedback_inputs')
-                    .select('respondent_id, target_unit_id, source_column, numerical_score, score_rule')
-                    .in('respondent_id', chunk)
-                    .eq('is_quantitative', true)
-                    .not('numerical_score', 'is', null),
-                'quant-scores'
-            );
+        const MAX_CONCURRENT = 5;
+        const processRows = (rows: any[]) => {
             for (const row of rows) {
                 const unitId = row.target_unit_id;
                 if (!unitId) continue;
@@ -156,7 +150,6 @@ export async function GET(req: NextRequest) {
                 if (!colMap.has(col)) colMap.set(col, { maxScore: 0, rule: row.score_rule, campusData: new Map() });
                 const colAcc = colMap.get(col)!;
                 if (score > colAcc.maxScore) colAcc.maxScore = score;
-                // Update rule if it was null previously
                 if (!colAcc.rule && row.score_rule) colAcc.rule = row.score_rule;
 
                 if (!colAcc.campusData.has(campus)) colAcc.campusData.set(campus, { sum: 0, count: 0 });
@@ -164,6 +157,25 @@ export async function GET(req: NextRequest) {
                 entry.sum += score;
                 entry.count += 1;
             }
+        };
+
+        // Fetch in parallel batches of MAX_CONCURRENT chunks to avoid sequential timeouts
+        for (let batchStart = 0; batchStart < respIds.length; batchStart += CHUNK * MAX_CONCURRENT) {
+            const batchChunks: number[][] = [];
+            for (let i = batchStart; i < Math.min(batchStart + CHUNK * MAX_CONCURRENT, respIds.length); i += CHUNK) {
+                batchChunks.push(respIds.slice(i, i + CHUNK));
+            }
+            const batchResults = await Promise.all(batchChunks.map(chunk =>
+                fetchAll(() =>
+                    supabase.from('raw_feedback_inputs')
+                        .select('respondent_id, target_unit_id, source_column, numerical_score, score_rule')
+                        .in('respondent_id', chunk)
+                        .eq('is_quantitative', true)
+                        .not('numerical_score', 'is', null),
+                    'quant-scores'
+                )
+            ));
+            for (const rows of batchResults) processRows(rows);
         }
 
         // Phase 2: Aggregate, excluding binary or "wrong" Likert columns (max score <= 1)
