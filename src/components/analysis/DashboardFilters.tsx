@@ -3,18 +3,36 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Filter, MessageSquare, ChevronDown } from "lucide-react";
+import { Filter, MessageSquare, ChevronDown, Tag } from "lucide-react";
+
+type ActiveFilters = {
+    sentiment: string[];
+    location: string[];
+    faculty: string[];
+    program: string[];
+    category: string[];
+};
 
 type FiltersProps = {
     isFilterOpen: boolean;
     setIsFilterOpen: (open: boolean) => void;
-    activeFilters: { sentiment: string[]; location: string[]; faculty: string[]; program: string[] };
-    setActiveFilters: React.Dispatch<React.SetStateAction<{ sentiment: string[]; location: string[]; faculty: string[]; program: string[] }>>;
+    activeFilters: ActiveFilters;
+    setActiveFilters: React.Dispatch<React.SetStateAction<ActiveFilters>>;
     filterOptions: { locations: string[]; faculties: string[]; programs: string[] };
+    categories: { id: number; name: string }[];
 };
 
-export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, activeFilters, setActiveFilters, filterOptions }: FiltersProps) {
-    const activeCount = activeFilters.sentiment.length + activeFilters.location.length + activeFilters.faculty.length + activeFilters.program.length;
+const EMPTY_FILTERS: ActiveFilters = { sentiment: [], location: [], faculty: [], program: [], category: [] };
+
+export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, activeFilters, setActiveFilters, filterOptions, categories }: FiltersProps) {
+    const activeCount = activeFilters.sentiment.length + activeFilters.location.length + activeFilters.faculty.length + activeFilters.program.length + activeFilters.category.length;
+
+    const toggle = (key: keyof ActiveFilters, value: string) => {
+        setActiveFilters(p => {
+            const arr = p[key] as string[];
+            return { ...p, [key]: arr.includes(value) ? arr.filter(x => x !== value) : [...arr, value] };
+        });
+    };
 
     return (
         <div className="print:hidden space-y-3">
@@ -28,7 +46,7 @@ export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, active
                             <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 hover:bg-indigo-100">
                                 {activeCount} Active
                             </Badge>
-                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200" onClick={() => setActiveFilters({ sentiment: [], location: [], faculty: [], program: [] })}>Clear All</Button>
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200" onClick={() => setActiveFilters(EMPTY_FILTERS)}>Clear All</Button>
                         </div>
                     )}
                 </div>
@@ -49,10 +67,7 @@ export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, active
                                     <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
                                         <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
                                             checked={activeFilters.sentiment.includes(s)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) setActiveFilters(p => ({ ...p, sentiment: [...p.sentiment, s] }));
-                                                else setActiveFilters(p => ({ ...p, sentiment: p.sentiment.filter(x => x !== s) }));
-                                            }}
+                                            onChange={() => toggle('sentiment', s)}
                                         />
                                         <span className={`w-2 h-2 rounded-full ${s === 'Positive' ? 'bg-green-500' : s === 'Negative' ? 'bg-red-500' : 'bg-slate-400'}`} />
                                         {s}
@@ -69,10 +84,7 @@ export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, active
                                     <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
                                         <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
                                             checked={activeFilters.location.includes(s)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) setActiveFilters(p => ({ ...p, location: [...p.location, s] }));
-                                                else setActiveFilters(p => ({ ...p, location: p.location.filter(x => x !== s) }));
-                                            }}
+                                            onChange={() => toggle('location', s)}
                                         /> <span className="truncate" title={s}>{s}</span>
                                     </label>
                                 ))}
@@ -87,10 +99,7 @@ export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, active
                                     <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
                                         <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
                                             checked={activeFilters.faculty.includes(s)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) setActiveFilters(p => ({ ...p, faculty: [...p.faculty, s] }));
-                                                else setActiveFilters(p => ({ ...p, faculty: p.faculty.filter(x => x !== s) }));
-                                            }}
+                                            onChange={() => toggle('faculty', s)}
                                         /> <span className="truncate" title={s}>{s}</span>
                                     </label>
                                 ))}
@@ -105,15 +114,42 @@ export default function DashboardFilters({ isFilterOpen, setIsFilterOpen, active
                                     <label key={s} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer">
                                         <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
                                             checked={activeFilters.program.includes(s)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) setActiveFilters(p => ({ ...p, program: [...p.program, s] }));
-                                                else setActiveFilters(p => ({ ...p, program: p.program.filter(x => x !== s) }));
-                                            }}
+                                            onChange={() => toggle('program', s)}
                                         /> <span className="truncate" title={s}>{s}</span>
                                     </label>
                                 ))}
                             </div>
                         </div>
+
+                        {/* Category — full-width pill toggles so long names can wrap */}
+                        {categories.length > 0 && (
+                            <div className="col-span-full space-y-3 border-t border-indigo-100 dark:border-indigo-900/40 pt-5">
+                                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                    <Tag className="w-3 h-3" /> Category
+                                    {activeFilters.category.length > 0 && (
+                                        <button onClick={() => setActiveFilters(p => ({ ...p, category: [] }))} className="ml-2 text-[10px] text-indigo-500 hover:text-indigo-700 font-normal normal-case tracking-normal">Clear</button>
+                                    )}
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    {categories.map(c => {
+                                        const selected = activeFilters.category.includes(c.name);
+                                        return (
+                                            <button
+                                                key={c.id}
+                                                onClick={() => toggle('category', c.name)}
+                                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors leading-snug text-left ${
+                                                    selected
+                                                        ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500'
+                                                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700 hover:text-indigo-700 dark:hover:text-indigo-400'
+                                                }`}
+                                            >
+                                                {c.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
 
                     </CardContent>
                 </Card>

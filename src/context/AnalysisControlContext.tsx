@@ -81,16 +81,21 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             setJobId(activeJobId);
             addLog("Job initialized. Starting batch processing...");
 
-            // Pre-fetch respondent IDs for survey filtering
+            // Pre-fetch respondent IDs for survey filtering (parallel page loading)
             let respIds: number[] = [];
             if (surveyId) {
-                let rPage = 0;
-                while (true) {
-                    const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).order('id').range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                    if (!rBat || rBat.length === 0) break;
-                    respIds.push(...rBat.map((r: any) => r.id));
-                    if (rBat.length < 1000) break;
-                    rPage++;
+                const firstPage = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(0, 999);
+                respIds = (firstPage.data || []).map((r: any) => r.id);
+                if (firstPage.data && firstPage.data.length === 1000) {
+                    const { count: totalResps } = await supabase.from('respondents')
+                        .select('*', { count: 'exact', head: true }).eq('survey_id', surveyId);
+                    const extraPages = Math.ceil(((totalResps || 1000) - 1000) / 1000);
+                    const rest = await Promise.all(
+                        Array.from({ length: extraPages }, (_, i) =>
+                            supabase.from('respondents').select('id').eq('survey_id', surveyId).range((i + 1) * 1000, (i + 2) * 1000 - 1)
+                        )
+                    );
+                    for (const page of rest) respIds.push(...(page.data || []).map((r: any) => r.id));
                 }
             }
 
@@ -176,6 +181,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
             if (!stopRef.current) {
                 addLog("✅ All batches complete!");
+                await supabase.from('analysis_jobs').update({ status: 'COMPLETED' }).eq('id', activeJobId);
                 await supabase.from('organization_units').update({ analysis_status: 'COMPLETED' }).eq('id', unitId);
                 addLog("🏁 Unit status set to COMPLETED.");
                 setIsAnalyzing(false);
@@ -271,7 +277,9 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             }
         }
 
-        await supabase.from('analysis_jobs').delete().eq('unit_id', unitId);
+        let jobDelete = supabase.from('analysis_jobs').delete().eq('unit_id', unitId);
+        if (surveyId) jobDelete = jobDelete.eq('survey_id', surveyId);
+        await jobDelete;
         await supabase.from('organization_units').update({ analysis_status: 'NOT_STARTED' }).eq('id', unitId);
 
         addLog("✅ Reset Complete.");

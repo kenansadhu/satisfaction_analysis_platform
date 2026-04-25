@@ -58,7 +58,7 @@ export default function SurveyDetailPage() {
         // === Fast parallel fetch: survey info + units + respondent count + per-survey jobs ===
         const [surveyRes, unitsRes, respCountRes, jobsRes] = await Promise.all([
             supabase.from('surveys').select('title, year').eq('id', surveyId).single(),
-            supabase.from('organization_units').select('id, name, short_name, description').order('name'),
+            supabase.from('organization_units').select('id, name, short_name, description, analysis_status').order('name'),
             supabase.from('respondents').select('id', { count: 'exact', head: true }).eq('survey_id', surveyId),
             supabase.from('analysis_jobs').select('unit_id, status').eq('survey_id', parseInt(surveyId)),
         ]);
@@ -78,18 +78,53 @@ export default function SurveyDetailPage() {
                 const current = surveyStatusMap.get(unitId);
                 if (job.status === 'COMPLETED') {
                     surveyStatusMap.set(unitId, 'COMPLETED');
-                } else if ((job.status === 'PROCESSING' || job.status === 'PENDING') && current !== 'COMPLETED') {
+                } else if ((job.status === 'PROCESSING' || job.status === 'PENDING' || job.status === 'STOPPED') && current !== 'COMPLETED') {
                     surveyStatusMap.set(unitId, 'IN_PROGRESS');
                 }
             }
 
-            setUnits(unitsRes.data.map((u: any) => ({
-                unit_id: u.id,
-                unit_name: u.name,
-                unit_short_name: u.short_name || null,
-                unit_desc: u.description || null,
-                analysis_status: surveyStatusMap.get(u.id) || 'NOT_STARTED',
-            })));
+            setUnits(unitsRes.data.map((u: any) => {
+                return {
+                    unit_id: u.id,
+                    unit_name: u.name,
+                    unit_short_name: u.short_name || null,
+                    unit_desc: u.description || null,
+                    analysis_status: surveyStatusMap.get(u.id) || 'NOT_STARTED',
+                };
+            }));
+
+            // Background self-heal: if any jobs are stale (PENDING/PROCESSING/STOPPED) but
+            // all feedback items for this survey have been analyzed, mark them COMPLETED.
+            const staleUnitIds = [...surveyStatusMap.entries()]
+                .filter(([, s]) => s === 'IN_PROGRESS')
+                .map(([id]) => id);
+
+            if (staleUnitIds.length > 0) {
+                void (async () => {
+                    const nowComplete: number[] = [];
+
+                    for (const unitId of staleUnitIds) {
+                        const { count } = await supabase.from('raw_feedback_inputs')
+                            .select('*', { count: 'exact', head: true })
+                            .eq('target_unit_id', unitId)
+                            .eq('is_quantitative', false)
+                            .eq('requires_analysis', true);
+                        if ((count || 0) === 0) nowComplete.push(unitId);
+                    }
+
+                    if (nowComplete.length === 0) return;
+
+                    await supabase.from('analysis_jobs')
+                        .update({ status: 'COMPLETED' })
+                        .eq('survey_id', parseInt(surveyId))
+                        .in('unit_id', nowComplete)
+                        .in('status', ['PENDING', 'PROCESSING', 'STOPPED']);
+
+                    setUnits(prev => prev.map(u =>
+                        nowComplete.includes(u.unit_id) ? { ...u, analysis_status: 'COMPLETED' } : u
+                    ));
+                })();
+            }
         }
 
         setIsLoading(false);

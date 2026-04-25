@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Loader2, TrendingUp, AlertTriangle, Lightbulb, Filter, Sparkles, RefreshCcw, Save, Download, BarChart2, MessageSquare, ChevronRight, ChevronDown, X, Quote, Target, CheckCircle2, AlertCircle, Search, Table2, Check } from "lucide-react";
+import { Loader2, TrendingUp, AlertTriangle, Lightbulb, Filter, Sparkles, RefreshCcw, Save, Download, BarChart2, MessageSquare, ChevronRight, ChevronDown, X, Quote, Target, CheckCircle2, AlertCircle, Search, Table2, Check, GitCompareArrows } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -53,6 +53,10 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
     const [allSegments, setAllSegments] = useState<any[]>([]);
     const [crossUnitSegments, setCrossUnitSegments] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
+
+    // Incoming cross-unit mentions (other units referencing this one)
+    const [incomingMentions, setIncomingMentions] = useState<any>(null);
+    const [incomingLoading, setIncomingLoading] = useState(false);
     const [unitName, setUnitName] = useState("");
     const [verifiedCount, setVerifiedCount] = useState(0);
     const [totalSegmentCount, setTotalSegmentCount] = useState(0);
@@ -74,8 +78,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
 
     // Filter Options & Active State
     const [filterOptions, setFilterOptions] = useState<{ locations: string[], faculties: string[], programs: string[] }>({ locations: [], faculties: [], programs: [] });
-    const [activeFilters, setActiveFilters] = useState<{ sentiment: string[], location: string[], faculty: string[], program: string[] }>({
-        sentiment: [], location: [], faculty: [], program: []
+    const [activeFilters, setActiveFilters] = useState<{ sentiment: string[], location: string[], faculty: string[], program: string[], category: string[] }>({
+        sentiment: [], location: [], faculty: [], program: [], category: []
     });
     const [isFilterOpen, setIsFilterOpen] = useState(false);
 
@@ -109,6 +113,16 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         return () => clearTimeout(timer);
     }, [activeFilters, baseRawInputs, baseScores, baseCatScores]);
 
+    useEffect(() => {
+        if (!unitId || !surveyId || isCurrentlyAnalyzing) { setIncomingMentions(null); return; }
+        setIncomingLoading(true);
+        fetch(`/api/executive/incoming-mentions?unitId=${unitId}&surveyId=${surveyId}`)
+            .then(r => r.json())
+            .then(data => setIncomingMentions(data))
+            .catch(() => setIncomingMentions(null))
+            .finally(() => setIncomingLoading(false));
+    }, [unitId, surveyId, isCurrentlyAnalyzing]);
+
     // --- DATA LOADING ---
 
     async function fetchRawData() {
@@ -124,20 +138,29 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
             setCategories(catRes.data || []);
             setAllUnits(orgRes.data || []);
 
-            // 2. Pre-fetch respondent IDs for this survey (uses idx_respondents_survey_id)
+            // 2. Pre-fetch respondent IDs for this survey (parallel page loading)
             let respMap = new Map<number, any>();
             if (surveyId) {
-                let rPage = 0;
-                while (true) {
-                    const { data: rBat } = await supabase
-                        .from('respondents')
-                        .select('id, location, faculty, study_program')
-                        .eq('survey_id', surveyId)
-                        .range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                    if (!rBat || rBat.length === 0) break;
-                    rBat.forEach((r: any) => respMap.set(r.id, r));
-                    if (rBat.length < 1000) break;
-                    rPage++;
+                const firstPage = await supabase
+                    .from('respondents')
+                    .select('id, location, faculty, study_program')
+                    .eq('survey_id', surveyId)
+                    .range(0, 999);
+                (firstPage.data || []).forEach((r: any) => respMap.set(r.id, r));
+
+                if (firstPage.data && firstPage.data.length === 1000) {
+                    const { count: totalResps } = await supabase.from('respondents')
+                        .select('*', { count: 'exact', head: true }).eq('survey_id', surveyId);
+                    const extraPages = Math.ceil(((totalResps || 1000) - 1000) / 1000);
+                    const rest = await Promise.all(
+                        Array.from({ length: extraPages }, (_, i) =>
+                            supabase.from('respondents')
+                                .select('id, location, faculty, study_program')
+                                .eq('survey_id', surveyId)
+                                .range((i + 1) * 1000, (i + 2) * 1000 - 1)
+                        )
+                    );
+                    for (const pg of rest) (pg.data || []).forEach((r: any) => respMap.set(r.id, r));
                 }
             }
             const respIds = Array.from(respMap.keys());
@@ -153,21 +176,27 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 let allData: any[] = [];
 
                 if (respIds.length > 0) {
-                    // With survey: chunk by respondent IDs (fast, uses idx_rfi_respondent_unit_analysis)
-                    for (let i = 0; i < respIds.length; i += CHUNK) {
-                        const chunk = respIds.slice(i, i + CHUNK);
-                        let q = supabase.from('raw_feedback_inputs')
-                            .select(select)
-                            .eq('target_unit_id', unitId)
-                            .in('respondent_id', chunk);
-                        q = filterFn(q);
-                        const { data, error } = await q;
-                        if (error) {
-                            console.error(`🔴 Supabase chunk error:`, error);
-                            toast.error(`Data fetch warning: ${error.message}`);
-                            continue;
-                        }
-                        if (data) allData.push(...data);
+                    // With survey: chunk by respondent IDs, fire up to 5 chunks in parallel
+                    const MAX_CONCURRENT = 5;
+                    const chunks: number[][] = [];
+                    for (let i = 0; i < respIds.length; i += CHUNK) chunks.push(respIds.slice(i, i + CHUNK));
+
+                    for (let b = 0; b < chunks.length; b += MAX_CONCURRENT) {
+                        const batch = chunks.slice(b, b + MAX_CONCURRENT);
+                        const results = await Promise.all(batch.map(async (chunk) => {
+                            let q = supabase.from('raw_feedback_inputs')
+                                .select(select)
+                                .eq('target_unit_id', unitId)
+                                .in('respondent_id', chunk);
+                            const { data, error } = await filterFn(q);
+                            if (error) {
+                                console.error(`🔴 Supabase chunk error:`, error);
+                                toast.error(`Data fetch warning: ${error.message}`);
+                                return [];
+                            }
+                            return data || [];
+                        }));
+                        for (const result of results) allData.push(...result);
                     }
                 } else {
                     // No survey: keyset pagination fallback
@@ -212,21 +241,30 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
 
             console.log(`✅ Loaded: ${qData.length} qualitative, ${sData.length} quantitative`);
 
-            // 5. Fetch verification stats
+            // 5. Fetch verification stats — all chunks fired simultaneously
             const allInputIds = qData.map((r: any) => r.id);
-            let vCount = 0;
-            let tSegCount = 0;
-            for (let i = 0; i < allInputIds.length; i += 200) {
-                const chunk = allInputIds.slice(i, i + 200);
-                const [vRes, tRes] = await Promise.all([
-                    supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).eq('is_verified', true).in('raw_input_id', chunk),
-                    supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk)
-                ]);
-                vCount += (vRes.count || 0);
-                tSegCount += (tRes.count || 0);
+            const STAT_CHUNK = 500;
+            const statChunks: number[][] = [];
+            for (let i = 0; i < allInputIds.length; i += STAT_CHUNK) statChunks.push(allInputIds.slice(i, i + STAT_CHUNK));
+
+            if (statChunks.length > 0) {
+                const statResults = await Promise.all(
+                    statChunks.map(chunk => Promise.all([
+                        supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).eq('is_verified', true).in('raw_input_id', chunk),
+                        supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk)
+                    ]))
+                );
+                let vCount = 0, tSegCount = 0;
+                for (const [vRes, tRes] of statResults) {
+                    vCount += vRes.count || 0;
+                    tSegCount += tRes.count || 0;
+                }
+                setVerifiedCount(vCount);
+                setTotalSegmentCount(tSegCount);
+            } else {
+                setVerifiedCount(0);
+                setTotalSegmentCount(0);
             }
-            setVerifiedCount(vCount);
-            setTotalSegmentCount(tSegCount);
 
             // csData is the same rows as qData (qualitative non-quant), just used for categorical score grouping
             // No need for a separate fetch — reuse qData
@@ -302,8 +340,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                     }
                     if (s.sentiment === 'Negative') catCountsMap[s.category_id].true_negative_count += 1;
 
-                    // Now apply sentiment filter
+                    // Now apply sentiment + category filters
                     if (activeFilters.sentiment.length && !activeFilters.sentiment.includes(s.sentiment)) return;
+                    if (activeFilters.category.length && !activeFilters.category.includes(catName)) return;
 
                     totalSegments++;
                     sentimentCounts[s.sentiment as keyof typeof sentimentCounts] += 1;
@@ -467,11 +506,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
         });
     }
 
-    const randomQuotes = allSegments
-        .filter(s => s.segment_text.length > 20 && s.segment_text.length < 150)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 8);
-
     const pieData = [
         { name: 'Positive', value: sentimentCounts.Positive, color: '#22c55e' },
         { name: 'Neutral', value: sentimentCounts.Neutral, color: '#94a3b8' },
@@ -580,6 +614,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 activeFilters={activeFilters}
                 setActiveFilters={setActiveFilters}
                 filterOptions={filterOptions}
+                categories={categories}
             />
 
             {/* --- SUB TABS NAVIGATION --- */}
@@ -634,20 +669,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                             <CardContent><div className="text-xs text-red-700 dark:text-red-400/80"><strong>{topNegativeCategory.count}</strong> negative comments {sentimentCounts.Negative > 0 && <span className="text-red-500 dark:text-red-500/70">({Math.round(topNegativeCategory.count / sentimentCounts.Negative * 100)}% of all negatives)</span>}</div></CardContent>
                         </Card>
                     </div>
-
-                    {/* --- CAROUSEL --- */}
-                    {randomQuotes.length > 0 && (
-                        <div className="bg-slate-900 text-slate-200 p-3 rounded-lg overflow-hidden relative shadow-inner">
-                            <div className="flex items-center gap-4 animate-marquee whitespace-nowrap">
-                                <span className="font-bold text-indigo-400 text-xs flex items-center gap-2 px-4 border-r border-slate-700">LIVE FEED</span>
-                                {randomQuotes.map((q, i) => (
-                                    <span key={i} className="mx-8 text-sm italic opacity-80 flex items-center gap-2">
-                                        <span className={`w-2 h-2 rounded-full ${q.sentiment === 'Positive' ? 'bg-green-400' : q.sentiment === 'Negative' ? 'bg-red-400' : 'bg-slate-400'}`} /> &ldquo;{q.segment_text}&rdquo;
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                     {/* --- OVERALL SENTIMENT OVERVIEW --- */}
                     <div className="space-y-4">
@@ -710,6 +731,68 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                             </Card>
                         </div>
                     )}
+
+                    {/* --- INCOMING CROSS-UNIT MENTIONS --- */}
+                    {surveyId && (incomingLoading || (incomingMentions && incomingMentions.total_mentions > 0)) && (
+                        <div className="space-y-4 pt-4">
+                            <div className="flex items-center gap-2 pb-2 border-b border-amber-200 dark:border-amber-900/40">
+                                <GitCompareArrows className="w-5 h-5 text-amber-500" />
+                                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Mentioned By Other Units</h2>
+                                {!incomingLoading && incomingMentions && (
+                                    <Badge variant="outline" className="ml-2 border-amber-200 text-amber-700 bg-amber-50 dark:border-amber-900/40 dark:text-amber-400 dark:bg-amber-950/20 text-[10px]">
+                                        {incomingMentions.total_mentions} mention{incomingMentions.total_mentions !== 1 ? "s" : ""}
+                                    </Badge>
+                                )}
+                            </div>
+                            <Card className="shadow-md border-amber-100 dark:border-amber-900/30 bg-amber-50/30 dark:bg-amber-950/10">
+                                <CardHeader className="pb-2 pt-4">
+                                    <CardDescription className="dark:text-slate-400">
+                                        Feedback from other units&apos; respondents that referenced {unitName}.
+                                        These are issues or praises directed at this unit but captured in a different unit&apos;s analysis.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-3">
+                                    {incomingLoading ? (
+                                        <div className="flex items-center gap-2 text-slate-400 py-2">
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            <span className="text-sm">Loading incoming mentions…</span>
+                                        </div>
+                                    ) : incomingMentions?.sources?.length > 0 ? (
+                                        <>
+                                            <div className="space-y-2">
+                                                {incomingMentions.sources.map((src: any) => {
+                                                    const posPct = src.total > 0 ? (src.positive / src.total) * 100 : 0;
+                                                    const negPct = src.total > 0 ? (src.negative / src.total) * 100 : 0;
+                                                    const neuPct = src.total > 0 ? (src.neutral / src.total) * 100 : 0;
+                                                    return (
+                                                        <div key={src.source_unit_id} className="flex items-center gap-3 py-1.5">
+                                                            <span className="text-sm text-slate-700 dark:text-slate-300 w-40 shrink-0 truncate" title={src.source_unit_name}>
+                                                                {src.source_unit_name}
+                                                            </span>
+                                                            <div className="flex-1 h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                                                                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${posPct}%` }} />
+                                                                <div className="h-full bg-slate-300 dark:bg-slate-600 transition-all" style={{ width: `${neuPct}%` }} />
+                                                                <div className="h-full bg-red-500 transition-all" style={{ width: `${negPct}%` }} />
+                                                            </div>
+                                                            <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-8 text-right tabular-nums shrink-0">
+                                                                {src.total}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="flex gap-4 pt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-amber-100 dark:border-amber-900/30">
+                                                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />{incomingMentions.positive_count} positive</span>
+                                                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600 inline-block" />{incomingMentions.neutral_count} neutral</span>
+                                                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{incomingMentions.negative_count} negative</span>
+                                                <span className="ml-auto text-slate-400">{incomingMentions.source_unit_count} source unit{incomingMentions.source_unit_count !== 1 ? "s" : ""}</span>
+                                            </div>
+                                        </>
+                                    ) : null}
+                                </CardContent>
+                            </Card>
+                        </div>
+                    )}
                 </TabsContent>
 
                 {/* TAB B: QUALITATIVE INSIGHTS */}
@@ -734,8 +817,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                     <RawDataExplorer
                         rawDataTab={rawDataTab}
                         setRawDataTab={setRawDataTab}
-                        showRawData={true} // Always open in its dedicated tab
-                        setShowRawData={() => { }} // Not toggleable when in its own tab
+                        showRawData={true}
+                        setShowRawData={() => { }}
                         rawDataPage={rawDataPage}
                         setRawDataPage={setRawDataPage}
                         rawDataSearch={rawDataSearch}

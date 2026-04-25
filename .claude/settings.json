@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(xargs grep *)",
-      "mcp__claude_ai_Supabase__list_projects"
+      "mcp__claude_ai_Supabase__list_projects",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(git push *)",
+      "Bash(grep -E \"\\\\.tsx?$\")",
+      "Bash(npx tsc *)",
+      "Bash(npx next *)"
     ]
   }
 }

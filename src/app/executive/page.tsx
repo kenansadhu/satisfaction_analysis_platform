@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/layout/PageShell";
-import { MetricCard } from "@/components/analytics/ExecutiveStats";
 import { SentimentHeatmap, LeaderBoard } from "@/components/analytics/SentimentHeatmap";
 import { IssuesRadar } from "@/components/analytics/IssuesRadar";
 import { PraisesRadar } from "@/components/analytics/PraisesRadar";
-import { DependencyGraph } from "@/components/analytics/DependencyGraph";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database } from "lucide-react";
+import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
+import { ActionPriorityMatrix } from "@/components/analytics/ActionPriorityMatrix";
+import FacultyRollup from "@/components/executive/FacultyRollup";
+import CrossUnitMentions from "@/components/analytics/CrossUnitMentions";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, GraduationCap, Share2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
@@ -123,86 +125,138 @@ export default function ExecutiveDashboard() {
                         <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
                         </TabsTrigger>
+                        <TabsTrigger value="faculty" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <GraduationCap className="w-4 h-4 text-teal-500" /> Faculty
+                        </TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="report" className="mt-6 focus-visible:ring-0">
                         <SSIReport surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
                     </TabsContent>
 
-                    <TabsContent value="insights" className="space-y-8 mt-0 focus-visible:ring-0">
+                    <TabsContent value="insights" className="space-y-6 mt-0 focus-visible:ring-0">
 
-                        {/* 1. KEY METRICS ROW */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <MetricCard
-                                title="Overall Sentiment Score"
-                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : overallScore}
-                                description={overallScore >= 70 ? "Healthy Institution" : overallScore >= 50 ? "Needs Attention" : "Critical Condition"}
-                                trend={overallScore >= 70 ? "up" : overallScore >= 50 ? "flat" : "down"}
-                                trendValue="Global Avg"
-                                icon={Activity}
-                                colorClass="text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30"
-                            />
-                            <MetricCard
-                                title="Total Feedback Volume"
-                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : totalComments.toLocaleString()}
-                                description="Analyzed comments"
-                                icon={MessageSquareQuote}
-                                colorClass="text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30"
-                            />
-                            <MetricCard
-                                title="Issues Detected"
-                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : criticalIssues.toLocaleString()}
-                                description="Negative sentiments"
-                                trend="down"
-                                trendValue="Action Req."
-                                icon={AlertTriangle}
-                                colorClass="text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30"
-                            />
-                            <MetricCard
-                                title="Active Units"
-                                value={loading ? <Loader2 className="w-5 h-5 animate-spin" /> : units.filter(u => u.total > 0).length}
-                                description={`out of ${units.length} total units`}
-                                icon={Users}
-                                colorClass="text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/30"
-                            />
+                        {/* 1. DARK HERO STRIP */}
+                        <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-7 shadow-lg">
+                            <div className="absolute -top-10 -right-10 w-56 h-56 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+                            <div className="absolute -bottom-8 left-1/3 w-40 h-40 bg-violet-500/15 rounded-full blur-3xl pointer-events-none" />
+                            <div className="relative grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
+                                {/* Big score — spans 2 of 5 cols */}
+                                <div className="lg:col-span-2 flex flex-col justify-center py-2 pr-4 lg:border-r lg:border-white/10">
+                                    <p className="text-xs font-semibold text-indigo-300 uppercase tracking-widest mb-4">Overall Sentiment Score</p>
+                                    <div className="flex items-end gap-4">
+                                        {loading
+                                            ? <Loader2 className="w-16 h-16 animate-spin text-indigo-400" />
+                                            : <span className="text-8xl font-black text-white leading-none tabular-nums">{overallScore}</span>
+                                        }
+                                        <div className="mb-2 space-y-1.5">
+                                            <span className="text-3xl text-indigo-300 font-light">/100</span>
+                                            <p className={`text-sm font-semibold ${overallScore >= 70 ? "text-emerald-400" : overallScore >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                                                {overallScore >= 70 ? "Healthy Institution" : overallScore >= 50 ? "Needs Attention" : "Critical Condition"}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Feedback */}
+                                <div className="bg-white/5 rounded-xl p-5 border border-white/10 flex flex-col justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <MessageSquareQuote className="w-4 h-4 text-purple-400 shrink-0" />
+                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Feedback</p>
+                                    </div>
+                                    <p className="text-4xl font-black text-white mt-3 tabular-nums">{loading ? "—" : totalComments.toLocaleString()}</p>
+                                    <p className="text-xs text-slate-500 mt-2">comments analyzed</p>
+                                </div>
+
+                                {/* Issues */}
+                                <div className="bg-white/5 rounded-xl p-5 border border-white/10 flex flex-col justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Issues</p>
+                                    </div>
+                                    <p className="text-4xl font-black text-red-400 mt-3 tabular-nums">{loading ? "—" : criticalIssues.toLocaleString()}</p>
+                                    <p className="text-xs text-slate-500 mt-2">negative sentiments</p>
+                                </div>
+
+                                {/* Active Units */}
+                                <div className="bg-white/5 rounded-xl p-5 border border-white/10 flex flex-col justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Users className="w-4 h-4 text-emerald-400 shrink-0" />
+                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Units</p>
+                                    </div>
+                                    <div className="mt-3">
+                                        <span className="text-4xl font-black text-white tabular-nums">{loading ? "—" : units.filter(u => u.total > 0).length}</span>
+                                        {!loading && <span className="text-xl font-normal text-slate-500">/{units.length}</span>}
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-2">with feedback data</p>
+                                </div>
+                            </div>
                         </div>
 
-                        {/* 2. STRATEGIC INSIGHTS */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            <div>
-                                <PraisesRadar
-                                    surveyId={selectedSurvey}
-                                    maxDomain={maxRadarDomain}
-                                    onMaxCalculated={setPraisesMax}
-                                />
+                        {/* 2. STRATEGIC SIGNALS — violet tinted band */}
+                        <div className="bg-violet-50/60 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/40 rounded-2xl p-5 space-y-5">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-violet-500" />
+                                <h2 className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-widest">Strategic Signals</h2>
+                                <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Top praised and flagged categories across units</span>
                             </div>
-                            <div>
-                                <IssuesRadar
-                                    surveyId={selectedSurvey}
-                                    maxDomain={maxRadarDomain}
-                                    onMaxCalculated={setIssuesMax}
-                                />
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <PraisesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setPraisesMax} />
+                                <IssuesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setIssuesMax} />
                             </div>
                         </div>
 
-                        {/* 3. LEADERBOARDS & HEATMAP */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            <div className="space-y-6">
+                        {/* 3. CROSS-UNIT BENCHMARKS — sky tinted band */}
+                        {selectedSurvey && selectedSurvey !== "all" && (
+                            <div className="bg-sky-50/60 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/40 rounded-2xl p-5 space-y-5">
+                                <div className="flex items-center gap-2">
+                                    <BarChart2 className="w-4 h-4 text-sky-500" />
+                                    <h2 className="text-xs font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-widest">Cross-Unit Benchmarks</h2>
+                                    <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Categories tracked across all units — ranked by positive sentiment</span>
+                                </div>
+                                <CategoryInsightPanels surveyId={selectedSurvey} hideHeader />
+                            </div>
+                        )}
+
+                        {/* 4. ACTION PRIORITY MATRIX */}
+                        <ActionPriorityMatrix units={units} />
+
+                        {/* 5. CROSS-UNIT TRAFFIC — orange tinted band */}
+                        {selectedSurvey && selectedSurvey !== "all" && (
+                            <div className="bg-orange-50/60 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/40 rounded-2xl p-5 space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <Share2 className="w-4 h-4 text-orange-500" />
+                                    <h2 className="text-xs font-semibold text-orange-700 dark:text-orange-300 uppercase tracking-widest">Cross-Unit Traffic</h2>
+                                    <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Units most referenced across other units&apos; feedback</span>
+                                </div>
+                                <CrossUnitMentions surveyId={selectedSurvey} hideHeader />
+                            </div>
+                        )}
+
+                        {/* 6. UNIT PERFORMANCE — bento: leaderboards side by side, heatmap full-width below */}
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2">
+                                <Activity className="w-4 h-4 text-slate-400" />
+                                <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Unit Performance</h2>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <LeaderBoard title="🏆 Top Performing Units" units={units} type="top" loading={loading} />
                                 <LeaderBoard title="⚠️ Units Needing Attention" units={units} type="bottom" loading={loading} />
                             </div>
-                            <div className="lg:col-span-2 space-y-8">
-                                {loading ? (
-                                    <div className="h-96 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-xl animate-pulse backdrop-blur-sm border border-white/20" />
-                                ) : (
-                                    <SentimentHeatmap units={units} />
-                                )}
-                            </div>
+                            {loading ? (
+                                <div className="h-96 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-xl animate-pulse backdrop-blur-sm border border-white/20" />
+                            ) : (
+                                <SentimentHeatmap units={units} surveyId={selectedSurvey ?? undefined} />
+                            )}
                         </div>
                     </TabsContent>
 
                     <TabsContent value="comparison" className="mt-6 focus-visible:ring-0">
                         <YearComparison surveys={surveys as any} />
+                    </TabsContent>
+
+                    <TabsContent value="faculty" className="mt-6 focus-visible:ring-0">
+                        <FacultyRollup surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
                     </TabsContent>
                 </Tabs>
             </div>

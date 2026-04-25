@@ -366,7 +366,7 @@ export async function GET(req: NextRequest) {
         totalEnrolled,
         responseRate: totalEnrolled > 0 ? parseFloat((respList.length / totalEnrolled * 100).toFixed(1)) : null,
         campusParticipation,
-        prodiParticipation: prodiParticipationEnriched.slice(0, 100),
+        prodiParticipation: prodiParticipationEnriched.slice(0, 150),
         globalSatisfactionIndex: globalCount > 0 ? parseFloat((globalSum / globalCount).toFixed(2)) : null,
         campusSatisfaction,
         campuses: allCampuses,

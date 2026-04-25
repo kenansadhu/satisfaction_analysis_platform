@@ -14,55 +14,59 @@ export async function POST(req: Request) {
         }
         const { jobId, unitId, surveyId, skipIds } = parsed.data;
 
-        // 1. Fetch Job
-        const { data: job, error: jobErr } = await supabase.from('analysis_jobs').select('*').eq('id', jobId).single();
+        // 1–3. Fetch all static data in parallel (job, unit, instructions, categories, allUnits)
+        const [
+            { data: job, error: jobErr },
+            { data: unit },
+            { data: instrRows },
+            { data: categories },
+            { data: allUnits },
+        ] = await Promise.all([
+            supabase.from('analysis_jobs').select('*').eq('id', jobId).single(),
+            supabase.from('organization_units').select('*').eq('id', unitId).single(),
+            supabase.from('unit_analysis_instructions').select('instruction').eq('unit_id', unitId),
+            supabase.from('analysis_categories').select('*').eq('unit_id', unitId),
+            supabase.from('organization_units').select('id, name, short_name, description'),
+        ]);
+
         if (jobErr || !job) {
             return NextResponse.json({ error: "Job not found" }, { status: 404 });
         }
         if (job.status === 'COMPLETED' || job.status === 'FAILED') {
             return NextResponse.json({ hasMore: false, processedIds: [] });
         }
-
-        // 2. Fetch Unit Details (name, description, custom rules)
-        const { data: unit } = await supabase.from('organization_units').select('*').eq('id', unitId).single();
         if (!unit) {
             return NextResponse.json({ error: "Unit not found" }, { status: 404 });
         }
-
-        // Fetch custom analysis instructions
-        const { data: instrRows } = await supabase
-            .from('unit_analysis_instructions')
-            .select('instruction')
-            .eq('unit_id', unitId);
-        const customInstructions = instrRows?.map((r: any) => r.instruction) || [];
-
-        // 3. Fetch Taxonomy (Categories for this unit)
-        const { data: categories } = await supabase.from('analysis_categories').select('*').eq('unit_id', unitId);
         if (!categories || categories.length === 0) {
             return NextResponse.json({ error: "Cannot process without defined taxonomy" }, { status: 400 });
         }
 
-        // Also fetch all other units WITH descriptions for intelligent cross-tagging
-        const { data: allUnits } = await supabase.from('organization_units').select('id, name, short_name, description');
+        const customInstructions = instrRows?.map((r: any) => r.instruction) || [];
 
         // 4. Find the NEXT Batch of Comments (up to 50)
         let rawItems: any[] = [];
         const BATCH_SIZE = 50;
 
         if (surveyId) {
-            // Safe filtered fetching via respondent IDs
-            let respIds: number[] = [];
-            let rPage = 0;
-            while (true) {
-                const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                if (!rBat || rBat.length === 0) break;
-                respIds.push(...rBat.map((r: any) => r.id));
-                if (rBat.length < 1000) break;
-                rPage++;
+            // Fetch respondent IDs with parallel page loading
+            const firstPage = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(0, 999);
+            let respIds: number[] = (firstPage.data || []).map((r: any) => r.id);
+
+            if (firstPage.data && firstPage.data.length === 1000) {
+                const { count: totalResps } = await supabase.from('respondents')
+                    .select('*', { count: 'exact', head: true }).eq('survey_id', surveyId);
+                const extraPages = Math.ceil(((totalResps || 1000) - 1000) / 1000);
+                const rest = await Promise.all(
+                    Array.from({ length: extraPages }, (_, i) =>
+                        supabase.from('respondents').select('id').eq('survey_id', surveyId).range((i + 1) * 1000, (i + 2) * 1000 - 1)
+                    )
+                );
+                for (const page of rest) respIds.push(...(page.data || []).map((r: any) => r.id));
             }
 
             if (respIds.length > 0) {
-                const CHUNK = 200;
+                const CHUNK = 500;
                 for (let i = 0; i < respIds.length; i += CHUNK) {
                     if (rawItems.length >= BATCH_SIZE) break;
 

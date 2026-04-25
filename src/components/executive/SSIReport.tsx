@@ -6,6 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+    ResponsiveContainer, ReferenceLine, Cell,
+} from "recharts";
+import {
     Users, MapPin, GraduationCap, BarChart3, TrendingUp, TrendingDown,
     Minus, MessageSquare, ThumbsUp, ThumbsDown,
     AlertCircle, Lightbulb, FileText, Award, ArrowUpDown, Hash, Percent,
@@ -451,6 +455,74 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* === SECTION 1b: RESPONSE RATE BY FACULTY === */}
+            {(() => {
+                // Aggregate prodiParticipation by faculty
+                const facMap = new Map<string, { respondents: number; enrolled: number }>();
+                for (const pp of prodiParticipation) {
+                    const fac = pp.faculty || "Unknown";
+                    if (!facMap.has(fac)) facMap.set(fac, { respondents: 0, enrolled: 0 });
+                    const e = facMap.get(fac)!;
+                    e.respondents += pp.respondents;
+                    if (pp.enrolled) e.enrolled += pp.enrolled;
+                }
+                const facData = Array.from(facMap.entries())
+                    .map(([faculty, d]) => ({
+                        faculty,
+                        ...d,
+                        rate: d.enrolled > 0 ? parseFloat((d.respondents / d.enrolled * 100).toFixed(1)) : null,
+                    }))
+                    .filter(f => f.rate !== null)
+                    .sort((a, b) => (b.rate || 0) - (a.rate || 0));
+
+                if (facData.length < 2) return null;
+
+                const avgRate = facData.reduce((s, f) => s + (f.rate || 0), 0) / facData.length;
+                const barColor = (rate: number | null) => {
+                    if (!rate) return "#94a3b8";
+                    if (rate >= avgRate * 1.1) return "#10b981";
+                    if (rate >= avgRate * 0.9) return "#f59e0b";
+                    return "#ef4444";
+                };
+
+                return (
+                    <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                        <div className="h-1 bg-gradient-to-r from-teal-500 to-cyan-400" />
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-base">
+                                <Target className="w-5 h-5 text-teal-600" /> Response Rate by Faculty
+                            </CardTitle>
+                            <CardDescription>
+                                Dashed line = institutional average ({avgRate.toFixed(1)}%).
+                                Green ≥ 110% of avg · Amber within 10% · Red below 90%.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="h-56">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={facData} margin={{ top: 5, right: 10, left: -10, bottom: 40 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                                        <XAxis dataKey="faculty" tick={{ fontSize: 11, fill: "#64748b" }} angle={-20} textAnchor="end" height={50} interval={0} />
+                                        <YAxis unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                                        <Tooltip
+                                            formatter={(v: any) => [`${Number(v).toFixed(1)}%`, "Response Rate"]}
+                                            contentStyle={{ borderRadius: 10, border: "none", boxShadow: "0 4px 24px rgba(0,0,0,0.1)", fontSize: 12 }}
+                                        />
+                                        <ReferenceLine y={avgRate} stroke="#6366f1" strokeDasharray="5 4" strokeWidth={1.5}
+                                            label={{ value: `avg ${avgRate.toFixed(1)}%`, position: "right", fontSize: 10, fill: "#6366f1" }} />
+                                        <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
+                                            {facData.map((entry, i) => (
+                                                <Cell key={i} fill={barColor(entry.rate)} />
+                                            ))}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </CardContent>
+                    </Card>
+                );
+            })()}
 
             {/* === SECTION 2: SATISFACTION INDEX OVERVIEW TABLE === */}
             <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
