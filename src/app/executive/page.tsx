@@ -8,14 +8,17 @@ import { IssuesRadar } from "@/components/analytics/IssuesRadar";
 import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
 import { ActionPriorityMatrix } from "@/components/analytics/ActionPriorityMatrix";
-import FacultyRollup from "@/components/executive/FacultyRollup";
 import CrossUnitMentions from "@/components/analytics/CrossUnitMentions";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, GraduationCap, Share2 } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Save, Lightbulb, TrendingUp, Share2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
 import YearComparison from "@/components/executive/YearComparison";
 import SSIReport from "@/components/executive/SSIReport";
+import AIAnalystChat from "@/components/analysis/AIAnalystChat";
+import SavedChartsTab from "@/components/executive/SavedChartsTab";
+import SuggestionHub from "@/components/executive/SuggestionHub";
+import { DependencyGraph } from "@/components/analytics/DependencyGraph";
 import { useActiveSurvey } from "@/context/SurveyContext";
 
 type UnitPerformance = {
@@ -100,8 +103,8 @@ export default function ExecutiveDashboard() {
     return (
         <div className="min-h-full bg-slate-50 dark:bg-slate-950 pb-20 transition-colors">
             <PageHeader
-                title="Executive Overview"
-                description="High-level performance metrics across the institution."
+                title="Executive Insights"
+                description="High-level performance metrics, AI analysis, and actionable intelligence across the institution."
                 actions={
                     activeSurvey ? (
                         <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-lg border border-indigo-200/50 dark:border-indigo-800/40">
@@ -116,17 +119,26 @@ export default function ExecutiveDashboard() {
             <div className="max-w-7xl mx-auto px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <Tabs defaultValue="report" className="w-full">
                     <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden">
-                        <TabsTrigger value="report" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                        <TabsTrigger value="report" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <FileText className="w-4 h-4 text-emerald-500" /> Report
                         </TabsTrigger>
-                        <TabsTrigger value="insights" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                        <TabsTrigger value="insights" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <BarChart2 className="w-4 h-4 text-purple-500" /> Insights
                         </TabsTrigger>
-                        <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                        <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
                         </TabsTrigger>
-                        <TabsTrigger value="faculty" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <GraduationCap className="w-4 h-4 text-teal-500" /> Faculty
+                        <TabsTrigger value="analyst" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Sparkles className="w-4 h-4 text-purple-500" /> AI Analyst
+                        </TabsTrigger>
+                        <TabsTrigger value="saved" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Save className="w-4 h-4" /> Saved
+                        </TabsTrigger>
+                        <TabsTrigger value="suggestions" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Lightbulb className="w-4 h-4 text-amber-500" /> Suggestions
+                        </TabsTrigger>
+                        <TabsTrigger value="depmap" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <TrendingUp className="w-4 h-4 text-indigo-500" /> Dependency Map
                         </TabsTrigger>
                     </TabsList>
 
@@ -255,8 +267,26 @@ export default function ExecutiveDashboard() {
                         <YearComparison surveys={surveys as any} />
                     </TabsContent>
 
-                    <TabsContent value="faculty" className="mt-6 focus-visible:ring-0">
-                        <FacultyRollup surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    <TabsContent value="analyst" className="focus-visible:ring-0">
+                        <AIAnalystChat
+                            surveyId={selectedSurvey === "all" ? undefined : selectedSurvey}
+                            macroData={[]}
+                            onChartSaved={() => {}}
+                        />
+                    </TabsContent>
+
+                    <TabsContent value="saved" className="focus-visible:ring-0">
+                        <SavedChartsTab />
+                    </TabsContent>
+
+                    <TabsContent value="suggestions" className="focus-visible:ring-0">
+                        <SuggestionHub surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    </TabsContent>
+
+                    <TabsContent value="depmap" className="focus-visible:ring-0 animate-in fade-in">
+                        <div className="h-[600px] w-full bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <DependencyGraph surveyId={selectedSurvey || "all"} />
+                        </div>
                     </TabsContent>
                 </Tabs>
             </div>

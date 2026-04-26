@@ -63,21 +63,25 @@ const CustomTooltip = ({ active, payload, label, avg }: any) => {
     );
 };
 
-export default function FacultyRollup({ surveyId }: { surveyId?: string }) {
-    const [faculties, setFaculties] = useState<FacultyData[]>([]);
+export default function FacultyRollup({ surveyId, facultyFilter }: { surveyId?: string; facultyFilter?: string }) {
+    const [allFaculties, setAllFaculties] = useState<FacultyData[]>([]);
     const [loading, setLoading] = useState(false);
     const [fromCache, setFromCache] = useState(false);
 
+    const faculties = facultyFilter
+        ? allFaculties.filter(f => f.faculty === facultyFilter)
+        : allFaculties;
+
     useEffect(() => {
-        if (!surveyId) { setFaculties([]); return; }
+        if (!surveyId) { setAllFaculties([]); return; }
         setLoading(true);
         fetch(`/api/executive/faculty-rollup?surveyId=${surveyId}`)
             .then(r => r.json())
             .then(data => {
-                setFaculties(data.faculties || []);
+                setAllFaculties(data.faculties || []);
                 setFromCache(data.fromCache || false);
             })
-            .catch(() => setFaculties([]))
+            .catch(() => setAllFaculties([]))
             .finally(() => setLoading(false));
     }, [surveyId]);
 

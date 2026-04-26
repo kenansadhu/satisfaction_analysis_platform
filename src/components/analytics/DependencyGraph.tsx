@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Network, ArrowRight } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+// Explicitly resolve .default to handle both CJS and ESM builds
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ForceGraph2D = dynamic(() => import("react-force-graph-2d").then(m => (m as any).default || m), { ssr: false }) as any;
 
 interface CrossMention {
     sourceId: number;
@@ -14,98 +16,39 @@ interface CrossMention {
     count: number;
 }
 
+interface GraphNode {
+    id: string;
+    name: string;
+    received: number;
+    sent: number;
+    val: number;
+    x?: number;
+    y?: number;
+}
+
 export function DependencyGraph({ surveyId }: { surveyId: string }) {
     const [mentions, setMentions] = useState<CrossMention[]>([]);
     const [loading, setLoading] = useState(true);
-    const [hoveredRow, setHoveredRow] = useState<number | null>(null);
-    const [hoveredCell, setHoveredCell] = useState<{ s: number; t: number } | null>(null);
+    const [isClient, setIsClient] = useState(false);
+    const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [dimensions, setDimensions] = useState({ width: 800, height: 460 });
+
+    useEffect(() => { setIsClient(true); }, []);
 
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                let segments: any[] = [];
-
-                if (surveyId === "all") {
-                    const { data } = await supabase
-                        .from('feedback_segments')
-                        .select('related_unit_ids, raw_input_id')
-                        .not('related_unit_ids', 'is', null);
-                    segments = data || [];
-                } else {
-                    // Fetch respondents → inputs → segments
-                    let respIds: number[] = [];
-                    let rPage = 0;
-                    while (true) {
-                        const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', parseInt(surveyId)).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                        if (!rBat || rBat.length === 0) break;
-                        respIds.push(...rBat.map((r: any) => r.id));
-                        if (rBat.length < 1000) break;
-                        rPage++;
-                    }
-
-                    if (respIds.length > 0) {
-                        let inputs: any[] = [];
-                        const CHUNK = 400;
-                        for (let i = 0; i < respIds.length; i += CHUNK) {
-                            const chunk = respIds.slice(i, i + CHUNK);
-                            const { data: iBat } = await supabase.from('raw_feedback_inputs').select('id, target_unit_id').in('respondent_id', chunk);
-                            if (iBat) inputs.push(...iBat);
-                        }
-                        const inputMap = new Map(inputs.map((i: any) => [i.id, i]));
-                        const inputIds = inputs.map((i: any) => i.id);
-
-                        if (inputIds.length > 0) {
-                            for (let i = 0; i < inputIds.length; i += CHUNK) {
-                                const chunk = inputIds.slice(i, i + CHUNK);
-                                const { data } = await supabase
-                                    .from('feedback_segments')
-                                    .select('related_unit_ids, raw_input_id')
-                                    .not('related_unit_ids', 'is', null)
-                                    .in('raw_input_id', chunk);
-                                if (data) {
-                                    segments.push(...data.map((d: any) => ({
-                                        related_unit_ids: d.related_unit_ids,
-                                        target_unit_id: inputMap.get(d.raw_input_id)?.target_unit_id
-                                    })));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (!segments.length) { setMentions([]); return; }
-
-                const { data: unitsData } = await supabase.from('organization_units').select('id, name, short_name');
-                const unitsMap = new Map((unitsData || []).map(u => [u.id, { name: u.name, short: u.short_name || u.name.split(' ')[0] }]));
-
-                // Build cross-mention count map
-                const countMap = new Map<string, number>();
-                for (const seg of segments) {
-                    const sourceId = seg.target_unit_id;
-                    const related = seg.related_unit_ids;
-                    if (!sourceId || !related || !Array.isArray(related)) continue;
-                    for (const targetId of related) {
-                        if (targetId !== sourceId) {
-                            const key = `${sourceId}::${targetId}`;
-                            countMap.set(key, (countMap.get(key) || 0) + 1);
-                        }
-                    }
-                }
-
-                const result: CrossMention[] = [];
-                for (const [key, count] of countMap.entries()) {
-                    const [sId, tId] = key.split('::').map(Number);
-                    const src = unitsMap.get(sId);
-                    const tgt = unitsMap.get(tId);
-                    if (src && tgt) {
-                        result.push({ sourceId: sId, sourceName: src.short, targetId: tId, targetName: tgt.short, count });
-                    }
-                }
-                result.sort((a, b) => b.count - a.count);
-                setMentions(result);
+                const url = surveyId === 'all'
+                    ? '/api/analytics/dependency-graph'
+                    : `/api/analytics/dependency-graph?surveyId=${surveyId}`;
+                const res = await fetch(url);
+                const json = await res.json();
+                if (json.error) throw new Error(json.error);
+                setMentions(json.mentions || []);
             } catch (err) {
-                console.error("DependencyGraph fetch failed:", err);
+                console.error('DependencyGraph fetch failed:', err);
             } finally {
                 setLoading(false);
             }
@@ -113,154 +56,203 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
         fetchData();
     }, [surveyId]);
 
-    // Build matrix from mentions
-    const { unitIds, unitNames, matrix, maxCount } = useMemo(() => {
-        if (!mentions.length) return { unitIds: [], unitNames: [], matrix: [], maxCount: 0 };
 
-        const idSet = new Set<number>();
-        for (const m of mentions) { idSet.add(m.sourceId); idSet.add(m.targetId); }
-        const unitIds = Array.from(idSet);
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const obs = new ResizeObserver(entries => {
+            const { width, height } = entries[0].contentRect;
+            if (width > 0 && height > 0) setDimensions({ width, height });
+        });
+        obs.observe(containerRef.current);
+        return () => obs.disconnect();
+    }, []);
+
+    const graphData = useMemo(() => {
+        if (!mentions.length) return { nodes: [] as GraphNode[], links: [] as { source: string; target: string; value: number }[] };
+
         const nameMap = new Map<number, string>();
+        const receivedMap = new Map<number, number>();
+        const sentMap = new Map<number, number>();
+
         for (const m of mentions) {
             nameMap.set(m.sourceId, m.sourceName);
             nameMap.set(m.targetId, m.targetName);
-        }
-        const unitNames = unitIds.map(id => nameMap.get(id) || `Unit ${id}`);
-
-        const mentionMap = new Map<string, number>();
-        let maxCount = 0;
-        for (const m of mentions) {
-            mentionMap.set(`${m.sourceId}::${m.targetId}`, m.count);
-            if (m.count > maxCount) maxCount = m.count;
+            receivedMap.set(m.targetId, (receivedMap.get(m.targetId) || 0) + m.count);
+            sentMap.set(m.sourceId, (sentMap.get(m.sourceId) || 0) + m.count);
         }
 
-        const matrix = unitIds.map(sId =>
-            unitIds.map(tId => mentionMap.get(`${sId}::${tId}`) || 0)
-        );
+        const unitSet = new Set<number>();
+        for (const m of mentions) { unitSet.add(m.sourceId); unitSet.add(m.targetId); }
+        const maxReceived = Math.max(...Array.from(receivedMap.values()), 1);
 
-        return { unitIds, unitNames, matrix, maxCount };
+        const nodes: GraphNode[] = Array.from(unitSet).map(id => ({
+            id: id.toString(),
+            name: nameMap.get(id) || `Unit ${id}`,
+            received: receivedMap.get(id) || 0,
+            sent: sentMap.get(id) || 0,
+            val: Math.max(((receivedMap.get(id) || 0) / maxReceived) * 18 + 4, 4),
+        }));
+
+        const links = mentions.map(m => ({
+            source: m.sourceId.toString(),
+            target: m.targetId.toString(),
+            value: m.count,
+        }));
+
+        return { nodes, links };
     }, [mentions]);
 
-    const getColor = (count: number) => {
-        if (count === 0) return undefined;
-        const intensity = count / maxCount;
-        if (intensity > 0.7) return 'bg-indigo-600 text-white';
-        if (intensity > 0.4) return 'bg-indigo-400 text-white';
-        if (intensity > 0.2) return 'bg-indigo-200 text-indigo-900';
-        return 'bg-indigo-100 text-indigo-700';
-    };
+    const maxReceived = useMemo(() =>
+        Math.max(...graphData.nodes.map(n => n.received), 1),
+        [graphData.nodes]
+    );
 
-    const topMentions = mentions.slice(0, 5);
+    const nodeCanvasObject = useCallback((node: GraphNode & { x: number; y: number }, ctx: CanvasRenderingContext2D, globalScale: number) => {
+        const r = Math.sqrt(node.val) * 2.5 + 3;
+        const fontSize = Math.max(9, 11 / globalScale);
+        const label = node.name.length > 13 ? node.name.slice(0, 12) + '…' : node.name;
+        const isHovered = hoveredNode?.id === node.id;
+
+        if (isHovered) {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r + 5, 0, 2 * Math.PI);
+            ctx.fillStyle = 'rgba(99,102,241,0.18)';
+            ctx.fill();
+        }
+
+        const intensity = node.received / maxReceived;
+        let fillColor = '#94a3b8';
+        if (intensity > 0.7) fillColor = '#3730a3';
+        else if (intensity > 0.4) fillColor = '#6366f1';
+        else if (intensity > 0.1) fillColor = '#818cf8';
+
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+        ctx.fillStyle = fillColor;
+        ctx.globalAlpha = isHovered ? 1 : 0.9;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 1.5 / globalScale;
+        ctx.stroke();
+
+        ctx.font = `${isHovered ? 'bold ' : ''}${fontSize}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = isHovered ? '#1e293b' : '#475569';
+        ctx.fillText(label, node.x, node.y + r + 2 / globalScale);
+    }, [hoveredNode, maxReceived]);
+
+    const nodePointerAreaPaint = useCallback((node: GraphNode & { x: number; y: number }, color: string, ctx: CanvasRenderingContext2D) => {
+        const r = Math.sqrt(node.val) * 2.5 + 8;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+        ctx.fill();
+    }, []);
+
+    const topMentions = mentions.slice(0, 6);
+
+    const stats = useMemo(() => {
+        if (!graphData.nodes.length) return null;
+        const totalMentions = mentions.reduce((s, m) => s + m.count, 0);
+        const sorted = [...graphData.nodes].sort((a, b) => b.received - a.received);
+        const mostReferenced = sorted[0];
+        const mostMentioning = [...graphData.nodes].sort((a, b) => b.sent - a.sent)[0];
+        return { totalMentions, mostReferenced, mostMentioning };
+    }, [graphData.nodes, mentions]);
 
     return (
-        <Card className="border-slate-200 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900 col-span-full xl:col-span-2 flex flex-col">
-            <CardHeader className="pb-2">
-                <div className="flex items-center gap-2">
-                    <div className="p-2 bg-indigo-100 dark:bg-indigo-950/50 rounded-lg">
-                        <Network className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    </div>
-                    <div>
-                        <CardTitle className="text-base">Cross-Unit Mention Matrix</CardTitle>
-                        <CardDescription className="text-xs">
-                            When students mention one unit while responding to another — showing operational friction points.
-                        </CardDescription>
+        <div className="flex flex-col h-full gap-3 p-1">
+            {!loading && stats && (
+                <div className="shrink-0 grid grid-cols-3 gap-2">
+                    {[
+                        { label: "Total Cross-Mentions", value: stats.totalMentions, sub: "between units" },
+                        { label: "Most Referenced", value: stats.mostReferenced?.name ?? "—", sub: `${stats.mostReferenced?.received ?? 0} times referenced` },
+                        { label: "Most Mentioning", value: stats.mostMentioning?.name ?? "—", sub: `${stats.mostMentioning?.sent ?? 0} outbound mentions` },
+                    ].map(({ label, value, sub }) => (
+                        <div key={label} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl px-4 py-3">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
+                            <p className="text-base font-bold text-slate-800 dark:text-slate-100 truncate">{value}</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {!loading && topMentions.length > 0 && (
+                <div className="shrink-0 space-y-2">
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Strongest Cross-Unit Signals</p>
+                    <div className="flex flex-wrap gap-1.5">
+                        {topMentions.map((m, i) => (
+                            <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 rounded-full text-xs">
+                                <span className="font-semibold text-indigo-700 dark:text-indigo-300">{m.sourceName}</span>
+                                <ArrowRight className="w-2.5 h-2.5 text-indigo-400" />
+                                <span className="font-semibold text-indigo-700 dark:text-indigo-300">{m.targetName}</span>
+                                <Badge className="bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 border-0 text-[10px] px-1.5 py-0 h-4 ml-0.5">{m.count}</Badge>
+                            </div>
+                        ))}
                     </div>
                 </div>
-            </CardHeader>
+            )}
 
-            <CardContent className="pt-2">
+            <div ref={containerRef} className="flex-1 relative rounded-xl overflow-hidden bg-slate-50/80 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800">
                 {loading ? (
-                    <div className="h-48 flex items-center justify-center">
-                        <Loader2 className="w-6 h-6 animate-spin text-slate-300" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                        <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
+                        <p className="text-sm text-slate-400 font-medium animate-pulse">Mapping unit connections...</p>
                     </div>
                 ) : mentions.length === 0 ? (
-                    <div className="h-48 flex flex-col items-center justify-center text-slate-400 gap-3">
-                        <Network className="w-8 h-8 opacity-30" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-4 px-8">
+                        <Network className="w-12 h-12 opacity-20" />
                         <div className="text-sm text-center">
-                            <p className="font-medium">No cross-unit mentions detected</p>
-                            <p className="text-xs mt-1 text-slate-400">This appears when students reference other departments in their feedback.</p>
+                            <p className="font-semibold text-slate-500">No cross-unit mentions detected</p>
+                            <p className="text-xs mt-2 text-slate-400 max-w-xs leading-relaxed">This graph populates when students reference other departments in their feedback during AI analysis. Run analysis on more units to populate the graph.</p>
                         </div>
                         <Badge variant="outline" className="text-xs font-normal opacity-60">Requires AI tagging with related_unit_ids</Badge>
                     </div>
                 ) : (
-                    <div className="space-y-5">
-                        {/* TOP MENTIONS FEED */}
-                        <div className="space-y-2">
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Top Cross-Unit Connections</p>
-                            <div className="space-y-1.5">
-                                {topMentions.map((m, i) => (
-                                    <div key={i} className="flex items-center gap-3 p-2.5 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-100 dark:border-slate-800 text-sm">
-                                        <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-black flex items-center justify-center">
-                                            {i + 1}
-                                        </span>
-                                        <span className="text-slate-700 dark:text-slate-300 truncate font-medium">{m.sourceName}</span>
-                                        <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
-                                        <span className="text-slate-700 dark:text-slate-300 truncate font-medium">{m.targetName}</span>
-                                        <Badge className="ml-auto shrink-0 bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 text-xs font-bold">
-                                            {m.count} mention{m.count !== 1 ? 's' : ''}
-                                        </Badge>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* MATRIX HEATMAP */}
-                        {unitIds.length >= 2 && (
-                            <div className="space-y-2">
-                                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mention Heatmap (Row → Column)</p>
-                                <div className="overflow-x-auto">
-                                    <table className="text-[10px] border-separate border-spacing-0.5">
-                                        <thead>
-                                            <tr>
-                                                <th className="w-20 text-right pr-1 font-medium text-slate-400 text-[9px] pb-1">Source ↓ / Target →</th>
-                                                {unitNames.map((name, ci) => (
-                                                    <th
-                                                        key={ci}
-                                                        className={`w-10 text-center font-semibold pb-1 transition-colors duration-150 ${hoveredCell?.t === ci || hoveredRow === ci ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'}`}
-                                                        style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)', height: 64, verticalAlign: 'bottom' }}
-                                                    >
-                                                        {name.length > 8 ? name.slice(0, 8) + '…' : name}
-                                                    </th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {matrix.map((row, ri) => (
-                                                <tr key={ri}>
-                                                    <td
-                                                        className={`text-right pr-1.5 font-semibold text-[9px] transition-colors duration-150 ${hoveredRow === ri ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'}`}
-                                                        onMouseEnter={() => setHoveredRow(ri)}
-                                                        onMouseLeave={() => setHoveredRow(null)}
-                                                    >
-                                                        {unitNames[ri].length > 8 ? unitNames[ri].slice(0, 8) + '…' : unitNames[ri]}
-                                                    </td>
-                                                    {row.map((count, ci) => (
-                                                        <td
-                                                            key={ci}
-                                                            className={`w-9 h-9 text-center font-bold rounded transition-all duration-150 cursor-default
-                                                                ${ri === ci ? 'bg-slate-100 dark:bg-slate-800 opacity-40' : count > 0 ? getColor(count) : 'bg-slate-50 dark:bg-slate-900/30 text-slate-300'}
-                                                                ${(hoveredRow === ri || hoveredCell?.t === ci) && count > 0 ? 'ring-2 ring-indigo-400 scale-105 shadow' : ''}
-                                                            `}
-                                                            onMouseEnter={() => setHoveredCell({ s: ri, t: ci })}
-                                                            onMouseLeave={() => setHoveredCell(null)}
-                                                            title={count > 0 ? `${unitNames[ri]} → ${unitNames[ci]}: ${count} mention${count !== 1 ? 's' : ''}` : ri === ci ? 'Self' : 'No mentions'}
-                                                        >
-                                                            {ri === ci ? '·' : count > 0 ? count : ''}
-                                                        </td>
-                                                    ))}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                    <>
+                        {hoveredNode && (
+                            <div className="absolute top-3 left-3 z-10 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl px-4 py-3 shadow-xl text-sm pointer-events-none">
+                                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1.5">{hoveredNode.name}</p>
+                                <div className="space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                    <p>Cross-referenced by others: <span className="font-semibold text-indigo-600 dark:text-indigo-400">{hoveredNode.received} mentions</span></p>
+                                    <p>References other units: <span className="font-semibold text-slate-600 dark:text-slate-300">{hoveredNode.sent} mentions</span></p>
                                 </div>
-                                <p className="text-[10px] text-slate-400 italic">
-                                    Each cell shows how many times feedback for the <strong>row unit</strong> mentioned the <strong>column unit</strong>.
-                                </p>
                             </div>
                         )}
-                    </div>
+                        <div className="absolute bottom-3 right-3 z-10 flex items-center gap-3 text-[10px] text-slate-500 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm rounded-lg px-2.5 py-1.5 border border-slate-100 dark:border-slate-800">
+                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-indigo-800 inline-block" /> High traffic</span>
+                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block" /> Moderate</span>
+                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" /> Low</span>
+                        </div>
+                        {isClient && (
+                            <ForceGraph2D
+                                graphData={graphData}
+                                width={dimensions.width}
+                                height={dimensions.height}
+                                nodeCanvasObject={nodeCanvasObject}
+                                nodeCanvasObjectMode={() => 'replace'}
+                                nodePointerAreaPaint={nodePointerAreaPaint}
+                                linkWidth={(link: { value: number }) => Math.log(link.value + 1) * 1.5 + 0.5}
+                                linkDirectionalArrowLength={7}
+                                linkDirectionalArrowRelPos={1}
+                                linkColor={() => 'rgba(99,102,241,0.22)'}
+                                linkDirectionalParticles={2}
+                                linkDirectionalParticleWidth={(link: { value: number }) => Math.log(link.value + 1)}
+                                linkDirectionalParticleColor={() => '#818cf8'}
+                                onNodeHover={(node: GraphNode | null) => setHoveredNode(node || null)}
+                                backgroundColor="transparent"
+                                d3AlphaDecay={0.015}
+                                d3VelocityDecay={0.35}
+                                cooldownTicks={120}
+                                enableZoomInteraction
+                                enablePanInteraction
+                            />
+                        )}
+                    </>
                 )}
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     );
 }

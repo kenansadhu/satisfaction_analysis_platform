@@ -138,11 +138,33 @@ export default function ImportPage() {
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
 
-  useEffect(() => { loadUnits(); }, []);
+  // Faculty mapping step state
+  const [existingFaculties, setExistingFaculties] = useState<{ id: number; name: string }[]>([]);
+  // key = raw CSV value, value = existing faculty id (or -1 = create new)
+  const [facultyMappings, setFacultyMappings] = useState<Record<string, number>>({});
+
+  useEffect(() => { loadUnits(); loadFaculties(); }, []);
   async function loadUnits() {
     const { data } = await supabase.from('organization_units').select('*').order('name');
     if (data) setUnits(data);
   }
+  async function loadFaculties() {
+    const { data } = await supabase.from('faculties').select('id, name').order('name');
+    if (data) setExistingFaculties(data);
+  }
+
+  // Distinct faculty strings found in the CSV
+  const csvFacultyValues = useMemo(() => {
+    if (!facultyCols.length || !csvData.length) return [];
+    const values = new Set<string>();
+    csvData.forEach(row => {
+      facultyCols.forEach(col => {
+        const v = row[col];
+        if (v && v.trim() && v !== '-' && v !== 'N/A') values.add(v.trim());
+      });
+    });
+    return Array.from(values).sort();
+  }, [csvData, facultyCols]);
 
   // --- SMART PREVIEW LOGIC ---
   const previewStats = useMemo(() => {
@@ -270,6 +292,23 @@ export default function ImportPage() {
       if (surveyError) throw surveyError;
       surveyId = survey.id;
 
+      // Resolve faculty mappings: create new faculties where value === -1
+      const resolvedFacultyIds = new Map<string, number | null>({ ...facultyMappings } as any);
+      const autoMatchMap = new Map(existingFaculties.map(f => [f.name.toLowerCase(), f.id]));
+
+      for (const csvVal of csvFacultyValues) {
+        const mapped = facultyMappings[csvVal];
+        if (mapped === -1) {
+          // Create new faculty
+          const { data: newFac } = await supabase.from('faculties').insert({ name: csvVal }).select('id').single();
+          if (newFac) resolvedFacultyIds.set(csvVal, newFac.id);
+        } else if (mapped === undefined) {
+          // Auto-match by exact name (case-insensitive)
+          const autoId = autoMatchMap.get(csvVal.toLowerCase());
+          resolvedFacultyIds.set(csvVal, autoId ?? null);
+        }
+      }
+
       const BATCH_SIZE = 50;
       let processedRows = 0;
 
@@ -282,10 +321,11 @@ export default function ImportPage() {
           const hash = `row_${i + idx}_${Date.now()}`;
           hashToRow.set(hash, row);
           const loc = locationCols.find(c => row[c]) ? row[locationCols.find(c => row[c])!] : "Unknown";
-          const fac = facultyCols.find(c => row[c]) ? row[facultyCols.find(c => row[c])!] : "Unknown";
+          const fac = facultyCols.find(c => row[c]) ? row[facultyCols.find(c => row[c])!]?.trim() : "Unknown";
           const maj = majorCols.find(c => row[c]) ? row[majorCols.find(c => row[c])!] : "Unknown";
           const year = yearCols.find(c => row[c]) ? row[yearCols.find(c => row[c])!] : "Unknown";
-          return { survey_id: surveyId, location: loc, faculty: fac, study_program: maj, entry_year: year, student_hash: hash };
+          const facultyId = fac ? (resolvedFacultyIds.get(fac) ?? null) : null;
+          return { survey_id: surveyId, location: loc, faculty: fac, raw_faculty: fac, faculty_id: facultyId, study_program: maj, entry_year: year, student_hash: hash };
         });
 
         const { data: insertedRespondents, error: respError } = await supabase.from('respondents').insert(respondentsPayload).select('id, student_hash');
@@ -372,7 +412,7 @@ export default function ImportPage() {
     <PageShell>
       <PageHeader
         title={<div className="flex items-center gap-3"><div className="p-2 bg-blue-500/20 rounded-lg"><FileSpreadsheet className="w-6 h-6 text-blue-400" /></div> Import Wizard</div>}
-        description={step === 1 ? "Start by uploading your survey data" : step === 2 ? "Define column identities" : step === 3 ? "Map columns to organization units" : "Final validation before import"}
+        description={step === 1 ? "Start by uploading your survey data" : step === 2 ? "Define column identities" : step === 3 ? "Map columns to organization units" : step === 4 ? "Normalize faculty names" : "Final validation before import"}
         backHref="/surveys"
         backLabel="Dashboard"
       />
@@ -386,7 +426,8 @@ export default function ImportPage() {
               { id: 1, label: "Upload", icon: Upload },
               { id: 2, label: "Identity", icon: User },
               { id: 3, label: "Mapping", icon: Layers },
-              { id: 4, label: "Validate", icon: ShieldCheck }
+              { id: 4, label: "Faculties", icon: GraduationCap },
+              { id: 5, label: "Validate", icon: ShieldCheck }
             ].map((s) => (
               <div key={s.id} className="flex flex-col items-center gap-3 relative z-10">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500 ${step >= s.id ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-110" : "bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 text-slate-400"
@@ -838,7 +879,7 @@ export default function ImportPage() {
                         onClick={() => setStep(4)}
                         className="px-10 bg-indigo-600 hover:bg-indigo-700 shadow-xl shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
                       >
-                        Proceed to Validation
+                        Map Faculties
                         <ArrowRight className="w-4 h-4 ml-2" />
                       </Button>
                     </div>
@@ -923,8 +964,78 @@ export default function ImportPage() {
               </div>
             )}
 
-            {/* STEP 4: VALIDATION */}
+            {/* STEP 4: FACULTY MAPPING */}
             {step === 4 && (
+              <div className="space-y-6 animate-in zoom-in-95 duration-500">
+                <Card className="border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
+                  <div className="h-1.5 bg-gradient-to-r from-teal-500 to-emerald-500" />
+                  <CardHeader className="border-b border-slate-100 dark:border-slate-800">
+                    <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                      <GraduationCap className="w-6 h-6 text-teal-600" />
+                      Faculty Name Normalization
+                    </CardTitle>
+                    <CardDescription>
+                      {csvFacultyValues.length === 0
+                        ? "No faculty columns were detected. You can skip this step."
+                        : `Map the ${csvFacultyValues.length} faculty value${csvFacultyValues.length !== 1 ? 's' : ''} found in the CSV to your faculty records. Select an existing faculty or choose "Create New" to add a new one.`}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-8 space-y-4">
+                    {csvFacultyValues.length === 0 ? (
+                      <div className="text-center py-10 text-slate-400">
+                        <GraduationCap className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                        <p className="font-medium">No faculty values found in CSV.</p>
+                        <p className="text-sm mt-1">Make sure you selected the correct faculty column in Step 2.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {csvFacultyValues.map(val => {
+                          const currentMapping = facultyMappings[val];
+                          const autoMatch = existingFaculties.find(f => f.name.toLowerCase() === val.toLowerCase());
+                          return (
+                            <div key={val} className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-colors ${currentMapping !== undefined ? 'border-teal-300 bg-teal-50/40 dark:border-teal-800 dark:bg-teal-950/20' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'}`}>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-slate-800 dark:text-slate-100 truncate">{val}</p>
+                                {autoMatch && currentMapping === undefined && (
+                                  <p className="text-xs text-teal-600 mt-0.5">Auto-matched: "{autoMatch.name}"</p>
+                                )}
+                              </div>
+                              <select
+                                value={currentMapping !== undefined ? currentMapping : (autoMatch ? autoMatch.id : '')}
+                                onChange={e => setFacultyMappings(prev => ({ ...prev, [val]: parseInt(e.target.value) }))}
+                                className="h-9 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-medium text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 min-w-[220px]"
+                              >
+                                <option value="" disabled>— Select faculty —</option>
+                                {existingFaculties.map(f => (
+                                  <option key={f.id} value={f.id}>{f.name}</option>
+                                ))}
+                                <option value={-1}>+ Create new: "{val}"</option>
+                              </select>
+                              {(currentMapping !== undefined || autoMatch) && (
+                                <CheckCircle className="w-5 h-5 text-teal-500 shrink-0" />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                  <div className="flex justify-between items-center p-8 border-t border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30">
+                    <Button variant="outline" size="lg" onClick={() => setStep(3)} className="px-8">
+                      <ArrowLeft className="w-4 h-4 mr-2" /> Back to Mapping
+                    </Button>
+                    <Button size="lg" onClick={() => setStep(5)}
+                      className="px-10 bg-teal-600 hover:bg-teal-700 shadow-xl shadow-teal-500/20 transition-all hover:scale-105 active:scale-95">
+                      Proceed to Validation
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* STEP 5: VALIDATION */}
+            {step === 5 && (
               <div className="space-y-8 animate-in zoom-in-95 duration-500">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <Card className="bg-blue-600 text-white shadow-xl shadow-blue-500/20 border-0 overflow-hidden relative">
@@ -1030,9 +1141,9 @@ export default function ImportPage() {
                       </div>
                     ) : (
                       <div className="flex flex-col sm:flex-row justify-between items-center gap-6 pt-6 border-t border-slate-100 dark:border-slate-800">
-                        <Button variant="outline" size="lg" onClick={() => setStep(3)} className="w-full sm:w-auto px-8 border-slate-300 dark:border-slate-700 font-bold">
+                        <Button variant="outline" size="lg" onClick={() => setStep(4)} className="w-full sm:w-auto px-8 border-slate-300 dark:border-slate-700 font-bold">
                           <ArrowLeft className="w-4 h-4 mr-2" />
-                          Back to Config
+                          Back to Faculties
                         </Button>
                         <Button
                           size="lg"

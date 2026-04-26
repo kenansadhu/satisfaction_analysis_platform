@@ -2,25 +2,27 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard,
     Building2,
-    Upload,
-    Lightbulb,
+    GraduationCap,
     Settings,
     ChevronLeft,
     ChevronRight,
-    Menu,
     Activity,
-    Sparkles,
     Sun,
-    Moon
+    Moon,
+    PieChart,
+    Users,
+    LogOut,
+    UserCog,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth, canAccessAdminPages, isOwner } from "@/context/AuthContext";
 
 interface SidebarProps {
     className?: string;
@@ -38,7 +40,14 @@ export function Sidebar({
     onCloseMobile
 }: SidebarProps) {
     const pathname = usePathname();
+    const router = useRouter();
     const { theme, setTheme } = useTheme();
+    const { role, profile, signOut } = useAuth();
+
+    const handleSignOut = async () => {
+        await signOut();
+        router.replace("/login");
+    };
 
     const NavItem = ({ href, icon: Icon, label, active = false, className, prominent = false }: any) => (
         <Link
@@ -105,7 +114,7 @@ export function Sidebar({
                         className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/20 mx-auto cursor-pointer hover:from-blue-400 hover:to-indigo-500 transition-colors"
                         title="Go to Home"
                     >
-                        <span className="text-xl font-bold text-white">U</span>
+                        <span className="text-xl font-bold text-white">S</span>
                     </Link>
                 )}
             </div>
@@ -118,15 +127,29 @@ export function Sidebar({
                     {(!isCollapsed || isMobile) && (
                         <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest px-4 mb-4 opacity-80">Core Platform</h3>
                     )}
-                    <NavItem href="/surveys" icon={LayoutDashboard} label="Surveys" active={pathname === "/surveys" || pathname.startsWith("/surveys/")} prominent={true} />
-                    <NavItem href="/executive" icon={Activity} label="Executive View" active={pathname === "/executive"} prominent={true} />
-                    <NavItem href="/ai-scientist" icon={Sparkles} label="AI Data Scientist" active={pathname === "/ai-scientist"} prominent={true} />
+                    {canAccessAdminPages(role) && (
+                        <NavItem href="/surveys" icon={LayoutDashboard} label="Surveys" active={pathname === "/surveys" || pathname.startsWith("/surveys/")} prominent={true} />
+                    )}
+                    <NavItem href="/faculty-insights" icon={GraduationCap} label="Faculty Insights" active={pathname === "/faculty-insights" || pathname.startsWith("/faculty-insights/")} prominent={true} />
+                    <NavItem href="/unit-insights" icon={PieChart} label="Unit Insights" active={pathname === "/unit-insights" || pathname.startsWith("/unit-insights/")} prominent={true} />
+                    <NavItem href="/executive" icon={Activity} label="Executive Insights" active={pathname === "/executive"} prominent={true} />
                 </div>
 
-                {/* Settings / Footer -> Moved Building2 here */}
+                {/* Settings / Footer */}
                 <div className="px-3 mt-auto space-y-1 pt-6 border-t border-slate-800/50">
-                    <NavItem href="/units" icon={Building2} label="Organization Units" active={pathname === "/units" || pathname.startsWith("/analysis/unit/")} />
-                    <NavItem href="/settings" icon={Settings} label="Settings" active={pathname === "/settings"} />
+                    {(!isCollapsed || isMobile) && canAccessAdminPages(role) && (
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest px-3 mb-2">Management</p>
+                    )}
+                    {canAccessAdminPages(role) && (
+                        <>
+                            <NavItem href="/faculties" icon={GraduationCap} label="Faculty Management" active={pathname === "/faculties"} />
+                            <NavItem href="/units" icon={Building2} label="Organization Units" active={pathname === "/units"} />
+                            <NavItem href="/settings" icon={Settings} label="Settings" active={pathname === "/settings"} />
+                        </>
+                    )}
+                    {isOwner(role) && (
+                        <NavItem href="/users" icon={UserCog} label="User Management" active={pathname === "/users"} />
+                    )}
 
                     {/* Theme Toggle */}
                     <button
@@ -145,6 +168,38 @@ export function Sidebar({
                             <span className="truncate">Theme</span>
                         )}
                     </button>
+
+                    {/* User + Sign Out */}
+                    <div className={cn("pt-3 mt-2 border-t border-slate-800/50", isCollapsed && !isMobile ? "flex justify-center" : "")}>
+                        {(!isCollapsed || isMobile) ? (
+                            <div className="flex items-center gap-2 px-3 py-2">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0">
+                                    <span className="text-xs font-bold text-white">
+                                        {profile?.email?.[0]?.toUpperCase() ?? "?"}
+                                    </span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-semibold text-slate-300 truncate">{profile?.full_name || profile?.email || "User"}</p>
+                                    <p className="text-[10px] text-slate-500 capitalize">{role ?? "—"}</p>
+                                </div>
+                                <button
+                                    onClick={handleSignOut}
+                                    title="Sign out"
+                                    className="text-slate-500 hover:text-red-400 transition-colors p-1"
+                                >
+                                    <LogOut className="w-4 h-4" />
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleSignOut}
+                                title="Sign out"
+                                className="w-9 h-9 flex items-center justify-center rounded-md text-slate-500 hover:text-red-400 hover:bg-slate-800/50 transition-colors"
+                            >
+                                <LogOut className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

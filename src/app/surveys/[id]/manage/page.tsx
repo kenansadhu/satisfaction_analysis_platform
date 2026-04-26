@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -64,6 +64,11 @@ export default function SurveyManagePage() {
     // AI Dataset Cache
     const [aiCacheUpdatedAt, setAiCacheUpdatedAt] = useState<string | null>(null);
     const [buildingAiCache, setBuildingAiCache] = useState(false);
+    const [buildElapsed, setBuildElapsed] = useState(0);
+    const buildTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    type BuildSummary = { total_org_units: number; analyzed_units: number; quant_only_units: number; cached_units: number };
+    const [buildSummary, setBuildSummary] = useState<BuildSummary | null>(null);
 
     // Column mappings
     const [columns, setColumns] = useState<ColumnMapping[]>([]);
@@ -107,6 +112,13 @@ export default function SurveyManagePage() {
                 setYear(data.year || "");
                 setDescription(data.description || "");
                 setAiCacheUpdatedAt(data.ai_dataset_updated_at || null);
+                // Restore persisted build summary
+                if (data.ai_dataset_updated_at) {
+                    try {
+                        const stored = localStorage.getItem(`ai_build_summary_${surveyId}`);
+                        if (stored) setBuildSummary(JSON.parse(stored));
+                    } catch {}
+                }
             }
             setLoading(false);
         };
@@ -169,6 +181,9 @@ export default function SurveyManagePage() {
                 existing.count++;
                 existing.inputIds.push(row.id);
                 if (row.id < existing.minId) existing.minId = row.id;
+                // OR-merge: if any row marks this column as text/quant, honour it
+                if (row.requires_analysis) existing.requires_analysis = true;
+                if (row.is_quantitative) existing.is_quantitative = true;
             } else {
                 groupMap.set(key, {
                     source_column: row.source_column,
@@ -515,6 +530,8 @@ export default function SurveyManagePage() {
     // --- Build AI Data Scientist Cache ---
     const handleBuildAiCache = async () => {
         setBuildingAiCache(true);
+        setBuildElapsed(0);
+        buildTimerRef.current = setInterval(() => setBuildElapsed(e => e + 1), 1000);
         try {
             const res = await fetch('/api/ai/cache-global-dataset', {
                 method: 'POST',
@@ -524,11 +541,22 @@ export default function SurveyManagePage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Failed to build AI cache");
 
-            toast.success(`AI Context Built! Cached ${data.count} units.`);
+            const summary: BuildSummary = {
+                total_org_units: data.total_org_units ?? 0,
+                analyzed_units: data.analyzed_units ?? 0,
+                quant_only_units: data.quant_only_units ?? 0,
+                cached_units: data.count ?? 0,
+            };
+            setBuildSummary(summary);
+            try { localStorage.setItem(`ai_build_summary_${surveyId}`, JSON.stringify(summary)); } catch {}
+
+            const unanalyzed = summary.total_org_units - summary.analyzed_units;
+            toast.success(`AI Context Built! ${summary.analyzed_units}/${summary.total_org_units} units analyzed.${unanalyzed > 0 ? ` ${unanalyzed} unit(s) still need analysis.` : ''}`);
             setAiCacheUpdatedAt(new Date().toISOString());
         } catch (e: any) {
             toast.error(e.message);
         } finally {
+            if (buildTimerRef.current) clearInterval(buildTimerRef.current);
             setBuildingAiCache(false);
         }
     };
@@ -675,8 +703,12 @@ export default function SurveyManagePage() {
                 }
             }
 
-            // Invalidate score cache
-            await supabase.from('survey_quant_cache').delete().eq('survey_id', parseInt(surveyId));
+            // Invalidate derived caches — segments changed, all downstream caches are stale
+            await Promise.all([
+                supabase.from('survey_quant_cache').delete().eq('survey_id', parseInt(surveyId)),
+                supabase.from('survey_faculty_cache').delete().eq('survey_id', parseInt(surveyId)),
+                supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', parseInt(surveyId)),
+            ]);
 
             toast.success(`Saved changes to ${dirtyColumns.length} column(s). Analysis segments cleared for changed columns.`);
             loadColumnMappings();
@@ -883,14 +915,58 @@ export default function SurveyManagePage() {
                                             className="w-full gap-2 bg-purple-600 hover:bg-purple-700 text-white"
                                         >
                                             {buildingAiCache ? (
-                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                <>
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                    {buildElapsed > 0
+                                                        ? `${Math.floor(buildElapsed / 60)}:${String(buildElapsed % 60).padStart(2, '0')}`
+                                                        : "Building..."}
+                                                </>
                                             ) : (
-                                                <BrainCircuit className="w-4 h-4" />
+                                                <>
+                                                    <BrainCircuit className="w-4 h-4" />
+                                                    {aiCacheUpdatedAt ? "Re-Build Context" : "Build Context"}
+                                                </>
                                             )}
-                                            {aiCacheUpdatedAt ? "Re-Build Context" : "Build Context"}
                                         </Button>
                                     </div>
                                 </div>
+
+                                {buildSummary && (
+                                    <div className="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Coverage at Last Build</p>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div className="bg-purple-50 dark:bg-purple-950/20 rounded-lg px-3 py-2.5 border border-purple-100 dark:border-purple-900/40">
+                                                <p className="text-[10px] text-purple-500 font-semibold uppercase tracking-wide mb-0.5">In Dataset</p>
+                                                <p className="text-xl font-black text-purple-700 dark:text-purple-300 tabular-nums">
+                                                    {buildSummary.cached_units}
+                                                    <span className="text-sm font-normal text-purple-400 ml-1">/ {buildSummary.total_org_units}</span>
+                                                </p>
+                                                <p className="text-[10px] text-purple-400 mt-0.5">org units with data</p>
+                                            </div>
+                                            <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2.5 border border-emerald-100 dark:border-emerald-900/40">
+                                                <p className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide mb-0.5">Analyzed</p>
+                                                <p className="text-xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums">
+                                                    {buildSummary.analyzed_units}
+                                                    <span className="text-sm font-normal text-emerald-400 ml-1">/ {buildSummary.total_org_units}</span>
+                                                </p>
+                                                <p className="text-[10px] text-emerald-500 mt-0.5">with qualitative analysis</p>
+                                            </div>
+                                            <div className={`rounded-lg px-3 py-2.5 border ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/40' : 'bg-slate-50 dark:bg-slate-900/40 border-slate-100 dark:border-slate-800'}`}>
+                                                <p className={`text-[10px] font-semibold uppercase tracking-wide mb-0.5 ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-600' : 'text-slate-400'}`}>Not Yet Analyzed</p>
+                                                <p className={`text-xl font-black tabular-nums ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400'}`}>
+                                                    {buildSummary.total_org_units - buildSummary.analyzed_units}
+                                                </p>
+                                                <p className={`text-[10px] mt-0.5 ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-500' : 'text-slate-400'}`}>units still pending</p>
+                                            </div>
+                                        </div>
+                                        {buildSummary.total_org_units - buildSummary.analyzed_units > 0 && (
+                                            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 rounded-lg px-3 py-2 flex items-center gap-2">
+                                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                                {buildSummary.total_org_units - buildSummary.analyzed_units} unit{buildSummary.total_org_units - buildSummary.analyzed_units !== 1 ? 's' : ''} had not been analyzed yet. Re-build context after completing all unit analyses for full coverage.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </TabsContent>

@@ -10,6 +10,10 @@
       "Bash(grep -E \"\\\\.tsx?$\")",
       "Bash(npx tsc *)",
       "Bash(npx next *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",
+      "c:\\Users\\kenan\\.claude\\projects\\c--Users-kenan-OneDrive-Documents-Creations-New-SSI-Analysis-and-Report-New-2026-student-voice-platform\\memory"
     ]
   }
 }

@@ -1,6 +1,6 @@
 import { callGemini, handleAIError, wrapUserData } from "@/lib/ai";
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 
 export const maxDuration = 60;
 
@@ -16,19 +16,23 @@ export async function POST(req: Request) {
         const { messages, surveyId, existingChart } = body as {
             messages: ChatMessage[];
             surveyId?: string;
-            existingChart?: any; // When refining a saved chart
+            existingChart?: any;
         };
 
         if (!messages || messages.length === 0) {
             return NextResponse.json({ error: "No messages provided" }, { status: 400 });
         }
 
-        // 1. Fetch the cached global dataset (replaces N+1 bottleneck)
+        // 1. Load cached dataset
         let globalDataset: any[] = [];
         let availableKeys = new Set<string>([
             'unit_name', 'unit_short_name', 'total_segments',
-            'positive', 'neutral', 'negative', 'score'
+            'positive', 'neutral', 'negative', 'score',
         ]);
+
+        let surveyContext: any = null;
+        let columnSchema: any[] = [];
+        let facultiesSummary: any[] = [];
 
         if (surveyId) {
             const { data: surveyData, error: sErr } = await supabase
@@ -39,36 +43,65 @@ export async function POST(req: Request) {
 
             if (sErr) throw new Error("Failed to load survey cache: " + sErr.message);
 
-            if (surveyData?.ai_dataset_cache) {
-                globalDataset = surveyData.ai_dataset_cache;
-                // Read keys dynamically from the first valid object to preserve category transparency
-                if (globalDataset.length > 0) {
-                    Object.keys(globalDataset[0]).forEach(k => {
-                        if (k.startsWith('category_') || k.startsWith('likert_') || k.startsWith('binary_')) availableKeys.add(k);
-                    });
-                }
-            } else {
+            const raw = (surveyData as any)?.ai_dataset_cache;
+            if (!raw) {
                 return NextResponse.json({ error: "AI Context not built. Please build it in Survey Settings." }, { status: 400 });
+            }
+
+            // Support v1 (flat array) and v2 (enriched object)
+            if (Array.isArray(raw)) {
+                globalDataset = raw;
+            } else if (raw?.v === 2) {
+                globalDataset = raw.units || [];
+                surveyContext = raw.survey_context || null;
+                columnSchema = raw.column_schema || [];
+                facultiesSummary = raw.faculties_summary || [];
+            } else {
+                globalDataset = raw.units || raw;
+            }
+
+            if (globalDataset.length > 0) {
+                Object.keys(globalDataset[0]).forEach(k => {
+                    if (k.startsWith('category_') || k.startsWith('likert_') || k.startsWith('binary_')) availableKeys.add(k);
+                });
             }
         } else {
             return NextResponse.json({ error: "No survey selected." }, { status: 400 });
         }
 
-        console.log(`[chat-analyst] Cached Dataset loaded: ${globalDataset.length} units.`);
+        console.log(`[chat-analyst] Dataset: ${globalDataset.length} units | columns: ${columnSchema.length} | faculties: ${facultiesSummary.length}`);
 
-        // Also fetch quantitative averages 
-        const quantData = await fetchQuantSummary(surveyId);
-
-        // 2. Build conversation history for Gemini
+        // 2. Build conversation history
         const conversationHistory = messages.map(m => {
             if (m.role === "user") return `USER: ${m.content}`;
-            if (m.chart) {
-                return `ASSISTANT: ${m.content}\n[CHART_CONFIG: ${JSON.stringify(m.chart)}]`;
-            }
+            if (m.chart) return `ASSISTANT: ${m.content}\n[CHART_CONFIG: ${JSON.stringify(m.chart)}]`;
             return `ASSISTANT: ${m.content}`;
         }).join("\n\n");
 
-        // 3. Build the system prompt
+        // 3. Build enriched context sections
+        const surveyContextBlock = surveyContext ? `
+SURVEY CONTEXT:
+- Name: ${surveyContext.survey_name}
+- Total respondents: ${surveyContext.respondent_count.toLocaleString()}
+- Faculties (use for breakdowns): ${surveyContext.faculties.join(', ')}
+- Programs: ${surveyContext.programs.slice(0, 20).join(', ')}${surveyContext.programs.length > 20 ? ` (+${surveyContext.programs.length - 20} more)` : ''}
+- Locations: ${surveyContext.locations.join(', ')}
+` : '';
+
+        const columnDictBlock = columnSchema.length > 0 ? `
+COLUMN DICTIONARY — exact prompt key → original survey question → unit → scale:
+${columnSchema.map(c =>
+    `  ${c.key} | "${c.question}" | ${c.unit_name} | scale: ${c.scale}${c.raw_options?.length > 0 ? ` | raw options: ${c.raw_options.join(' / ')}` : ''}`
+).join('\n')}
+` : '';
+
+        const facultiesBlock = facultiesSummary.length > 0 ? `
+FACULTY BREAKDOWN DATA — pre-aggregated average quantitative scores per faculty × unit:
+(Reference this when the user asks for faculty comparisons. Cite specific numbers from here.)
+${JSON.stringify(facultiesSummary)}
+` : '';
+
+        // 4. Build system prompt
         const systemPrompt = `
 ACT AS A SENIOR DATA SCIENTIST powered by Gemini Pro, analyzing Student Satisfaction Survey data for a university.
 
@@ -79,13 +112,16 @@ CAPABILITIES:
 2. GENERATE chart blueprints (the frontend renders them live)
 3. MODIFY existing charts based on user feedback
 4. EXPLAIN correlations and patterns
+5. BREAK DOWN results by faculty using the FACULTY BREAKDOWN DATA section
 
 DATASET CONTEXT:
 - ${globalDataset.length} units analyzed
 - Available chart keys: ${JSON.stringify(Array.from(availableKeys))}
-- Quantitative summary: ${JSON.stringify(quantData)}
+${surveyContextBlock}
+${columnDictBlock}
+${facultiesBlock}
 
-LIVE DATA:
+LIVE UNIT DATA:
 ${wrapUserData(globalDataset)}
 
 ${existingChart ? `
@@ -95,10 +131,10 @@ Start by acknowledging you see this chart and ask what they'd like to change.
 ` : ''}
 
 CHART OUTPUT FORMAT:
-When generating charts, include a JSON block wrapped in <charts_config>...</charts_config> tags. 
-**PRO TIP: Combine related points into a single chart!** Do not generate 9 different charts with 1 line each. If you are comparing 3 different 'likert' metrics or measuring positive vs negative segments, combine them into one single chart using the \`yKeys\` array instead of \`yKey\`.
+When generating charts, include a JSON block wrapped in <charts_config>...</charts_config> tags.
+**PRO TIP: Combine related points into a single chart!** Do not generate 9 different charts with 1 line each. If comparing 3 different 'likert' metrics or measuring positive vs negative segments, combine them into one chart using the \`yKeys\` array.
 
-The chart config MUST use ONLY keys from the available keys list above.
+Chart config MUST use ONLY keys from the available keys list above (or xKey: "unit_name", yKey: "score" etc).
 Format:
 <charts_config>
 [
@@ -108,8 +144,8 @@ Format:
         "title": "Chart Title",
         "description": "AI insight about what this visualization reveals",
         "xKey": "unit_name",
-        "yKey": "score", 
-        "yKeys": ["likert_Quality", "likert_Speed", "likert_Cost"], 
+        "yKey": "score",
+        "yKeys": ["likert_Quality", "likert_Speed"],
         "aggregation": "AVG" | "COUNT" | "SUM"
     }
 ]
@@ -117,72 +153,60 @@ Format:
 
 IMPORTANT RULES:
 - xKey, yKey, yKeys MUST exactly match keys from the available keys list
-- When comparing MULTIPLE metrics across units (e.g. 3 different Likert scores), you MUST use a "BAR" or "LINE" chart and provide an array of strings in \`yKeys\`. Do not use \`yKey\` if using \`yKeys\`.
+- When comparing MULTIPLE metrics across units, use "BAR" or "LINE" with \`yKeys\` array
 - For SCATTER, use xKey and yKey (two numeric metrics)
 - Always include a "description" with a deep insight
 - If the user just asks a question (no chart needed), respond with text only
 - If you do NOT need to generate a chart, do NOT include <charts_config> tags
-- Do NOT generate charts with only 1 data point if they can be combined. Group them logically (e.g., all 'likert_' academic scores, or 'positive' vs 'negative' segments).
+- Do NOT generate charts with only 1 data point
 
-CRITICAL FORMATTING DIRECTIVES (YOU WILL BE PENALIZED FOR IGNORING THESE):
-1. **NO CORNY ROLEPLAY**: Absolutely omit conversational filler, greetings, or roleplay preambles. Output strict, direct, and actionable insights. NEVER refer to yourself as "Gemini" or mention your AI model name.
-2. **MANDATORY ENCAPSULATION**: YOU MUST WRAP EVERY SINGLE THEMATIC POINT OR EXPLANATION IN A \`<box title="Your Title Here">\` TAG. 
-    - Provide a short 1-2 sentence high-level summary paragraph at the very beginning BEFORE your boxes.
-3. **MANDATORY TYPOGRAPHY**: You MUST format text entities using these EXACT Markdown rules so our parser can style them:
-    - Verbatim Student Quotes: Blockquotes > "quote here"
-    - Dataset Column/Category Names: Inline Code \`category_Facilities_neg\`
+CRITICAL FORMATTING DIRECTIVES:
+1. **NO CORNY ROLEPLAY**: No greetings or roleplay preambles. Output strict, direct, actionable insights. NEVER refer to yourself as "Gemini".
+2. **MANDATORY ENCAPSULATION**: WRAP EVERY THEMATIC POINT IN A \`<box title="Your Title Here">\` TAG. Short 1-2 sentence summary at the very start BEFORE boxes.
+3. **MANDATORY TYPOGRAPHY**:
+    - Student Quotes: Blockquotes > "quote here"
+    - Column/Category Names: Inline Code \`category_Facilities_neg\`
     - Faculty Names: Bold **Faculty of Medicine**
-    - Organization Unit Names: Italics *IT Department (ITD)*
-    - Exact Score Values (Likert/Binary): Bold **3.42** or **85%**
-    - Qualitative Volume/Segment Counts: Italics *1,420 segments*
-4. **CROSS-UNIT FOCUS**: Focus exclusively on structural connections, correlations, and comparisons between MULTIPLE units. DO NOT generate single-unit deep dives (e.g., do not spend a whole box analyzing just the IT Department). The user has a separate analysis tool for single units. Pay close attention to the \`unit_description\` variable to understand the context and faculty mappings behind each unit.
-5. **CHART RULE**: Charts MUST compare MULTIPLE units (e.g., \`xKey: "unit_name"\`). Never generate a chart that plots "Categories" as the axis for a single unit. Never hallucinate nested "transform" JSON objects in the chart config.
-6. **SEPARATE QUANT/QUAL**: You must analyze quantitative Likert scores (the \`likert_X\` keys, which are 1-4 scale KPIs) and binary scores (\`binary_X\` keys, 0-1 scale) alongside qualitative sentiments (the \`category_X\` keys). Explicitly state what is quantitative and what is qualitative sentiment.
-7. **DATA-FIRST**: Cite specific metrics (both exact quantitative averages out of 4 or 1, and exact sentiment \`total_segments\`) from the dataset to support your claims. Do not hallucinate numbers. Understand that \`likert_\` are average scores out of 4, while \`binary_\` represent percentages (0 to 1).
+    - Unit Names: Italics *IT Department (ITD)*
+    - Exact Score Values: Bold **3.42** or **85%**
+    - Segment Counts: Italics *1,420 segments*
+4. **FACULTY AWARENESS**: When the user asks about faculty breakdowns, use the FACULTY BREAKDOWN DATA above. Cite specific avg_score values per faculty. If a faculty has notably lower scores on a specific unit, flag it.
+5. **COLUMN TRANSPARENCY**: Use the COLUMN DICTIONARY to explain what each \`likert_X\` or \`binary_X\` key actually measures. When citing a score, mention the original question text.
+6. **CROSS-UNIT FOCUS**: Focus on structural connections, correlations, and comparisons between MULTIPLE units. Avoid single-unit deep dives.
+7. **SEPARATE QUANT/QUAL**: Analyze \`likert_X\` keys (1-4 scale) and \`binary_X\` keys (0-1 scale) separately from qualitative \`category_X\` sentiment keys.
+8. **DATA-FIRST**: Cite specific metrics from the dataset. Do not hallucinate numbers.
 
 CONVERSATION SO FAR:
 ${conversationHistory}
 
 Respond as the ASSISTANT. Be helpful and insightful.`;
 
-        // 4. Call Gemini Pro
+        // 5. Call Gemini Pro
         const rawResponse = await callGemini(systemPrompt, {
-            jsonMode: false, // We want mixed text + chart responses
-            model: "gemini-2.5-flash"
+            jsonMode: false,
+            model: "gemini-2.5-flash",
         }) as string;
 
-        // 5. Parse response — extract charts config if present
+        // 6. Parse response — extract charts
         let reply = rawResponse;
         let charts: any[] = [];
 
-        // Catch multiple <charts_config> tags using a global regex
         const chartRegex = /<charts_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/charts_config>/gi;
         let match;
-
         while ((match = chartRegex.exec(rawResponse)) !== null) {
             try {
                 const parsed = JSON.parse(match[1].trim());
-                if (Array.isArray(parsed)) {
-                    charts.push(...parsed);
-                } else {
-                    charts.push(parsed);
-                }
-            } catch (e) {
-                console.warn("Failed to parse a charts config block from AI response");
+                if (Array.isArray(parsed)) charts.push(...parsed);
+                else charts.push(parsed);
+            } catch {
+                console.warn("Failed to parse a charts_config block");
             }
         }
-
-        // Completely remove all tags and their contents from the text reply
         reply = reply.replace(/<charts_config>[\s\S]*?<\/charts_config>/gi, '').trim();
 
-        // Handle legacy single chart tag if AI hallucinates it
         const legacyRegex = /<chart_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/chart_config>/gi;
         while ((match = legacyRegex.exec(rawResponse)) !== null) {
-            try {
-                charts.push(JSON.parse(match[1].trim()));
-            } catch (e) {
-                console.warn("Failed to parse a legacy chart_config block");
-            }
+            try { charts.push(JSON.parse(match[1].trim())); } catch { /* ignore */ }
         }
         reply = reply.replace(/<chart_config>[\s\S]*?<\/chart_config>/gi, '').trim();
 
@@ -190,53 +214,5 @@ Respond as the ASSISTANT. Be helpful and insightful.`;
 
     } catch (error) {
         return handleAIError(error);
-    }
-}
-
-async function fetchQuantSummary(surveyId?: string) {
-    if (surveyId) {
-        let respIds: number[] = [];
-        let rPage = 0;
-        while (true) {
-            const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-            if (!rBat || rBat.length === 0) break;
-            respIds.push(...rBat.map((r: any) => r.id));
-            if (rBat.length < 1000) break;
-            rPage++;
-        }
-
-        if (respIds.length === 0) return { totalQuantitativeResponses: 0 };
-
-        const CHUNK = 400;
-        const MAX_CONCURRENT = 5;
-        let totalQuant = 0;
-
-        for (let batchStart = 0; batchStart < respIds.length; batchStart += CHUNK * MAX_CONCURRENT) {
-            const chunks: number[][] = [];
-            for (let i = batchStart; i < Math.min(batchStart + CHUNK * MAX_CONCURRENT, respIds.length); i += CHUNK) {
-                chunks.push(respIds.slice(i, i + CHUNK));
-            }
-            const counts = await Promise.all(chunks.map(chunk =>
-                supabase.from('raw_feedback_inputs')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('is_quantitative', true)
-                    .not('numerical_score', 'is', null)
-                    .gte('numerical_score', 1)
-                    .lte('numerical_score', 4)
-                    .in('respondent_id', chunk)
-                    .then(({ count }) => count || 0)
-            ));
-            totalQuant += counts.reduce((a, b) => a + b, 0);
-        }
-        return { totalQuantitativeResponses: totalQuant };
-    } else {
-        const { count } = await supabase
-            .from('raw_feedback_inputs')
-            .select('*', { count: 'exact', head: true })
-            .eq('is_quantitative', true)
-            .not('numerical_score', 'is', null)
-            .gte('numerical_score', 1)
-            .lte('numerical_score', 4);
-        return { totalQuantitativeResponses: count || 0 };
     }
 }

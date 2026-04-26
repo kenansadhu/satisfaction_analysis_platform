@@ -1,6 +1,6 @@
 import { callGemini, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 
 export async function POST(req: Request) {
   try {

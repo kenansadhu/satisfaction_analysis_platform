@@ -22,6 +22,7 @@ export const metadata: Metadata = {
 import { AnalysisProvider } from "@/context/AnalysisControlContext";
 import { AnalysisProgressProvider } from "@/context/AnalysisProgressContext";
 import { SurveyProvider } from "@/context/SurveyContext";
+import { AuthProvider } from "@/context/AuthContext";
 
 import { ThemeProvider } from "@/components/ThemeProvider";
 
@@ -41,15 +42,17 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <SurveyProvider>
-            <AnalysisProgressProvider>
-              <AnalysisProvider>
-                <AppShell>
-                  {children}
-                </AppShell>
-              </AnalysisProvider>
-            </AnalysisProgressProvider>
-          </SurveyProvider>
+          <AuthProvider>
+            <SurveyProvider>
+              <AnalysisProgressProvider>
+                <AnalysisProvider>
+                  <AppShell>
+                    {children}
+                  </AppShell>
+                </AnalysisProvider>
+              </AnalysisProgressProvider>
+            </SurveyProvider>
+          </AuthProvider>
         </ThemeProvider>
         <Toaster richColors position="top-right" closeButton toastOptions={{ className: 'print:hidden' }} />
       </body>

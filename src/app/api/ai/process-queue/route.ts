@@ -1,6 +1,6 @@
 import { callGemini, handleAIError } from "@/lib/ai";
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { processQueueSchema } from "@/lib/validators";
 
 export const maxDuration = 60; // 60 seconds max
