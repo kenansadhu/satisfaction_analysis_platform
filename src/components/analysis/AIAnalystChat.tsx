@@ -484,7 +484,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                                 onMouseLeave={() => setHoveredSeries(null)}>
                                                 {chartData.map((_, i) => <Cell key={i} fill={getBarColor("value", i, horizGradient)} />)}
                                                 <LabelList dataKey="value" position="right"
-                                                    formatter={(v: number | string | undefined) => typeof v === 'number' ? v.toFixed(2) : (v ?? '')}
+                                                    formatter={(v: any) => typeof v === 'number' ? v.toFixed(2) : (v ?? '')}
                                                     style={{ fontSize: '9px', fill: '#64748b' }} />
                                             </Bar>
                                         )}
@@ -517,7 +517,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                                 onMouseEnter={() => setHoveredSeries("value")}
                                                 onMouseLeave={() => setHoveredSeries(null)}>
                                                 <LabelList dataKey="value" position="top"
-                                                    formatter={(v: number | string | undefined) => typeof v === 'number' ? v.toFixed(2) : (v ?? '')}
+                                                    formatter={(v: any) => typeof v === 'number' ? v.toFixed(2) : (v ?? '')}
                                                     style={{ fontSize: '9px', fill: '#64748b' }} />
                                             </Line>
                                         )}
@@ -550,7 +550,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                                 onMouseLeave={() => setHoveredSeries(null)}>
                                                 {chartData.map((_, i) => <Cell key={i} fill={getBarColor("value", i, vertGradient)} />)}
                                                 <LabelList dataKey="value" position="top"
-                                                    formatter={(v: number | string | undefined) => typeof v === 'number' ? v.toFixed(2) : (v ?? '')}
+                                                    formatter={(v: any) => typeof v === 'number' ? v.toFixed(2) : (v ?? '')}
                                                     style={{ fontSize: '9px', fill: '#64748b' }} />
                                             </Bar>
                                         )}
