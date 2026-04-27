@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 
 export interface SurveyInfo {
     id: number;
@@ -27,6 +28,7 @@ const SurveyContext = createContext<SurveyContextType>({
 });
 
 export function SurveyProvider({ children }: { children: ReactNode }) {
+    const { user, loading: authLoading } = useAuth();
     const [surveys, setSurveys] = useState<SurveyInfo[]>([]);
     const [activeSurveyId, setActiveSurveyIdState] = useState<string>("");
     const [loading, setLoading] = useState(true);
@@ -39,6 +41,12 @@ export function SurveyProvider({ children }: { children: ReactNode }) {
     };
 
     useEffect(() => {
+        if (authLoading) return;
+        if (!user) {
+            setSurveys([]);
+            setLoading(false);
+            return;
+        }
         const load = async () => {
             const { data } = await supabase
                 .from("surveys")
@@ -101,7 +109,7 @@ export function SurveyProvider({ children }: { children: ReactNode }) {
             setLoading(false);
         };
         load();
-    }, []);
+    }, [user, authLoading]);
 
     const activeSurvey = surveys.find(s => s.id.toString() === activeSurveyId) || null;
 

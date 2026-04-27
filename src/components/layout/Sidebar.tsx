@@ -130,9 +130,9 @@ export function Sidebar({
                     {canAccessAdminPages(role) && (
                         <NavItem href="/surveys" icon={LayoutDashboard} label="Surveys" active={pathname === "/surveys" || pathname.startsWith("/surveys/")} prominent={true} />
                     )}
-                    <NavItem href="/faculty-insights" icon={GraduationCap} label="Faculty Insights" active={pathname === "/faculty-insights" || pathname.startsWith("/faculty-insights/")} prominent={true} />
-                    <NavItem href="/unit-insights" icon={PieChart} label="Unit Insights" active={pathname === "/unit-insights" || pathname.startsWith("/unit-insights/")} prominent={true} />
                     <NavItem href="/executive" icon={Activity} label="Executive Insights" active={pathname === "/executive"} prominent={true} />
+                    <NavItem href="/unit-insights" icon={PieChart} label="Unit Insights" active={pathname === "/unit-insights" || pathname.startsWith("/unit-insights/")} prominent={true} />
+                    <NavItem href="/faculty-insights" icon={GraduationCap} label="Faculty Insights" active={pathname === "/faculty-insights" || pathname.startsWith("/faculty-insights/")} prominent={true} />
                 </div>
 
                 {/* Settings / Footer */}
