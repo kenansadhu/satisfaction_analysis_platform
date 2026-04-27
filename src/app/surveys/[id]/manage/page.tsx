@@ -528,36 +528,51 @@ export default function SurveyManagePage() {
     };
 
     // --- Build AI Data Scientist Cache ---
+    const [buildPhase, setBuildPhase] = useState<1 | 2 | null>(null);
+
     const handleBuildAiCache = async () => {
         setBuildingAiCache(true);
         setBuildElapsed(0);
         buildTimerRef.current = setInterval(() => setBuildElapsed(e => e + 1), 1000);
         try {
-            const res = await fetch('/api/ai/cache-global-dataset', {
+            // Phase 1: heavy compute + write cache (up to 300s)
+            setBuildPhase(1);
+            const res1 = await fetch('/api/ai/cache-global-dataset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ surveyId })
+                body: JSON.stringify({ surveyId, phase: 1 })
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Failed to build AI cache");
+            const data1 = await res1.json();
+            if (!res1.ok) throw new Error(data1.error || "Phase 1 failed");
+
+            // Phase 2: suggestions merge (up to 300s)
+            setBuildPhase(2);
+            const res2 = await fetch('/api/ai/cache-global-dataset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ surveyId, phase: 2 })
+            });
+            const data2 = await res2.json();
+            if (!res2.ok) throw new Error(data2.error || "Phase 2 failed");
 
             const summary: BuildSummary = {
-                total_org_units: data.total_org_units ?? 0,
-                analyzed_units: data.analyzed_units ?? 0,
-                quant_only_units: data.quant_only_units ?? 0,
-                cached_units: data.count ?? 0,
+                total_org_units: data1.total_org_units ?? 0,
+                analyzed_units: data1.analyzed_units ?? 0,
+                quant_only_units: data1.quant_only_units ?? 0,
+                cached_units: data1.count ?? 0,
             };
             setBuildSummary(summary);
             try { localStorage.setItem(`ai_build_summary_${surveyId}`, JSON.stringify(summary)); } catch {}
 
             const unanalyzed = summary.total_org_units - summary.analyzed_units;
-            toast.success(`AI Context Built! ${summary.analyzed_units}/${summary.total_org_units} units analyzed.${unanalyzed > 0 ? ` ${unanalyzed} unit(s) still need analysis.` : ''}`);
+            toast.success(`AI Context Built! ${summary.analyzed_units}/${summary.total_org_units} units analyzed.${unanalyzed > 0 ? ` ${unanalyzed} unit(s) still need analysis.` : ''} ${data2.suggestions_count ?? 0} suggestions loaded.`);
             setAiCacheUpdatedAt(new Date().toISOString());
         } catch (e: any) {
             toast.error(e.message);
         } finally {
             if (buildTimerRef.current) clearInterval(buildTimerRef.current);
             setBuildingAiCache(false);
+            setBuildPhase(null);
         }
     };
 
@@ -917,9 +932,7 @@ export default function SurveyManagePage() {
                                             {buildingAiCache ? (
                                                 <>
                                                     <Loader2 className="w-4 h-4 animate-spin" />
-                                                    {buildElapsed > 0
-                                                        ? `${Math.floor(buildElapsed / 60)}:${String(buildElapsed % 60).padStart(2, '0')}`
-                                                        : "Building..."}
+                                                    {`Phase ${buildPhase ?? 1}/2 · ${buildElapsed > 0 ? `${Math.floor(buildElapsed / 60)}:${String(buildElapsed % 60).padStart(2, '0')}` : '...'}`}
                                                 </>
                                             ) : (
                                                 <>
