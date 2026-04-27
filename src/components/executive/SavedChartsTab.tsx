@@ -217,8 +217,8 @@ export default function SavedChartsTab({ onOpenAnalyst }: Props) {
                                 label={({ percent }: any) => `${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}>
                                 {data.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                             </Pie>
-                            <Tooltip formatter={(v: any, name: string) => [typeof v === 'number' ? v.toFixed(2) : v, formatKey(name)]} />
-                            <Legend formatter={(v: string) => formatKey(v)} wrapperStyle={{ fontSize: '10px', paddingTop: '6px' }} />
+                            <Tooltip formatter={(v: any, name: any) => [typeof v === 'number' ? v.toFixed(2) : v, formatKey(name ?? '')]} />
+                            <Legend formatter={(v: any) => formatKey(v ?? '')} wrapperStyle={{ fontSize: '10px', paddingTop: '6px' }} />
                         </PieChart>
                     ) : chart.type === "SCATTER" ? (
                         <ScatterChart margin={{ top: 16, right: 32, bottom: 36, left: 16 }}>
