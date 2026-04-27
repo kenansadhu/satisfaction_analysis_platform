@@ -424,9 +424,9 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                             labelLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}>
                                             {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                                         </Pie>
-                                        <Tooltip formatter={(value: any, name: string) => [
+                                        <Tooltip formatter={(value: any, name: string | undefined) => [
                                             typeof value === 'number' ? value.toFixed(2) : value,
-                                            formatKey(name),
+                                            formatKey(name ?? ''),
                                         ]} />
                                         <Legend formatter={(v) => formatKey(v)} wrapperStyle={{ fontSize: '10px', paddingTop: '6px' }} />
                                     </PieChart>
