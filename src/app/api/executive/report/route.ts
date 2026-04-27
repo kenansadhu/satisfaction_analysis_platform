@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Helper: paginate through all rows (Supabase default limit = 1000)
 async function fetchAll(queryFactory: () => any, label?: string): Promise<any[]> {
@@ -124,18 +124,15 @@ export async function GET(req: NextRequest) {
             overall.count += count;
         }
     } else {
-        // Cache miss — compute from raw data, then store
-        // Uses same approach as ComprehensiveDashboard: group by source_column,
-        // exclude binary (0/1) columns by checking max value.
+        // Cache miss — scan all quantitative inputs for this survey in one paginated pass.
+        // We join through respondents by filtering on respondent_id IN (all resp IDs), but
+        // do it as a single paginated scan to avoid the O(n²) chunk×page nesting.
         type ColumnAccum = {
             maxScore: number;
-            rule: string | null;
             campusData: Map<string, { sum: number; count: number }>;
         };
         const unitColumnAccum = new Map<number, Map<string, ColumnAccum>>();
 
-        const CHUNK = 400;
-        const MAX_CONCURRENT = 5;
         const processRows = (rows: any[]) => {
             for (const row of rows) {
                 const unitId = row.target_unit_id;
@@ -147,10 +144,9 @@ export async function GET(req: NextRequest) {
 
                 if (!unitColumnAccum.has(unitId)) unitColumnAccum.set(unitId, new Map());
                 const colMap = unitColumnAccum.get(unitId)!;
-                if (!colMap.has(col)) colMap.set(col, { maxScore: 0, rule: row.score_rule, campusData: new Map() });
+                if (!colMap.has(col)) colMap.set(col, { maxScore: 0, campusData: new Map() });
                 const colAcc = colMap.get(col)!;
                 if (score > colAcc.maxScore) colAcc.maxScore = score;
-                if (!colAcc.rule && row.score_rule) colAcc.rule = row.score_rule;
 
                 if (!colAcc.campusData.has(campus)) colAcc.campusData.set(campus, { sum: 0, count: 0 });
                 const entry = colAcc.campusData.get(campus)!;
@@ -159,23 +155,20 @@ export async function GET(req: NextRequest) {
             }
         };
 
-        // Fetch in parallel batches of MAX_CONCURRENT chunks to avoid sequential timeouts
-        for (let batchStart = 0; batchStart < respIds.length; batchStart += CHUNK * MAX_CONCURRENT) {
-            const batchChunks: number[][] = [];
-            for (let i = batchStart; i < Math.min(batchStart + CHUNK * MAX_CONCURRENT, respIds.length); i += CHUNK) {
-                batchChunks.push(respIds.slice(i, i + CHUNK));
-            }
-            const batchResults = await Promise.all(batchChunks.map(chunk =>
-                fetchAll(() =>
-                    supabase.from('raw_feedback_inputs')
-                        .select('respondent_id, target_unit_id, source_column, numerical_score, score_rule')
-                        .in('respondent_id', chunk)
-                        .eq('is_quantitative', true)
-                        .not('numerical_score', 'is', null),
-                    'quant-scores'
-                )
-            ));
-            for (const rows of batchResults) processRows(rows);
+        // Single paginated scan — filter by respondent_id in chunks of 500 to stay within
+        // Supabase URL length limits, but paginate each chunk fully before moving on.
+        const CHUNK = 500;
+        for (let i = 0; i < respIds.length; i += CHUNK) {
+            const chunk = respIds.slice(i, i + CHUNK);
+            const rows = await fetchAll(() =>
+                supabase.from('raw_feedback_inputs')
+                    .select('respondent_id, target_unit_id, source_column, numerical_score')
+                    .in('respondent_id', chunk)
+                    .eq('is_quantitative', true)
+                    .not('numerical_score', 'is', null),
+                'quant-scores'
+            );
+            processRows(rows);
         }
 
         // Phase 2: Aggregate, excluding binary or "wrong" Likert columns (max score <= 1)

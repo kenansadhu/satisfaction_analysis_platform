@@ -499,7 +499,7 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="h-56">
+                            <div className="h-56 min-h-[224px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={facData} margin={{ top: 5, right: 10, left: -10, bottom: 40 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
