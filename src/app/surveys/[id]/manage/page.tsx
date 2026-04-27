@@ -41,6 +41,8 @@ interface ColumnMapping {
     newRule?: ScoreRule;
     ruleChanged?: boolean;
     customMapping?: Record<string, number | null>;
+    // The resolved type at load time (source of truth for dirty detection)
+    _initialType?: DataType;
 }
 
 interface ProdiEnrollmentEntry {
@@ -137,6 +139,17 @@ export default function SurveyManagePage() {
         setUnits(unitsData || []);
         const unitMap = new Map((unitsData || []).map(u => [u.id, u.name]));
 
+        // Fetch explicit column types from cache (source of truth after first save)
+        const { data: colTypeCache } = await supabase
+            .from('survey_column_cache')
+            .select('source_column, column_type')
+            .eq('survey_id', parseInt(surveyId));
+        const colTypeCacheMap = new Map<string, DataType>(
+            (colTypeCache || [])
+                .filter((r: any) => r.column_type)
+                .map((r: any) => [r.source_column, r.column_type as DataType])
+        );
+
         // 2. Extract Respondent IDs with pagination
         let respIds: number[] = [];
         let rPage = 0;
@@ -219,11 +232,11 @@ export default function SurveyManagePage() {
         }
 
         const mappings: ColumnMapping[] = Array.from(groupMap.entries()).map(([key, g]) => {
-            // Derive the current data type from flags
-            let currentType: DataType = "IGNORE";
-            if (g.is_quantitative) currentType = "SCORE";
-            else if (g.requires_analysis) currentType = "TEXT";
-            else currentType = "CATEGORY";
+            // Use explicit column_type from cache if available (survives analysis flipping requires_analysis).
+            // Fall back to flag derivation for columns not yet explicitly saved.
+            let currentType: DataType = colTypeCacheMap.get(key) ?? (
+                g.is_quantitative ? "SCORE" : g.requires_analysis ? "TEXT" : "CATEGORY"
+            );
 
             return {
                 source_column: g.source_column,
@@ -236,6 +249,7 @@ export default function SurveyManagePage() {
                 // Initialize editable fields to current values
                 newUnitId: g.target_unit_id,
                 newType: currentType,
+                _initialType: currentType,
                 newRule: g.score_rule || (currentType === "SCORE" ? "NUMBER" : undefined),
                 customMapping: g.custom_mapping || {},
                 _minId: g.minId,
@@ -601,8 +615,7 @@ export default function SurveyManagePage() {
     // Detect which columns have unsaved changes
     const dirtyColumns = useMemo(() => {
         return columns.filter(c => {
-            const origType: DataType = c.is_quantitative ? "SCORE" : (c.requires_analysis ? "TEXT" : "CATEGORY");
-            return c.newUnitId !== c.target_unit_id || c.newType !== origType || c.ruleChanged;
+            return c.newUnitId !== c.target_unit_id || c.newType !== c._initialType || c.ruleChanged;
         });
     }, [columns]);
 
@@ -716,6 +729,17 @@ export default function SurveyManagePage() {
                         }
                     }
                 }
+            }
+
+            // Persist explicit column types so they survive analysis flipping requires_analysis
+            const colTypeRows = dirtyColumns.map(col => ({
+                survey_id: parseInt(surveyId),
+                source_column: col.source_column,
+                column_type: col.newType || 'CATEGORY',
+            }));
+            for (let i = 0; i < colTypeRows.length; i += 50) {
+                await supabase.from('survey_column_cache')
+                    .upsert(colTypeRows.slice(i, i + 50), { onConflict: 'survey_id,source_column' });
             }
 
             // Invalidate derived caches — segments changed, all downstream caches are stale
@@ -1047,9 +1071,8 @@ export default function SurveyManagePage() {
                                         {/* Expandable Column Cards */}
                                         <div className="space-y-2">
                                             {filteredColumns.map(col => {
-                                                const origType: DataType = col.is_quantitative ? "SCORE" : (col.requires_analysis ? "TEXT" : "CATEGORY");
-                                                const isDirty = col.newUnitId !== col.target_unit_id || col.newType !== origType || col.ruleChanged;
-                                                const currentType = col.newType || origType;
+                                                const isDirty = col.newUnitId !== col.target_unit_id || col.newType !== col._initialType || col.ruleChanged;
+                                                const currentType = col.newType || col._initialType || "CATEGORY";
                                                 const isExpanded = expandedCols.has(col.source_column);
                                                 const uniqueVals = colUniqueValues.get(col.source_column) || [];
                                                 const hasUniqueVals = uniqueVals.length > 0;

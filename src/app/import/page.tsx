@@ -393,6 +393,21 @@ export default function ImportPage() {
         setProgress(Math.round((processedRows / csvData.length) * 100));
         setStatusMessage(`Processed ${processedRows} rows...`);
       }
+      // Persist explicit column types so they survive analysis flipping requires_analysis
+      const colTypeCacheRows = Object.entries(columnConfigs)
+        .filter(([, cfg]) => cfg.type !== "IGNORE" && cfg.unitId)
+        .map(([header, cfg]) => ({
+          survey_id: surveyId,
+          source_column: header,
+          column_type: cfg.type,
+        }));
+      if (colTypeCacheRows.length > 0) {
+        for (let i = 0; i < colTypeCacheRows.length; i += 50) {
+          await supabase.from('survey_column_cache')
+            .upsert(colTypeCacheRows.slice(i, i + 50), { onConflict: 'survey_id,source_column' });
+        }
+      }
+
       setStatusMessage("Import Complete!");
       setTimeout(() => window.location.href = "/surveys", 1000);
     } catch (e: any) {

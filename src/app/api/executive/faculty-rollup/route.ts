@@ -34,8 +34,11 @@ export async function GET(req: NextRequest) {
         .select("faculty, respondents, enrolled, positive, negative, neutral, total_segments, top_categories")
         .eq("survey_id", sid);
 
-    // Cache hit only if rows exist AND top_categories is populated (not a pre-migration row)
-    if (!cacheErr && cached && cached.length > 0 && cached.some(r => r.top_categories !== null)) {
+    // Cache hit only if rows exist with actual segment data or non-empty categories.
+    // An empty top_categories=[] with total_segments=0 means the cache was written before
+    // analysis ran — treat that as a miss so fresh data is computed.
+    const hasRealData = cached && cached.some(r => r.total_segments > 0 || (Array.isArray(r.top_categories) && r.top_categories.length > 0));
+    if (!cacheErr && hasRealData) {
         return NextResponse.json({ faculties: buildResult(cached), fromCache: true });
     }
 

@@ -111,6 +111,10 @@ export async function POST(req: Request) {
         if (rawItems.length === 0) {
             // Nothing left to process!
             await supabase.from('analysis_jobs').update({ status: 'COMPLETED', ended_at: new Date().toISOString() }).eq('id', jobId);
+            // Bust faculty cache so new segments appear immediately
+            if (surveyId) {
+                await supabase.from('survey_faculty_cache').delete().eq('survey_id', surveyId);
+            }
             return NextResponse.json({ hasMore: false, processedIds: [] });
         }
 
