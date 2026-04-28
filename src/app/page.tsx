@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
     ArrowRight, Database, Users, Building2, Sparkles,
     TrendingUp, Zap, PieChart, GraduationCap, Activity,
-    LayoutDashboard, Upload, Loader2,
+    LayoutDashboard, Upload, Loader2, BrainCircuit,
 } from "lucide-react";
 
 export default function HomePage() {
@@ -73,12 +73,23 @@ export default function HomePage() {
             href: "/executive",
             icon: Activity,
             label: "Executive Insights",
-            description: "Reports, AI analytics, and suggestions",
+            description: "Reports, year comparison, and suggestions",
             color: "blue",
             iconBg: "bg-blue-50 dark:bg-blue-950/40",
             iconColor: "text-blue-600 dark:text-blue-400",
             hoverBorder: "hover:border-blue-300 dark:hover:border-blue-700",
             hoverArrow: "group-hover:text-blue-500",
+        },
+        {
+            href: "/ai-scientist",
+            icon: BrainCircuit,
+            label: "AI Data Scientist",
+            description: "Conversational AI analysis and saved charts",
+            color: "violet",
+            iconBg: "bg-violet-50 dark:bg-violet-950/40",
+            iconColor: "text-violet-600 dark:text-violet-400",
+            hoverBorder: "hover:border-violet-300 dark:hover:border-violet-700",
+            hoverArrow: "group-hover:text-violet-500",
         },
     ];
 
@@ -135,7 +146,7 @@ export default function HomePage() {
                 {/* Quick Actions */}
                 <div>
                     <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">Quick Access</h2>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                         {quickActions.map((action) => (
                             <Link key={action.href} href={action.href} className="group">
                                 <div className={`flex flex-col h-full min-h-[156px] p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 ${action.hoverBorder} hover:shadow-lg transition-all duration-200 group-hover:-translate-y-1`}>

@@ -267,16 +267,6 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                         priority: priorityFor(t),
                         quotes: t.suggestions.slice(0, 5).map(s => ({ text: s.text, sentiment: s.sentiment })),
                     })),
-                    cross_unit_patterns: patterns.slice(0, 10).map(p => ({
-                        category: p.category,
-                        total_voices: p.total,
-                        negative_pct: p.total > 0 ? Math.round(p.negative / p.total * 100) : 0,
-                        units_affected: p.unitSlices.map(u => ({
-                            unit: u.unit.name,
-                            count: u.count,
-                            top_quote: u.topQuote,
-                        })),
-                    })),
                 }),
             });
             const data = await res.json();
@@ -505,7 +495,7 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                         </div>
                         <div>
                             <h3 className="text-base font-semibold text-slate-800 dark:text-slate-200 mb-1">No summary yet</h3>
-                            <p className="text-sm text-slate-500 max-w-sm">Generate an AI-powered executive briefing covering top issues, systemic patterns, bright spots, and recommended actions.</p>
+                            <p className="text-sm text-slate-500 max-w-sm">Generate an AI-powered executive briefing covering top issues, bright spots, and recommended actions.</p>
                         </div>
                         <Button className="gap-2 bg-violet-600 hover:bg-violet-700 text-white" onClick={handleGenerateSummary}>
                             <Sparkles className="w-4 h-4" /> Generate Summary
@@ -742,7 +732,7 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                         </div>
                     )}
                 </>
-            ) : (
+            ) : viewMode === "patterns" ? (
                 /* Cross-Unit Patterns */
                 <div className="space-y-4">
                     {patterns.length === 0 ? (
@@ -841,7 +831,7 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                         </>
                     )}
                 </div>
-            )}
+            ) : null}
         </div>
     );
 }

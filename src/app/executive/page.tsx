@@ -9,14 +9,12 @@ import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
 import { ActionPriorityMatrix } from "@/components/analytics/ActionPriorityMatrix";
 import CrossUnitMentions from "@/components/analytics/CrossUnitMentions";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Save, Lightbulb, TrendingUp, Share2 } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, Share2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
 import YearComparison from "@/components/executive/YearComparison";
 import SSIReport from "@/components/executive/SSIReport";
-import AIAnalystChat from "@/components/analysis/AIAnalystChat";
-import SavedChartsTab from "@/components/executive/SavedChartsTab";
 import SuggestionHub from "@/components/executive/SuggestionHub";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
 import { useActiveSurvey } from "@/context/SurveyContext";
@@ -127,12 +125,6 @@ export default function ExecutiveDashboard() {
                         </TabsTrigger>
                         <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
-                        </TabsTrigger>
-                        <TabsTrigger value="analyst" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <Sparkles className="w-4 h-4 text-purple-500" /> AI Analyst
-                        </TabsTrigger>
-                        <TabsTrigger value="saved" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <Save className="w-4 h-4" /> Saved
                         </TabsTrigger>
                         <TabsTrigger value="suggestions" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <Lightbulb className="w-4 h-4 text-amber-500" /> Suggestions
@@ -265,18 +257,6 @@ export default function ExecutiveDashboard() {
 
                     <TabsContent value="comparison" className="mt-6 focus-visible:ring-0">
                         <YearComparison surveys={surveys as any} />
-                    </TabsContent>
-
-                    <TabsContent value="analyst" className="focus-visible:ring-0">
-                        <AIAnalystChat
-                            surveyId={selectedSurvey === "all" ? undefined : selectedSurvey}
-                            macroData={[]}
-                            onChartSaved={() => {}}
-                        />
-                    </TabsContent>
-
-                    <TabsContent value="saved" className="focus-visible:ring-0">
-                        <SavedChartsTab />
                     </TabsContent>
 
                     <TabsContent value="suggestions" className="focus-visible:ring-0">

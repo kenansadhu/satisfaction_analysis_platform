@@ -17,6 +17,7 @@ import {
     Users,
     LogOut,
     UserCog,
+    BrainCircuit,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -133,6 +134,7 @@ export function Sidebar({
                     <NavItem href="/executive" icon={Activity} label="Executive Insights" active={pathname === "/executive"} prominent={true} />
                     <NavItem href="/unit-insights" icon={PieChart} label="Unit Insights" active={pathname === "/unit-insights" || pathname.startsWith("/unit-insights/")} prominent={true} />
                     <NavItem href="/faculty-insights" icon={GraduationCap} label="Faculty Insights" active={pathname === "/faculty-insights" || pathname.startsWith("/faculty-insights/")} prominent={true} />
+                    <NavItem href="/ai-scientist" icon={BrainCircuit} label="AI Data Scientist" active={pathname === "/ai-scientist"} prominent={true} />
                 </div>
 
                 {/* Settings / Footer */}
