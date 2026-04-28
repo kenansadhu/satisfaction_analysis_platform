@@ -223,8 +223,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 return allData;
             };
 
-            // 4. Fetch qualitative data (with segments) and quantitative data in parallel
-            const [qData, sData] = await Promise.all([
+            // 4. Fetch qualitative data (with segments), quantitative data, and column type cache in parallel
+            const [qData, sData, colTypeCacheRes] = await Promise.all([
                 fetchByRespondentChunks(
                     `id, respondent_id, source_column, raw_text, feedback_segments (id, segment_text, sentiment, category_id, is_suggestion, related_unit_ids)`,
                     (q) => q.eq('is_quantitative', false).eq('requires_analysis', false)
@@ -232,7 +232,10 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 fetchByRespondentChunks(
                     'id, respondent_id, source_column, numerical_score, raw_text',
                     (q) => q.eq('is_quantitative', true).not('numerical_score', 'is', null)
-                )
+                ),
+                surveyId
+                    ? supabase.from('survey_column_cache').select('source_column, column_type').eq('survey_id', parseInt(surveyId))
+                    : Promise.resolve({ data: [] }),
             ]);
 
             // Attach respondent info
@@ -241,8 +244,29 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
 
             console.log(`✅ Loaded: ${qData.length} qualitative, ${sData.length} quantitative`);
 
-            // 5. Fetch verification stats — all chunks fired simultaneously
-            const allInputIds = qData.map((r: any) => r.id);
+            // Split qData into TEXT rows vs CATEGORY rows using survey_column_cache.column_type.
+            // Without this, analyzed TEXT columns (requires_analysis flipped to false after analysis)
+            // are indistinguishable from CATEGORY columns via flags alone.
+            const colTypeMap = new Map<string, string>(
+                ((colTypeCacheRes as any).data || [])
+                    .filter((r: any) => r.column_type)
+                    .map((r: any) => [r.source_column, r.column_type as string])
+            );
+            // Fallback for columns not yet in cache: if any row for the column has segments it's TEXT
+            const colsWithSegments = new Set<string>();
+            qData.forEach((r: any) => {
+                if (r.feedback_segments && r.feedback_segments.length > 0) colsWithSegments.add(r.source_column);
+            });
+            const isTextCol = (col: string) => {
+                const t = colTypeMap.get(col);
+                if (t) return t === 'TEXT';
+                return colsWithSegments.has(col);
+            };
+            const textRows = qData.filter((r: any) => isTextCol(r.source_column));
+            const catRows  = qData.filter((r: any) => !isTextCol(r.source_column));
+
+            // 5. Fetch verification stats — only over text rows (segments only exist on text inputs)
+            const allInputIds = textRows.map((r: any) => r.id);
             const STAT_CHUNK = 500;
             const statChunks: number[][] = [];
             for (let i = 0; i < allInputIds.length; i += STAT_CHUNK) statChunks.push(allInputIds.slice(i, i + STAT_CHUNK));
@@ -266,11 +290,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId }: { unitId: s
                 setTotalSegmentCount(0);
             }
 
-            // csData is the same rows as qData (qualitative non-quant), just used for categorical score grouping
-            // No need for a separate fetch — reuse qData
-            setBaseRawInputs(qData);
+            setBaseRawInputs(textRows);
             setBaseScores(sData);
-            setBaseCatScores(qData);
+            setBaseCatScores(catRows);
 
         } catch (error) {
             console.error(error);
