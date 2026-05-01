@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 
 // POST: Force recompute cache for a survey (e.g. after re-import)
 // DELETE: Clear cache for a survey

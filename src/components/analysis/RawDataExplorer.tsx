@@ -34,7 +34,7 @@ export default function RawDataExplorer({
     rawDataLoading,
     rawDataEntries,
     rawDataTotal,
-    RAW_PAGE_SIZE
+    RAW_PAGE_SIZE,
 }: RawDataExplorerProps) {
     return (
         <Card className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm print:hidden">

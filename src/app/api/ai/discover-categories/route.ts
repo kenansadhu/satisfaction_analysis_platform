@@ -1,4 +1,4 @@
-import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
+import { callGemini, wrapUserData, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { discoverCategoriesSchema } from "@/lib/validators";
 import { MANDATORY_CATEGORIES } from "@/lib/constants";
@@ -13,6 +13,7 @@ export async function POST(req: Request) {
     }
 
     const { comments, currentCategories, instructions, unitName, unitDescription } = validation.data;
+    const { modelId, addendum } = await getAgentSettings("discover-categories");
 
     // Format the "Memory" of what we found so far
     const existingList = currentCategories.length > 0
@@ -63,7 +64,9 @@ export async function POST(req: Request) {
       }
     `;
 
-    const result = await callGemini(prompt);
+    const result = await callGemini(prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
+      model: modelId, functionId: "discover-categories",
+    });
     return NextResponse.json(result);
 
   } catch (error) {

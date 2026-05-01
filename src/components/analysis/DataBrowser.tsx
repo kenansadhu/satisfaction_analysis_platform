@@ -51,8 +51,16 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
     const [verificationFilter, setVerificationFilter] = useState<"all" | "unverified" | "verified">("all");
     const [showVerifyConfirm, setShowVerifyConfirm] = useState(false);
 
+    // Cache refs — avoid redundant DB round-trips on page turns.
+    // respIds only change when surveyId changes; inputIds only change when unit/survey/filter changes.
+    const respIdsCacheRef = useRef<{ key: string; ids: number[] } | null>(null);
+    const inputIdsCacheRef = useRef<{ key: string; ids: number[] } | null>(null);
+
     useEffect(() => {
         loadCategories();
+        // Invalidate caches whenever the context changes
+        respIdsCacheRef.current = null;
+        inputIdsCacheRef.current = null;
     }, [unitId, surveyId]);
 
     // Debounce search input (300ms)
@@ -76,96 +84,140 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
         if (isAnalyzing && currentUnitId === unitId) {
             wasAnalyzingRef.current = true;
         } else if (wasAnalyzingRef.current) {
-            // Analysis just finished — reload
             wasAnalyzingRef.current = false;
+            // Invalidate caches — new segments may have been added
+            respIdsCacheRef.current = null;
+            inputIdsCacheRef.current = null;
             loadData();
             loadCategories();
         }
     }, [isAnalyzing]);
-
-
 
     async function loadCategories() {
         const { data } = await supabase.from('analysis_categories').select('*').eq('unit_id', unitId);
         if (data) setCategories(data);
     }
 
-
-
     async function loadData() {
         setLoading(true);
 
-        let inputIds: number[] = [];
-
+        // ── Step 1: Respondent IDs (cached per surveyId) ───────────────────────
+        // For 8k respondents this was 8+ sequential round-trips; now it's 1-2 parallel calls.
+        const respCacheKey = surveyId || 'all';
+        let respIds: number[] = [];
         if (surveyId) {
-            let respIds: number[] = [];
-            let rPage = 0;
-            while (true) {
-                const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                if (!rBat || rBat.length === 0) break;
-                respIds.push(...rBat.map((r: any) => r.id));
-                if (rBat.length < 1000) break;
-                rPage++;
+            if (respIdsCacheRef.current?.key === respCacheKey) {
+                respIds = respIdsCacheRef.current.ids;
+            } else {
+                const firstPage = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(0, 999);
+                respIds = (firstPage.data || []).map((r: any) => r.id);
+                if (firstPage.data && firstPage.data.length === 1000) {
+                    const { count: totalResps } = await supabase.from('respondents')
+                        .select('*', { count: 'exact', head: true }).eq('survey_id', surveyId);
+                    const extraPages = Math.ceil(((totalResps || 1000) - 1000) / 1000);
+                    const rest = await Promise.all(
+                        Array.from({ length: extraPages }, (_, i) =>
+                            supabase.from('respondents').select('id').eq('survey_id', surveyId)
+                                .range((i + 1) * 1000, (i + 2) * 1000 - 1)
+                        )
+                    );
+                    for (const pg of rest) respIds.push(...(pg.data || []).map((r: any) => r.id));
+                }
+                respIdsCacheRef.current = { key: respCacheKey, ids: respIds };
             }
+        }
 
-            if (respIds.length > 0) {
-                const CHUNK = 200;
-                for (let i = 0; i < respIds.length; i += CHUNK) {
-                    const chunk = respIds.slice(i, i + CHUNK);
+        // ── Step 2: All matching input IDs (cached per unit+survey+filter) ──────
+        // Page turns skip this entirely and use the cached array.
+        const inputCacheKey = `${unitId}|${surveyId}|${debouncedFilter}`;
+        let inputIds: number[];
+
+        if (inputIdsCacheRef.current?.key === inputCacheKey) {
+            inputIds = inputIdsCacheRef.current.ids;
+            setTotalCount(inputIds.length);
+        } else {
+            const CHUNK = 500;
+            let collectedIds: number[] = [];
+
+            if (surveyId && respIds.length > 0) {
+                // Split into chunks and query ALL chunks in parallel instead of sequentially
+                const chunks: number[][] = [];
+                for (let i = 0; i < respIds.length; i += CHUNK) chunks.push(respIds.slice(i, i + CHUNK));
+
+                const chunkResults = await Promise.all(chunks.map(async (chunk) => {
+                    const ids: number[] = [];
                     let iPage = 0;
                     while (true) {
-                        let q = supabase.from('raw_feedback_inputs').select('id, raw_text, feedback_segments!inner(id)').eq('target_unit_id', unitId).eq('requires_analysis', false).in('respondent_id', chunk).range(iPage * 1000, (iPage + 1) * 1000 - 1);
+                        let q = supabase.from('raw_feedback_inputs')
+                            .select('id, feedback_segments!inner(id)')
+                            .eq('target_unit_id', unitId)
+                            .eq('requires_analysis', false)
+                            .in('respondent_id', chunk)
+                            .range(iPage * 1000, (iPage + 1) * 1000 - 1);
                         if (debouncedFilter) q = q.ilike('raw_text', `%${debouncedFilter}%`);
                         const { data } = await q;
                         if (!data || data.length === 0) break;
-                        inputIds.push(...data.map(d => d.id));
+                        ids.push(...data.map((d: any) => d.id));
                         if (data.length < 1000) break;
                         iPage++;
                     }
+                    return ids;
+                }));
+                collectedIds = chunkResults.flat();
+            } else if (!surveyId) {
+                let iPage = 0;
+                while (true) {
+                    let q = supabase.from('raw_feedback_inputs')
+                        .select('id, feedback_segments!inner(id)')
+                        .eq('target_unit_id', unitId)
+                        .eq('requires_analysis', false)
+                        .range(iPage * 1000, (iPage + 1) * 1000 - 1);
+                    if (debouncedFilter) q = q.ilike('raw_text', `%${debouncedFilter}%`);
+                    const { data } = await q;
+                    if (!data || data.length === 0) break;
+                    collectedIds.push(...data.map((d: any) => d.id));
+                    if (data.length < 1000) break;
+                    iPage++;
                 }
             }
-        } else {
-            let iPage = 0;
-            while (true) {
-                let q = supabase.from('raw_feedback_inputs').select('id, raw_text, feedback_segments!inner(id)').eq('target_unit_id', unitId).eq('requires_analysis', false).range(iPage * 1000, (iPage + 1) * 1000 - 1);
-                if (debouncedFilter) q = q.ilike('raw_text', `%${debouncedFilter}%`);
-                const { data } = await q;
-                if (!data || data.length === 0) break;
-                inputIds.push(...data.map((d: any) => d.id));
-                if (data.length < 1000) break;
-                iPage++;
+
+            inputIds = Array.from(new Set(collectedIds)).sort((a, b) => a - b);
+            inputIdsCacheRef.current = { key: inputCacheKey, ids: inputIds };
+            setTotalCount(inputIds.length);
+
+            // Verification stats — all chunks fired simultaneously instead of sequentially
+            const STAT_CHUNK = 500;
+            const statChunks: number[][] = [];
+            for (let i = 0; i < inputIds.length; i += STAT_CHUNK) statChunks.push(inputIds.slice(i, i + STAT_CHUNK));
+
+            if (statChunks.length > 0) {
+                const statResults = await Promise.all(
+                    statChunks.map(chunk => Promise.all([
+                        supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk),
+                        supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk).eq('is_verified', true)
+                    ]))
+                );
+                let totalSegs = 0, verifiedSegs = 0;
+                for (const [tRes, vRes] of statResults) {
+                    totalSegs += tRes.count || 0;
+                    verifiedSegs += vRes.count || 0;
+                }
+                setTotalSegments(totalSegs);
+                setVerifiedCount(verifiedSegs);
+            } else {
+                setTotalSegments(0);
+                setVerifiedCount(0);
             }
         }
 
-        // Remove duplicates
-        inputIds = Array.from(new Set(inputIds));
-        inputIds.sort((a, b) => a - b);
-        setTotalCount(inputIds.length);
-
-        // Compute verification stats from these same inputIds
-        let totalSegs = 0;
-        let verifiedSegs = 0;
-        const STAT_CHUNK = 200;
-        for (let i = 0; i < inputIds.length; i += STAT_CHUNK) {
-            const chunk = inputIds.slice(i, i + STAT_CHUNK);
-            const [tRes, vRes] = await Promise.all([
-                supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk),
-                supabase.from('feedback_segments').select('*', { count: 'exact', head: true }).in('raw_input_id', chunk).eq('is_verified', true)
-            ]);
-            totalSegs += tRes.count || 0;
-            verifiedSegs += vRes.count || 0;
-        }
-        setTotalSegments(totalSegs);
-        setVerifiedCount(verifiedSegs);
-
+        // ── Step 3: Fetch current page (always fresh — just 50 rows, 1 DB call) ─
         const pageInputIds = inputIds.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
         let rawData: any[] = [];
         if (pageInputIds.length > 0) {
             const { data } = await supabase
                 .from('raw_feedback_inputs')
                 .select(`
-                    id, 
+                    id,
                     raw_text,
                     respondent_id,
                     feedback_segments (
@@ -183,27 +235,25 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
             rawData = data || [];
         }
 
-        if (rawData) {
-            let cleanRows = rawData.map((r: any) => ({
+        let cleanRows = rawData.map((r: any) => ({
+            ...r,
+            segments: r.feedback_segments.filter((s: any) => s.segment_text.length > 1 && s.segment_text !== "-")
+        })).filter((r: any) => r.segments.length > 0);
+
+        // Apply verification filter (client-side — totalCount intentionally reflects unfiltered total)
+        if (verificationFilter === "unverified") {
+            cleanRows = cleanRows.map((r: any) => ({
                 ...r,
-                segments: r.feedback_segments.filter((s: any) => s.segment_text.length > 1 && s.segment_text !== "-")
+                segments: r.segments.filter((s: any) => !s.is_verified)
             })).filter((r: any) => r.segments.length > 0);
-
-            // Apply verification filter
-            if (verificationFilter === "unverified") {
-                cleanRows = cleanRows.map((r: any) => ({
-                    ...r,
-                    segments: r.segments.filter((s: any) => !s.is_verified)
-                })).filter((r: any) => r.segments.length > 0);
-            } else if (verificationFilter === "verified") {
-                cleanRows = cleanRows.map((r: any) => ({
-                    ...r,
-                    segments: r.segments.filter((s: any) => s.is_verified)
-                })).filter((r: any) => r.segments.length > 0);
-            }
-
-            setRows(cleanRows);
+        } else if (verificationFilter === "verified") {
+            cleanRows = cleanRows.map((r: any) => ({
+                ...r,
+                segments: r.segments.filter((s: any) => s.is_verified)
+            })).filter((r: any) => r.segments.length > 0);
         }
+
+        setRows(cleanRows);
         setLoading(false);
     }
 
@@ -319,22 +369,24 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
             </div>
 
             {/* Toolbar */}
-            <div className="flex flex-wrap justify-between items-center bg-white p-4 rounded-lg border shadow-sm sticky top-0 z-10 gap-3">
-                {/* Left: Search */}
-                <div className="flex gap-2 flex-1 min-w-[200px] max-w-sm relative">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                        placeholder="Search comments..."
-                        value={filterText}
-                        onChange={handleSearch}
-                        className="pl-9"
-                    />
-                </div>
+            <div className="bg-white rounded-lg border shadow-sm sticky top-0 z-10 divide-y divide-slate-100">
 
-                {/* Center: Filter + Batch Action */}
-                <div className="flex items-center gap-3">
+                {/* Row 1: Search + Filter + Verify */}
+                <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="relative flex-1 max-w-sm">
+                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                        <Input
+                            placeholder="Search comments..."
+                            value={filterText}
+                            onChange={handleSearch}
+                            className="pl-9"
+                        />
+                    </div>
+
+                    <div className="h-5 w-px bg-slate-200" />
+
                     <div className="flex items-center gap-2">
-                        <Filter className="w-4 h-4 text-slate-400" />
+                        <Filter className="w-4 h-4 text-slate-400 shrink-0" />
                         <Select value={verificationFilter} onValueChange={(v) => { setVerificationFilter(v as any); setPage(0); }}>
                             <SelectTrigger className="h-8 w-[160px] text-xs">
                                 <SelectValue />
@@ -353,7 +405,7 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="text-xs gap-1.5 border-green-200 text-green-700 hover:bg-green-50 hover:border-green-300"
+                                    className="text-xs gap-1.5 border-green-200 text-green-700 hover:bg-green-50 hover:border-green-300 ml-auto"
                                     onClick={() => setShowVerifyConfirm(true)}
                                 >
                                     <ListChecks className="w-3.5 h-3.5" /> Verify Page
@@ -366,39 +418,42 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
                     </TooltipProvider>
                 </div>
 
-                {/* Right: Pagination */}
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-400">Jump to</span>
-                        <Input
-                            type="number"
-                            min={1}
-                            max={totalPages}
-                            className="w-16 h-8 text-xs p-1 px-2"
-                            placeholder="Page"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const val = parseInt((e.target as HTMLInputElement).value);
-                                    if (!isNaN(val) && val >= 1 && val <= totalPages) {
-                                        setPage(val - 1);
+                {/* Row 2: Record count + Jump to + Page buttons */}
+                <div className="flex items-center justify-between gap-4 px-4 py-2 bg-slate-50/60">
+                    <span className="text-xs text-slate-500 whitespace-nowrap">
+                        Showing <span className="font-semibold text-slate-700">{totalCount > 0 ? page * PAGE_SIZE + 1 : 0}–{Math.min((page + 1) * PAGE_SIZE, totalCount)}</span> of <span className="font-semibold text-slate-700">{totalCount}</span> comments
+                    </span>
+
+                    <div className="flex items-center gap-3">
+                        {/* Jump to page */}
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-slate-400">Go to</span>
+                            <Input
+                                type="number"
+                                min={1}
+                                max={totalPages}
+                                className="w-14 h-7 text-xs p-1 px-2"
+                                placeholder="pg"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const val = parseInt((e.target as HTMLInputElement).value);
+                                        if (!isNaN(val) && val >= 1 && val <= totalPages) {
+                                            setPage(val - 1);
+                                        }
                                     }
-                                }
-                            }}
-                        />
-                    </div>
+                                }}
+                            />
+                        </div>
 
-                    <div className="flex items-center gap-4">
-                        <span className="text-sm text-slate-500 whitespace-nowrap">
-                            Showing {totalCount > 0 ? page * PAGE_SIZE + 1 : 0}-{Math.min((page + 1) * PAGE_SIZE, totalCount)} of <strong>{totalCount}</strong>
-                        </span>
+                        <div className="h-4 w-px bg-slate-200" />
 
+                        {/* Prev / page numbers / Next */}
                         <div className="flex items-center gap-1">
-                            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(0)} disabled={page === 0}>
-                                <ChevronLeft className="w-4 h-4 mr-[-2px]" /><ChevronLeft className="w-4 h-4 ml-[-2px]" />
+                            <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setPage(0)} disabled={page === 0}>
+                                <ChevronLeft className="w-3.5 h-3.5 mr-[-3px]" /><ChevronLeft className="w-3.5 h-3.5 ml-[-3px]" />
                             </Button>
-
-                            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
-                                <ChevronLeft className="w-4 h-4" />
+                            <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
+                                <ChevronLeft className="w-3.5 h-3.5" />
                             </Button>
 
                             <div className="flex items-center gap-1 mx-1">
@@ -407,12 +462,12 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
                                     .map((p, idx, arr) => (
                                         <div key={p} className="flex items-center gap-1">
                                             {idx > 0 && arr[idx] !== arr[idx - 1] + 1 && (
-                                                <span className="text-slate-300 px-1">...</span>
+                                                <span className="text-slate-300 px-0.5 text-xs">…</span>
                                             )}
                                             <Button
                                                 variant={page === p ? "default" : "outline"}
                                                 size="sm"
-                                                className={`h-8 w-8 p-0 text-xs ${page === p ? "bg-blue-600 hover:bg-blue-700" : ""}`}
+                                                className={`h-7 w-7 p-0 text-xs ${page === p ? "bg-blue-600 hover:bg-blue-700" : ""}`}
                                                 onClick={() => setPage(p)}
                                             >
                                                 {p + 1}
@@ -422,12 +477,11 @@ export default function DataBrowser({ unitId, surveyId }: { unitId: string; surv
                                 }
                             </div>
 
-                            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
-                                <ChevronRight className="w-4 h-4" />
+                            <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
+                                <ChevronRight className="w-3.5 h-3.5" />
                             </Button>
-
-                            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
-                                <ChevronRight className="w-4 h-4 mr-[-2px]" /><ChevronRight className="w-4 h-4 ml-[-2px]" />
+                            <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
+                                <ChevronRight className="w-3.5 h-3.5 mr-[-3px]" /><ChevronRight className="w-3.5 h-3.5 ml-[-3px]" />
                             </Button>
                         </div>
                     </div>

@@ -1,6 +1,6 @@
-import { callGemini, handleAIError } from "@/lib/ai";
+import { callGemini, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 
 export const maxDuration = 60;
 
@@ -22,6 +22,8 @@ export async function POST(req: Request) {
         if (!unitId || !prompt) {
             return NextResponse.json({ error: "Missing unitId or prompt" }, { status: 400 });
         }
+
+        const { modelId, addendum } = await getAgentSettings("chat-unit");
 
         const execReportType = surveyId ? `executive_${surveyId}` : 'executive';
         const [unitRes, reportRes, surveyRespsResult] = await Promise.all([
@@ -160,7 +162,9 @@ CRITICAL FORMATTING DIRECTIVES (YOU WILL BE PENALIZED FOR IGNORING THESE):
 
 Response (Raw formatted string):`;
 
-        const reply = await callGemini(systemPrompt, { jsonMode: false }) as string;
+        const reply = await callGemini(systemPrompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
+            jsonMode: false, model: modelId, functionId: "chat-unit",
+        }) as string;
 
         return NextResponse.json({ reply });
 

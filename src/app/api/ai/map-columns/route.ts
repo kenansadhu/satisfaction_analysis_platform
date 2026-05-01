@@ -1,4 +1,4 @@
-import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
+import { callGemini, wrapUserData, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { mapColumnsSchema } from "@/lib/validators";
 
@@ -13,6 +13,8 @@ export async function POST(req: Request) {
     if (!headers || !samples || !units) {
       return NextResponse.json({ error: "Invalid Input" }, { status: 400 });
     }
+
+    const { modelId, addendum } = await getAgentSettings("map-columns");
 
     const prompt = `
       You are a Data Architect. Classify Survey Columns into 3 Types.
@@ -94,7 +96,9 @@ export async function POST(req: Request) {
       - N/A Handling: "N/A", "Tidak Relevan", "Tidak Pernah", "Blank" should always be null (no quotes).
     `;
 
-    const result = await callGemini(prompt);
+    const result = await callGemini(prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
+      model: modelId, functionId: "map-columns",
+    });
     return NextResponse.json(result);
 
   } catch (error) {

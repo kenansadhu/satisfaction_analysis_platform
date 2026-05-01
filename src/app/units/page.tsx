@@ -52,14 +52,6 @@ export default function UnitsPage() {
         u.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const getStatusColor = (status: string | undefined) => {
-        switch (status) {
-            case "COMPLETED": return "bg-green-100 text-green-700 border-green-200";
-            case "ANALYZING": return "bg-blue-100 text-blue-700 border-blue-200";
-            default: return "bg-slate-100 text-slate-700 border-slate-200";
-        }
-    };
-
     const handleSaveDescription = async () => {
         if (!editingUnit) return;
         setSaving(true);
@@ -184,13 +176,10 @@ export default function UnitsPage() {
                         {filteredUnits.map(unit => (
                             <div key={unit.id} className="group relative block h-full">
                                 <Card className="h-full hover:shadow-md transition-all duration-200 border-slate-200 hover:border-blue-300 flex flex-col">
-                                    <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
-                                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                    <CardHeader className="pb-3">
+                                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg w-fit">
                                             <Building2 className="w-5 h-5" />
                                         </div>
-                                        <Badge variant="outline" className={getStatusColor(unit.analysis_status)}>
-                                            {(unit.analysis_status || "NOT_STARTED").replace(/_/g, " ")}
-                                        </Badge>
                                     </CardHeader>
                                     <CardContent className="flex flex-col flex-grow">
                                         <CardTitle className="text-lg mb-1 group-hover:text-blue-700 transition-colors line-clamp-1 flex items-center gap-2">

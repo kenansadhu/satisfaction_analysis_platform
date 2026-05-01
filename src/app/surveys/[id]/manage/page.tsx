@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -41,6 +41,8 @@ interface ColumnMapping {
     newRule?: ScoreRule;
     ruleChanged?: boolean;
     customMapping?: Record<string, number | null>;
+    // The resolved type at load time (source of truth for dirty detection)
+    _initialType?: DataType;
 }
 
 interface ProdiEnrollmentEntry {
@@ -64,6 +66,11 @@ export default function SurveyManagePage() {
     // AI Dataset Cache
     const [aiCacheUpdatedAt, setAiCacheUpdatedAt] = useState<string | null>(null);
     const [buildingAiCache, setBuildingAiCache] = useState(false);
+    const [buildElapsed, setBuildElapsed] = useState(0);
+    const buildTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    type BuildSummary = { total_org_units: number; analyzed_units: number; quant_only_units: number; cached_units: number };
+    const [buildSummary, setBuildSummary] = useState<BuildSummary | null>(null);
 
     // Column mappings
     const [columns, setColumns] = useState<ColumnMapping[]>([]);
@@ -107,6 +114,13 @@ export default function SurveyManagePage() {
                 setYear(data.year || "");
                 setDescription(data.description || "");
                 setAiCacheUpdatedAt(data.ai_dataset_updated_at || null);
+                // Restore persisted build summary
+                if (data.ai_dataset_updated_at) {
+                    try {
+                        const stored = localStorage.getItem(`ai_build_summary_${surveyId}`);
+                        if (stored) setBuildSummary(JSON.parse(stored));
+                    } catch {}
+                }
             }
             setLoading(false);
         };
@@ -124,6 +138,17 @@ export default function SurveyManagePage() {
             .order('name');
         setUnits(unitsData || []);
         const unitMap = new Map((unitsData || []).map(u => [u.id, u.name]));
+
+        // Fetch explicit column types from cache (source of truth after first save)
+        const { data: colTypeCache } = await supabase
+            .from('survey_column_cache')
+            .select('source_column, column_type')
+            .eq('survey_id', parseInt(surveyId));
+        const colTypeCacheMap = new Map<string, DataType>(
+            (colTypeCache || [])
+                .filter((r: any) => r.column_type)
+                .map((r: any) => [r.source_column, r.column_type as DataType])
+        );
 
         // 2. Extract Respondent IDs with pagination
         let respIds: number[] = [];
@@ -169,6 +194,9 @@ export default function SurveyManagePage() {
                 existing.count++;
                 existing.inputIds.push(row.id);
                 if (row.id < existing.minId) existing.minId = row.id;
+                // OR-merge: if any row marks this column as text/quant, honour it
+                if (row.requires_analysis) existing.requires_analysis = true;
+                if (row.is_quantitative) existing.is_quantitative = true;
             } else {
                 groupMap.set(key, {
                     source_column: row.source_column,
@@ -204,11 +232,11 @@ export default function SurveyManagePage() {
         }
 
         const mappings: ColumnMapping[] = Array.from(groupMap.entries()).map(([key, g]) => {
-            // Derive the current data type from flags
-            let currentType: DataType = "IGNORE";
-            if (g.is_quantitative) currentType = "SCORE";
-            else if (g.requires_analysis) currentType = "TEXT";
-            else currentType = "CATEGORY";
+            // Use explicit column_type from cache if available (survives analysis flipping requires_analysis).
+            // Fall back to flag derivation for columns not yet explicitly saved.
+            let currentType: DataType = colTypeCacheMap.get(key) ?? (
+                g.is_quantitative ? "SCORE" : g.requires_analysis ? "TEXT" : "CATEGORY"
+            );
 
             return {
                 source_column: g.source_column,
@@ -221,6 +249,7 @@ export default function SurveyManagePage() {
                 // Initialize editable fields to current values
                 newUnitId: g.target_unit_id,
                 newType: currentType,
+                _initialType: currentType,
                 newRule: g.score_rule || (currentType === "SCORE" ? "NUMBER" : undefined),
                 customMapping: g.custom_mapping || {},
                 _minId: g.minId,
@@ -513,23 +542,51 @@ export default function SurveyManagePage() {
     };
 
     // --- Build AI Data Scientist Cache ---
+    const [buildPhase, setBuildPhase] = useState<1 | 2 | null>(null);
+
     const handleBuildAiCache = async () => {
         setBuildingAiCache(true);
+        setBuildElapsed(0);
+        buildTimerRef.current = setInterval(() => setBuildElapsed(e => e + 1), 1000);
         try {
-            const res = await fetch('/api/ai/cache-global-dataset', {
+            // Phase 1: heavy compute + write cache (up to 300s)
+            setBuildPhase(1);
+            const res1 = await fetch('/api/ai/cache-global-dataset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ surveyId })
+                body: JSON.stringify({ surveyId, phase: 1 })
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Failed to build AI cache");
+            const data1 = await res1.json();
+            if (!res1.ok) throw new Error(data1.error || "Phase 1 failed");
 
-            toast.success(`AI Context Built! Cached ${data.count} units.`);
+            // Phase 2: suggestions merge (up to 300s)
+            setBuildPhase(2);
+            const res2 = await fetch('/api/ai/cache-global-dataset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ surveyId, phase: 2 })
+            });
+            const data2 = await res2.json();
+            if (!res2.ok) throw new Error(data2.error || "Phase 2 failed");
+
+            const summary: BuildSummary = {
+                total_org_units: data1.total_org_units ?? 0,
+                analyzed_units: data1.analyzed_units ?? 0,
+                quant_only_units: data1.quant_only_units ?? 0,
+                cached_units: data1.count ?? 0,
+            };
+            setBuildSummary(summary);
+            try { localStorage.setItem(`ai_build_summary_${surveyId}`, JSON.stringify(summary)); } catch {}
+
+            const unanalyzed = summary.total_org_units - summary.analyzed_units;
+            toast.success(`AI Context Built! ${summary.analyzed_units}/${summary.total_org_units} units analyzed.${unanalyzed > 0 ? ` ${unanalyzed} unit(s) still need analysis.` : ''} ${data2.suggestions_count ?? 0} suggestions loaded.`);
             setAiCacheUpdatedAt(new Date().toISOString());
         } catch (e: any) {
             toast.error(e.message);
         } finally {
+            if (buildTimerRef.current) clearInterval(buildTimerRef.current);
             setBuildingAiCache(false);
+            setBuildPhase(null);
         }
     };
 
@@ -558,8 +615,7 @@ export default function SurveyManagePage() {
     // Detect which columns have unsaved changes
     const dirtyColumns = useMemo(() => {
         return columns.filter(c => {
-            const origType: DataType = c.is_quantitative ? "SCORE" : (c.requires_analysis ? "TEXT" : "CATEGORY");
-            return c.newUnitId !== c.target_unit_id || c.newType !== origType || c.ruleChanged;
+            return c.newUnitId !== c.target_unit_id || c.newType !== c._initialType || c.ruleChanged;
         });
     }, [columns]);
 
@@ -675,8 +731,23 @@ export default function SurveyManagePage() {
                 }
             }
 
-            // Invalidate score cache
-            await supabase.from('survey_quant_cache').delete().eq('survey_id', parseInt(surveyId));
+            // Persist explicit column types so they survive analysis flipping requires_analysis
+            const colTypeRows = dirtyColumns.map(col => ({
+                survey_id: parseInt(surveyId),
+                source_column: col.source_column,
+                column_type: col.newType || 'CATEGORY',
+            }));
+            for (let i = 0; i < colTypeRows.length; i += 50) {
+                await supabase.from('survey_column_cache')
+                    .upsert(colTypeRows.slice(i, i + 50), { onConflict: 'survey_id,source_column' });
+            }
+
+            // Invalidate derived caches — segments changed, all downstream caches are stale
+            await Promise.all([
+                supabase.from('survey_quant_cache').delete().eq('survey_id', parseInt(surveyId)),
+                supabase.from('survey_faculty_cache').delete().eq('survey_id', parseInt(surveyId)),
+                supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', parseInt(surveyId)),
+            ]);
 
             toast.success(`Saved changes to ${dirtyColumns.length} column(s). Analysis segments cleared for changed columns.`);
             loadColumnMappings();
@@ -883,14 +954,56 @@ export default function SurveyManagePage() {
                                             className="w-full gap-2 bg-purple-600 hover:bg-purple-700 text-white"
                                         >
                                             {buildingAiCache ? (
-                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                <>
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                    {`Phase ${buildPhase ?? 1}/2 · ${buildElapsed > 0 ? `${Math.floor(buildElapsed / 60)}:${String(buildElapsed % 60).padStart(2, '0')}` : '...'}`}
+                                                </>
                                             ) : (
-                                                <BrainCircuit className="w-4 h-4" />
+                                                <>
+                                                    <BrainCircuit className="w-4 h-4" />
+                                                    {aiCacheUpdatedAt ? "Re-Build Context" : "Build Context"}
+                                                </>
                                             )}
-                                            {aiCacheUpdatedAt ? "Re-Build Context" : "Build Context"}
                                         </Button>
                                     </div>
                                 </div>
+
+                                {buildSummary && (
+                                    <div className="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Coverage at Last Build</p>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div className="bg-purple-50 dark:bg-purple-950/20 rounded-lg px-3 py-2.5 border border-purple-100 dark:border-purple-900/40">
+                                                <p className="text-[10px] text-purple-500 font-semibold uppercase tracking-wide mb-0.5">In Dataset</p>
+                                                <p className="text-xl font-black text-purple-700 dark:text-purple-300 tabular-nums">
+                                                    {buildSummary.cached_units}
+                                                    <span className="text-sm font-normal text-purple-400 ml-1">/ {buildSummary.total_org_units}</span>
+                                                </p>
+                                                <p className="text-[10px] text-purple-400 mt-0.5">org units with data</p>
+                                            </div>
+                                            <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2.5 border border-emerald-100 dark:border-emerald-900/40">
+                                                <p className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide mb-0.5">Analyzed</p>
+                                                <p className="text-xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums">
+                                                    {buildSummary.analyzed_units}
+                                                    <span className="text-sm font-normal text-emerald-400 ml-1">/ {buildSummary.total_org_units}</span>
+                                                </p>
+                                                <p className="text-[10px] text-emerald-500 mt-0.5">with qualitative analysis</p>
+                                            </div>
+                                            <div className={`rounded-lg px-3 py-2.5 border ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/40' : 'bg-slate-50 dark:bg-slate-900/40 border-slate-100 dark:border-slate-800'}`}>
+                                                <p className={`text-[10px] font-semibold uppercase tracking-wide mb-0.5 ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-600' : 'text-slate-400'}`}>Not Yet Analyzed</p>
+                                                <p className={`text-xl font-black tabular-nums ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400'}`}>
+                                                    {buildSummary.total_org_units - buildSummary.analyzed_units}
+                                                </p>
+                                                <p className={`text-[10px] mt-0.5 ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-500' : 'text-slate-400'}`}>units still pending</p>
+                                            </div>
+                                        </div>
+                                        {buildSummary.total_org_units - buildSummary.analyzed_units > 0 && (
+                                            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 rounded-lg px-3 py-2 flex items-center gap-2">
+                                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                                {buildSummary.total_org_units - buildSummary.analyzed_units} unit{buildSummary.total_org_units - buildSummary.analyzed_units !== 1 ? 's' : ''} had not been analyzed yet. Re-build context after completing all unit analyses for full coverage.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </TabsContent>
@@ -958,9 +1071,8 @@ export default function SurveyManagePage() {
                                         {/* Expandable Column Cards */}
                                         <div className="space-y-2">
                                             {filteredColumns.map(col => {
-                                                const origType: DataType = col.is_quantitative ? "SCORE" : (col.requires_analysis ? "TEXT" : "CATEGORY");
-                                                const isDirty = col.newUnitId !== col.target_unit_id || col.newType !== origType || col.ruleChanged;
-                                                const currentType = col.newType || origType;
+                                                const isDirty = col.newUnitId !== col.target_unit_id || col.newType !== col._initialType || col.ruleChanged;
+                                                const currentType = col.newType || col._initialType || "CATEGORY";
                                                 const isExpanded = expandedCols.has(col.source_column);
                                                 const uniqueVals = colUniqueValues.get(col.source_column) || [];
                                                 const hasUniqueVals = uniqueVals.length > 0;

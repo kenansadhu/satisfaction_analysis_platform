@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Helper: paginate through all rows (Supabase default limit = 1000)
 async function fetchAll(queryFactory: () => any, label?: string): Promise<any[]> {
@@ -124,90 +124,35 @@ export async function GET(req: NextRequest) {
             overall.count += count;
         }
     } else {
-        // Cache miss — compute from raw data, then store
-        // Uses same approach as ComprehensiveDashboard: group by source_column,
-        // exclude binary (0/1) columns by checking max value.
-        type ColumnAccum = {
-            maxScore: number;
-            rule: string | null;
-            campusData: Map<string, { sum: number; count: number }>;
-        };
-        const unitColumnAccum = new Map<number, Map<string, ColumnAccum>>();
+        // Cache miss — use server-side RPC to aggregate in one SQL query instead of
+        // fetching thousands of raw rows across many round trips.
+        const { data: rpcRows, error: rpcErr } = await supabase.rpc(
+            'get_quant_summary_by_unit_campus',
+            { p_survey_id: parseInt(surveyId) }
+        );
 
-        const CHUNK = 400;
-        const MAX_CONCURRENT = 5;
-        const processRows = (rows: any[]) => {
-            for (const row of rows) {
-                const unitId = row.target_unit_id;
-                if (!unitId) continue;
-                const score = parseFloat(row.numerical_score);
-                if (isNaN(score)) continue;
-                const col = row.source_column || '_default';
-                const campus = respLocationMap.get(row.respondent_id) || "Unknown";
-
-                if (!unitColumnAccum.has(unitId)) unitColumnAccum.set(unitId, new Map());
-                const colMap = unitColumnAccum.get(unitId)!;
-                if (!colMap.has(col)) colMap.set(col, { maxScore: 0, rule: row.score_rule, campusData: new Map() });
-                const colAcc = colMap.get(col)!;
-                if (score > colAcc.maxScore) colAcc.maxScore = score;
-                if (!colAcc.rule && row.score_rule) colAcc.rule = row.score_rule;
-
-                if (!colAcc.campusData.has(campus)) colAcc.campusData.set(campus, { sum: 0, count: 0 });
-                const entry = colAcc.campusData.get(campus)!;
-                entry.sum += score;
-                entry.count += 1;
-            }
-        };
-
-        // Fetch in parallel batches of MAX_CONCURRENT chunks to avoid sequential timeouts
-        for (let batchStart = 0; batchStart < respIds.length; batchStart += CHUNK * MAX_CONCURRENT) {
-            const batchChunks: number[][] = [];
-            for (let i = batchStart; i < Math.min(batchStart + CHUNK * MAX_CONCURRENT, respIds.length); i += CHUNK) {
-                batchChunks.push(respIds.slice(i, i + CHUNK));
-            }
-            const batchResults = await Promise.all(batchChunks.map(chunk =>
-                fetchAll(() =>
-                    supabase.from('raw_feedback_inputs')
-                        .select('respondent_id, target_unit_id, source_column, numerical_score, score_rule')
-                        .in('respondent_id', chunk)
-                        .eq('is_quantitative', true)
-                        .not('numerical_score', 'is', null),
-                    'quant-scores'
-                )
-            ));
-            for (const rows of batchResults) processRows(rows);
+        if (rpcErr) {
+            console.error('[quant RPC] error:', rpcErr.message);
         }
 
-        // Phase 2: Aggregate, excluding binary or "wrong" Likert columns (max score <= 1)
-        for (const [unitId, colMap] of unitColumnAccum) {
-            for (const [_col, colAcc] of colMap) {
-                // If max score is 1 or less, it's either Boolean (0/1) or invalid Likert, skip it
-                if (colAcc.maxScore <= 1) continue;
+        // Exclude binary columns (max_score <= 1) — same logic as before
+        for (const row of (rpcRows || [])) {
+            const maxScore = parseFloat(row.max_score);
+            if (maxScore <= 1) continue;
 
-                if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
-                for (const [campus, data] of colAcc.campusData) {
-                    if (!unitScores.get(unitId)!.has(campus)) {
-                        unitScores.get(unitId)!.set(campus, { avg: 0, count: 0 });
-                    }
-                    const existing = unitScores.get(unitId)!.get(campus)!;
-                    const newCount = existing.count + data.count;
-                    existing.avg = (existing.avg * existing.count + data.sum) / newCount;
-                    existing.count = newCount;
+            const unitId = row.unit_id;
+            const campus = row.campus || 'Unknown';
+            const avg = parseFloat(row.avg_score);
+            const count = parseInt(row.cnt);
 
-                    campusScoreAccum.set(`${unitId}__${campus}`, unitScores.get(unitId)!.get(campus)!);
-                    if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
-                }
-            }
-        }
+            if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
+            unitScores.get(unitId)!.set(campus, { avg, count });
+            campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
 
-        // Recompute unitOverall from unitScores
-        for (const [unitId, campusMap] of unitScores) {
-            let sum = 0, count = 0;
-            for (const [_, entry] of campusMap) {
-                sum += entry.avg * entry.count;
-                count += entry.count;
-            }
-            unitOverall.set(unitId, { sum, count });
+            if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
+            const overall = unitOverall.get(unitId)!;
+            overall.sum += avg * count;
+            overall.count += count;
         }
 
         // Store to cache (fire-and-forget, don't block response)
@@ -366,7 +311,7 @@ export async function GET(req: NextRequest) {
         totalEnrolled,
         responseRate: totalEnrolled > 0 ? parseFloat((respList.length / totalEnrolled * 100).toFixed(1)) : null,
         campusParticipation,
-        prodiParticipation: prodiParticipationEnriched.slice(0, 100),
+        prodiParticipation: prodiParticipationEnriched.slice(0, 150),
         globalSatisfactionIndex: globalCount > 0 ? parseFloat((globalSum / globalCount).toFixed(2)) : null,
         campusSatisfaction,
         campuses: allCampuses,

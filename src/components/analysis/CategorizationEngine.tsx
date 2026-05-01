@@ -25,6 +25,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     const [categories, setCategories] = useState<Category[]>([]);
     const [totalComments, setTotalComments] = useState(0);
     const [pendingComments, setPendingComments] = useState(0);
+    const [countLoading, setCountLoading] = useState(true);
 
     // UI State
     const [newInstruction, setNewInstruction] = useState("");
@@ -97,71 +98,66 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
             setSavedSnapshot("[]");
         }
 
-        // Count qualitative comments for this unit
-        // Scope by survey if provided
-        if (surveyId) {
-            let respIds: number[] = [];
-            let rPage = 0;
-            while (true) {
-                const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-                if (!rBat || rBat.length === 0) break;
-                respIds.push(...rBat.map((r: any) => r.id));
-                if (rBat.length < 1000) break;
-                rPage++;
-            }
+        // Count qualitative comments for this unit (runs in background — doesn't block the rest of loadData)
+        const countComments = async () => {
+            setCountLoading(true);
+            try {
+                if (surveyId) {
+                    // Fetch all respondent ID pages in parallel (first page sequential to know total, rest parallel)
+                    const firstBatch = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(0, 999);
+                    if (!isMounted.current) return;
+                    let respIds: number[] = (firstBatch.data || []).map((r: any) => r.id);
 
-            if (respIds.length > 0) {
-                let totalC = 0;
-                let pendingC = 0;
-                const CHUNK_SIZE = 100;
-                const totalPromises = [];
-                const pendingPromises = [];
-                for (let i = 0; i < respIds.length; i += CHUNK_SIZE) {
-                    const chunk = respIds.slice(i, i + CHUNK_SIZE);
-                    totalPromises.push(
-                        supabase.from('raw_feedback_inputs')
-                            .select('*', { count: 'exact', head: true })
-                            .eq('target_unit_id', unitId)
-                            .eq('is_quantitative', false)
-                            .in('respondent_id', chunk)
-                    );
-                    pendingPromises.push(
-                        supabase.from('raw_feedback_inputs')
-                            .select('*', { count: 'exact', head: true })
-                            .eq('target_unit_id', unitId)
-                            .eq('is_quantitative', false)
-                            .eq('requires_analysis', true)
-                            .in('respondent_id', chunk)
-                    );
+                    if (firstBatch.data && firstBatch.data.length === 1000) {
+                        // There are more pages — fetch them all in parallel
+                        const { count: totalResps } = await supabase.from('respondents')
+                            .select('*', { count: 'exact', head: true }).eq('survey_id', surveyId);
+                        if (!isMounted.current) return;
+                        const extraPageCount = Math.ceil(((totalResps || 1000) - 1000) / 1000);
+                        const extraPages = await Promise.all(
+                            Array.from({ length: extraPageCount }, (_, i) =>
+                                supabase.from('respondents').select('id').eq('survey_id', surveyId).range((i + 1) * 1000, (i + 2) * 1000 - 1)
+                            )
+                        );
+                        if (!isMounted.current) return;
+                        for (const page of extraPages) respIds.push(...(page.data || []).map((r: any) => r.id));
+                    }
+
+                    if (respIds.length > 0) {
+                        const CHUNK = 400;
+                        const chunks = Array.from({ length: Math.ceil(respIds.length / CHUNK) }, (_, i) => respIds.slice(i * CHUNK, (i + 1) * CHUNK));
+                        const [totalResults, pendingResults] = await Promise.all([
+                            Promise.all(chunks.map(chunk =>
+                                supabase.from('raw_feedback_inputs').select('*', { count: 'exact', head: true })
+                                    .eq('target_unit_id', unitId).eq('is_quantitative', false).in('respondent_id', chunk)
+                                    .then(r => r.count || 0)
+                            )),
+                            Promise.all(chunks.map(chunk =>
+                                supabase.from('raw_feedback_inputs').select('*', { count: 'exact', head: true })
+                                    .eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', true).in('respondent_id', chunk)
+                                    .then(r => r.count || 0)
+                            )),
+                        ]);
+                        if (!isMounted.current) return;
+                        setTotalComments(totalResults.reduce((a, b) => a + b, 0));
+                        setPendingComments(pendingResults.reduce((a, b) => a + b, 0));
+                    }
+                } else {
+                    const [{ count: total }, { count: pending }] = await Promise.all([
+                        supabase.from('raw_feedback_inputs').select('*', { count: 'exact', head: true })
+                            .eq('target_unit_id', unitId).eq('is_quantitative', false),
+                        supabase.from('raw_feedback_inputs').select('*', { count: 'exact', head: true })
+                            .eq('target_unit_id', unitId).eq('is_quantitative', false).eq('requires_analysis', true),
+                    ]);
+                    if (!isMounted.current) return;
+                    setTotalComments(total || 0);
+                    setPendingComments(pending || 0);
                 }
-                const [totalResults, pendingResults] = await Promise.all([
-                    Promise.all(totalPromises),
-                    Promise.all(pendingPromises)
-                ]);
-                if (!isMounted.current) return;
-                for (const res of totalResults) totalC += (res.count || 0);
-                for (const res of pendingResults) pendingC += (res.count || 0);
-                setTotalComments(totalC);
-                setPendingComments(pendingC);
-            } else {
-                if (!isMounted.current) return;
-                setTotalComments(0);
-                setPendingComments(0);
+            } finally {
+                if (isMounted.current) setCountLoading(false);
             }
-        } else {
-            const { count: total } = await supabase.from('raw_feedback_inputs')
-                .select('*', { count: 'exact', head: true })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', false);
-            const { count: pending } = await supabase.from('raw_feedback_inputs')
-                .select('*', { count: 'exact', head: true })
-                .eq('target_unit_id', unitId)
-                .eq('is_quantitative', false)
-                .eq('requires_analysis', true);
-            if (!isMounted.current) return;
-            setTotalComments(total || 0);
-            setPendingComments(pending || 0);
-        }
+        };
+        countComments();
     }
 
     const addInstruction = async () => {
@@ -576,7 +572,18 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                     <div className="flex items-center justify-between">
                         <div className="space-y-1">
                             <CardTitle className="text-lg flex items-center gap-2"><RefreshCw className="w-5 h-5 text-blue-600" /> 2. Discover Categories</CardTitle>
-                            <CardDescription>AI will read {totalComments.toLocaleString()} comments in batches to build a taxonomy.</CardDescription>
+                            <CardDescription>
+                                AI will read{" "}
+                                {countLoading ? (
+                                    <span className="inline-flex items-center gap-1 text-slate-400">
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                        <span>counting…</span>
+                                    </span>
+                                ) : (
+                                    <strong>{totalComments.toLocaleString()}</strong>
+                                )}{" "}
+                                comments in batches to build a taxonomy.
+                            </CardDescription>
                         </div>
                         <Link
                             href={`/surveys/${surveyId}/unit/${unitId}/columns`}

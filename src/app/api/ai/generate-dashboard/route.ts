@@ -1,6 +1,6 @@
-import { callGemini, handleAIError } from "@/lib/ai";
+import { callGemini, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { generateDashboardSchema } from "@/lib/validators";
 
 export const maxDuration = 60; // Allow longer timeout for deep reasoning
@@ -33,6 +33,8 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    const { modelId, addendum } = await getAgentSettings("generate-dashboard");
 
     const globalDataset: any[] = surveyData.ai_dataset_cache;
     if (globalDataset.length === 0) {
@@ -100,9 +102,10 @@ export async function POST(req: Request) {
         `;
 
     // 4. Call Gemini 3.1 Pro Preview
-    const rawResult = await callGemini(prompt, {
+    const rawResult = await callGemini(prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
       jsonMode: false,
-      model: "gemini-2.5-flash"
+      model: modelId,
+      functionId: "generate-dashboard",
     }) as string;
 
     const parsedResult = JSON.parse(rawResult);

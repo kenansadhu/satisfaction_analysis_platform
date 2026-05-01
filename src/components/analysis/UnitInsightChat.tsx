@@ -31,13 +31,14 @@ type ExecutiveReportData = {
     closing_statement: string;
 };
 
-export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: { unitId: string; surveyId?: string; fullPage?: boolean }) {
+export default function UnitInsightChat({ unitId, surveyId, fullPage = false, unitName, surveyTitle, surveyYear }: { unitId: string; surveyId?: string; fullPage?: boolean; unitName?: string; surveyTitle?: string; surveyYear?: number }) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [generatingReport, setGeneratingReport] = useState(false);
     const [report, setReport] = useState<ExecutiveReportData | null>(null);
     const [lastSaved, setLastSaved] = useState<string | null>(null);
+    const [reportError, setReportError] = useState<string | null>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
 
     // 1. Fetch persistent history and report on mount
@@ -137,6 +138,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
 
     const generateExecutiveReport = async () => {
         setGeneratingReport(true);
+        setReportError(null);
         try {
             const res = await fetch('/api/ai/generate-report', {
                 method: 'POST',
@@ -158,10 +160,96 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                 throw new Error(data.error || "Generation failed");
             }
         } catch (e: any) {
-            toast.error(e.message || "Failed to generate report");
+            const errMsg = e.message || "Failed to generate report";
+            toast.error(errMsg);
+            setReportError(errMsg);
         } finally {
             setGeneratingReport(false);
         }
+    };
+
+    const openPrintView = () => {
+        if (!report) return;
+        const esc = (str: string) =>
+            str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        const verdictBg: Record<string, string> = {
+            Excellent: "#059669", Good: "#4f46e5", "Needs Improvement": "#d97706", Critical: "#dc2626",
+        };
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>Executive Analysis Report</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#1e293b;max-width:860px;margin:0 auto;padding:48px 56px 80px}
+  .header{margin-bottom:32px;padding-bottom:24px;border-bottom:2px solid #e2e8f0}
+  .unit-name{font-size:13px;font-weight:700;color:#6366f1;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+  .title{font-size:28px;font-weight:900;color:#0f172a;letter-spacing:-0.5px}
+  .subtitle{font-size:10px;color:#94a3b8;letter-spacing:2px;text-transform:uppercase;margin-top:6px}
+  .verdict{display:inline-block;margin-top:14px;padding:6px 16px;border-radius:6px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+  .section{margin-bottom:32px}
+  .section-label{font-size:9px;font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:14px}
+  .summary-block{border-left:4px solid #818cf8;padding:8px 0 8px 20px}
+  .summary-text{font-size:14px;font-style:italic;color:#334155;line-height:1.75}
+  .card{border-radius:10px;padding:20px 24px;margin-bottom:12px;border:1px solid;page-break-inside:avoid}
+  .strength-card{background:#f0fdf4;border-color:#86efac}
+  .concern-card{background:#fff5f5;border-color:#fca5a5}
+  .reco-card{background:#fafafa;border-color:#c7d2fe;border-width:2px}
+  .card-num{font-size:15px;font-weight:800;margin-bottom:8px}
+  .card-detail{font-size:13px;color:#475569;line-height:1.65;margin-bottom:10px}
+  .quote{border-left:3px solid #cbd5e1;padding:6px 0 6px 14px;margin-top:10px}
+  .quote-text{font-size:12px;font-style:italic;color:#64748b;line-height:1.6}
+  .badge{display:inline-block;padding:4px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:14px}
+  .col-label{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px}
+  .col-text{font-size:13px;color:#334155;line-height:1.6}
+  .closing{margin-top:32px;padding-top:28px;border-top:1px solid #e2e8f0;text-align:center}
+  .closing-text{font-size:14px;font-style:italic;color:#64748b;max-width:580px;margin:0 auto;line-height:1.75}
+  @media print{body{padding:0}.card{break-inside:avoid}}
+</style></head><body>
+<div class="header">
+  ${unitName ? `<div class="unit-name">${esc(unitName)}</div>` : ""}
+  <div class="title">Executive Analysis Report</div>
+  <div class="subtitle">
+    ${surveyTitle ? esc(surveyTitle) : ""}${surveyYear ? ` &middot; ${surveyYear}` : ""}${(surveyTitle || surveyYear) ? " &middot; " : ""}AI-Generated Strategic Overview
+  </div>
+  <span class="verdict" style="background:${verdictBg[report.overall_verdict] ?? "#64748b"}">Verdict: ${esc(report.overall_verdict)}</span>
+</div>
+<div class="section">
+  <div class="section-label" style="color:#4f46e5">Executive Summary</div>
+  <div class="summary-block"><div class="summary-text">${esc(report.executive_summary)}</div></div>
+</div>
+<div class="section">
+  <div class="section-label" style="color:#16a34a">Key Competitive Advantages</div>
+  ${report.strengths.map((item, i) => `<div class="card strength-card">
+    <div class="card-num" style="color:#15803d">0${i + 1}. ${esc(item.title)}</div>
+    <div class="card-detail">${esc(item.detail)}</div>
+    ${item.evidence ? `<div class="quote" style="border-color:#4ade80"><div class="quote-text">"${esc(item.evidence)}"</div></div>` : ""}
+  </div>`).join("")}
+</div>
+<div class="section">
+  <div class="section-label" style="color:#dc2626">Strategic Vulnerabilities</div>
+  ${report.concerns.map((item, i) => `<div class="card concern-card">
+    <div class="card-num" style="color:#b91c1c">0${i + 1}. ${esc(item.title)}</div>
+    <span class="badge" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5">${esc(item.severity)} Severity</span>
+    <div class="card-detail">${esc(item.detail)}</div>
+    ${item.evidence ? `<div class="quote" style="border-color:#f87171"><div class="quote-text">"${esc(item.evidence)}"</div></div>` : ""}
+  </div>`).join("")}
+</div>
+<div class="section">
+  <div class="section-label" style="color:#4f46e5">Actionable Roadmaps</div>
+  ${report.recommendations.map((item, i) => `<div class="card reco-card">
+    <span class="badge" style="background:#4f46e5;color:#fff">${esc(item.priority)} Impact</span>
+    <div class="card-num" style="color:#1e1b4b;margin-bottom:14px">${esc(item.title)}</div>
+    <div class="two-col">
+      <div><div class="col-label" style="color:#6366f1">Strategic Action</div><div class="col-text" style="font-weight:700">${esc(item.action)}</div></div>
+      <div><div class="col-label" style="color:#ec4899">Expected Outcome</div><div class="col-text" style="font-style:italic">${esc(item.impact)}</div></div>
+    </div>
+  </div>`).join("")}
+</div>
+<div class="closing"><div class="closing-text">"${esc(report.closing_statement)}"</div></div>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400))</script>
+</body></html>`;
+        const w = window.open("", "_blank");
+        if (w) { w.document.write(html); w.document.close(); }
     };
 
     return (
@@ -205,6 +293,16 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                     </div>
                                 )}
 
+                                {report && (
+                                    <Button
+                                        onClick={openPrintView}
+                                        variant="outline"
+                                        className="w-full gap-2 text-xs h-10 font-bold rounded-xl border-slate-200 dark:border-slate-700"
+                                    >
+                                        <Download className="w-4 h-4" /> Export / Print PDF
+                                    </Button>
+                                )}
+
                                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                                     <p className="text-[10px] text-slate-400 leading-relaxed italic">
                                         Our AI Specialist will process all qualitative feedback and quantitative metrics to build a comprehensive strategic overview.
@@ -217,7 +315,16 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                     {/* Strategy Main Content */}
                     <div className="flex-1 min-w-0">
                         {report ? (
-                            <Card className="h-full border-indigo-200 dark:border-indigo-900/50 bg-white dark:bg-slate-900 shadow-xl overflow-hidden flex flex-col">
+                            <div className="relative h-full">
+                                {generatingReport && (
+                                    <div className="absolute inset-0 z-20 pointer-events-none">
+                                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 animate-pulse" />
+                                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/50 rounded-full px-4 py-2 flex items-center gap-2 shadow-lg text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest whitespace-nowrap">
+                                            <Loader2 className="w-3 h-3 animate-spin" /> Regenerating synthesis...
+                                        </div>
+                                    </div>
+                                )}
+                                <Card className="h-full border-indigo-200 dark:border-indigo-900/50 bg-white dark:bg-slate-900 shadow-xl overflow-hidden flex flex-col">
                                 <div className="h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 shrink-0" />
                                 <CardHeader className="py-6 px-10 border-b border-slate-100 dark:border-slate-800 bg-indigo-50/20 dark:bg-indigo-950/20 shrink-0">
                                     <div className="flex items-center justify-between">
@@ -330,7 +437,98 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                         </div>
                                     </div>
                                 </CardContent>
+                                </Card>
+                            </div>
+                        ) : generatingReport ? (
+                            <Card className="h-full border-indigo-200 dark:border-indigo-900/50 bg-white dark:bg-slate-900 shadow-xl overflow-hidden flex flex-col">
+                                <div className="h-1 bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300 animate-pulse" />
+                                <CardHeader className="py-6 px-10 border-b border-slate-100 dark:border-slate-800 bg-indigo-50/20 dark:bg-indigo-950/20 shrink-0">
+                                    <div className="flex items-center justify-between">
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-7 h-7 rounded-full bg-amber-200 dark:bg-amber-900/40 animate-pulse" />
+                                                <div className="h-7 w-56 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
+                                            </div>
+                                            <div className="h-3 w-40 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+                                        </div>
+                                        <div className="h-9 w-32 bg-slate-200 dark:bg-slate-700 rounded-full animate-pulse" />
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="p-0 overflow-y-auto">
+                                    <div className="p-10 space-y-10 max-w-5xl mx-auto">
+                                        <div className="flex items-center justify-center gap-3 py-6">
+                                            <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+                                            <span className="text-sm font-black text-indigo-400 uppercase tracking-widest">AI Specialist Processing...</span>
+                                        </div>
+                                        {/* Summary skeleton */}
+                                        <div className="bg-slate-50 dark:bg-slate-800/20 border border-slate-200/50 dark:border-slate-800 rounded-[2rem] p-10 space-y-4 animate-pulse">
+                                            <div className="h-3 w-36 bg-indigo-200 dark:bg-indigo-900/40 rounded" />
+                                            <div className="border-l-4 border-indigo-200 dark:border-indigo-900/40 pl-8 space-y-3">
+                                                <div className="h-5 w-full bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                                                <div className="h-5 w-5/6 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                                                <div className="h-5 w-4/5 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                                            </div>
+                                        </div>
+                                        {/* Strengths skeleton */}
+                                        <div className="space-y-4">
+                                            <div className="h-3 w-52 bg-emerald-200 dark:bg-emerald-900/30 rounded ml-2 animate-pulse" />
+                                            {[0, 1, 2].map(i => (
+                                                <div key={i} className="bg-emerald-50/30 dark:bg-emerald-950/20 p-8 rounded-[1.5rem] border border-emerald-100 dark:border-emerald-900/30 space-y-3 animate-pulse">
+                                                    <div className="h-5 w-48 bg-emerald-200 dark:bg-emerald-900/40 rounded" />
+                                                    <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded" />
+                                                    <div className="h-4 w-2/3 bg-slate-200 dark:bg-slate-700 rounded" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {/* Concerns skeleton */}
+                                        <div className="space-y-4">
+                                            <div className="h-3 w-52 bg-red-200 dark:bg-red-900/30 rounded ml-2 animate-pulse" />
+                                            {[0, 1, 2].map(i => (
+                                                <div key={i} className="bg-red-50/20 dark:bg-red-950/20 p-8 rounded-[1.5rem] border border-red-100/50 dark:border-red-900/30 space-y-3 animate-pulse">
+                                                    <div className="h-5 w-48 bg-red-200 dark:bg-red-900/40 rounded" />
+                                                    <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded" />
+                                                    <div className="h-4 w-2/3 bg-slate-200 dark:bg-slate-700 rounded" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {/* Recommendations skeleton */}
+                                        <div className="space-y-4">
+                                            <div className="h-3 w-52 bg-indigo-200 dark:bg-indigo-900/30 rounded ml-2 animate-pulse" />
+                                            {[0, 1, 2].map(i => (
+                                                <div key={i} className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] border-2 border-indigo-50 dark:border-indigo-900/20 flex gap-8 animate-pulse">
+                                                    <div className="w-1/3 space-y-3">
+                                                        <div className="h-6 w-20 bg-indigo-200 dark:bg-indigo-900/40 rounded-full" />
+                                                        <div className="h-6 w-36 bg-slate-200 dark:bg-slate-700 rounded" />
+                                                    </div>
+                                                    <div className="flex-1 grid grid-cols-2 gap-8">
+                                                        <div className="space-y-2">
+                                                            <div className="h-3 w-24 bg-indigo-100 dark:bg-indigo-900/30 rounded" />
+                                                            <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded" />
+                                                            <div className="h-4 w-4/5 bg-slate-200 dark:bg-slate-700 rounded" />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <div className="h-3 w-24 bg-pink-100 dark:bg-pink-900/30 rounded" />
+                                                            <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded" />
+                                                            <div className="h-4 w-3/4 bg-slate-200 dark:bg-slate-700 rounded" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </CardContent>
                             </Card>
+                        ) : reportError ? (
+                            <div className="h-full flex flex-col items-center justify-center text-center p-20 border-2 border-dashed border-red-200 dark:border-red-900/40 rounded-[3rem] bg-red-50/20 dark:bg-red-950/10 animate-in fade-in zoom-in duration-700">
+                                <div className="w-20 h-20 rounded-[1.5rem] bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-6">
+                                    <AlertCircle className="w-10 h-10 text-red-400" />
+                                </div>
+                                <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 tracking-tight mb-2">Synthesis Failed</h3>
+                                <p className="text-sm text-slate-500 max-w-sm mb-6 font-medium">{reportError}</p>
+                                <Button onClick={generateExecutiveReport} className="bg-red-600 hover:bg-red-700 text-white gap-2">
+                                    <RefreshCcw className="w-4 h-4" /> Retry Generation
+                                </Button>
+                            </div>
                         ) : (
                             <div className="h-full flex flex-col items-center justify-center text-center p-20 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem] bg-slate-50/30 dark:bg-slate-900/30 animate-in fade-in zoom-in duration-1000">
                                 <div className="w-24 h-24 rounded-[2rem] bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center mb-6">
@@ -475,7 +673,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                                             <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
                                                             <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-bounce" />
                                                         </div>
-                                                        <span className="text-indigo-600 dark:text-indigo-400 font-black tracking-widest uppercase text-[11px]">Executing high-precision analysis...</span>
+                                                        <span className="text-indigo-600 dark:text-indigo-400 font-black tracking-widest uppercase text-[11px]">Analysing feedback data...</span>
                                                     </div>
                                                 </div>
                                             )}
@@ -484,6 +682,29 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                 </div>
                             </CardContent>
 
+                            {/* Persistent Quick Questions strip */}
+                            <div className="px-8 py-3 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-950/40 shrink-0 relative z-10">
+                                <div className="flex items-center gap-2 overflow-x-auto max-w-6xl mx-auto">
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0 flex items-center gap-1.5 pr-3 border-r border-slate-200 dark:border-slate-700 mr-1">
+                                        <Lightbulb className="w-3 h-3 text-amber-400" /> Quick Questions
+                                    </span>
+                                    {[
+                                        { label: "Critical Pain Points", prompt: "What are the most critical student pain points right now?" },
+                                        { label: "Infrastructure Proposals", prompt: "Summarize student suggestions for infrastructure improvement" },
+                                        { label: "Historical Trends", prompt: "How does student sentiment compare across different survey years?" },
+                                        { label: "Performance Highlights", prompt: "Extract key success drivers for the unit report" },
+                                    ].map(s => (
+                                        <button
+                                            key={s.label}
+                                            onClick={() => setInput(s.prompt)}
+                                            disabled={isLoading}
+                                            className="shrink-0 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 hover:border-indigo-300 hover:text-indigo-600 dark:hover:border-indigo-700 dark:hover:text-indigo-400 transition-all disabled:opacity-40 whitespace-nowrap"
+                                        >
+                                            {s.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                             <CardFooter className="p-8 bg-slate-50/50 dark:bg-slate-950/50 border-t border-slate-200 dark:border-slate-800 shrink-0 relative z-10">
                                 <form
                                     onSubmit={(e) => { e.preventDefault(); handleSend(); }}
