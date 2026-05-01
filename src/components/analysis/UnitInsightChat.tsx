@@ -39,7 +39,9 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
     const [report, setReport] = useState<ExecutiveReportData | null>(null);
     const [lastSaved, setLastSaved] = useState<string | null>(null);
     const [reportError, setReportError] = useState<string | null>(null);
+    const [downloadingPdf, setDownloadingPdf] = useState(false);
     const chatContainerRef = useRef<HTMLDivElement>(null);
+    const reportContentRef = useRef<HTMLDivElement>(null);
 
     // 1. Fetch persistent history and report on mount
     useEffect(() => {
@@ -168,6 +170,38 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
         }
     };
 
+    const downloadPdf = async () => {
+        if (!reportContentRef.current || !report) return;
+        setDownloadingPdf(true);
+        try {
+            const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+                import("html2canvas"),
+                import("jspdf"),
+            ]);
+            const el = reportContentRef.current;
+            const canvas = await html2canvas(el, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+                height: el.scrollHeight,
+                onclone: (clonedDoc) => {
+                    clonedDoc.documentElement.classList.remove("dark");
+                },
+                logging: false,
+            });
+            const imgWidth = 210;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            const pdf = new jsPDF({ unit: "mm", format: [imgWidth, imgHeight] });
+            pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, imgWidth, imgHeight);
+            pdf.save("strategic-analysis-report.pdf");
+            toast.success("PDF downloaded");
+        } catch {
+            toast.error("PDF generation failed — try again");
+        } finally {
+            setDownloadingPdf(false);
+        }
+    };
+
     return (
         <Tabs defaultValue="strategy" className="w-full h-full flex flex-col animate-in fade-in duration-700">
             {/* Sub-tab Navigation (Matching Main Page Style) */}
@@ -209,6 +243,18 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                     </div>
                                 )}
 
+                                {report && (
+                                    <Button
+                                        onClick={downloadPdf}
+                                        disabled={downloadingPdf}
+                                        variant="outline"
+                                        className="w-full gap-2 text-xs h-10 font-bold rounded-xl border-slate-200 dark:border-slate-700"
+                                    >
+                                        {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                        {downloadingPdf ? "Generating PDF..." : "Download as PDF"}
+                                    </Button>
+                                )}
+
                                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                                     <p className="text-[10px] text-slate-400 leading-relaxed italic">
                                         Our AI Specialist will process all qualitative feedback and quantitative metrics to build a comprehensive strategic overview.
@@ -247,7 +293,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                 </CardHeader>
 
                                 <CardContent className="p-0 overflow-y-auto">
-                                    <div className="p-10 space-y-12 max-w-5xl mx-auto">
+                                    <div ref={reportContentRef} className="p-10 space-y-12 max-w-5xl mx-auto">
                                         {/* Summary Section */}
                                         <div className="bg-slate-50/50 dark:bg-slate-900/70 border border-slate-200/50 dark:border-slate-800 rounded-[2rem] p-10 relative overflow-hidden group hover:shadow-2xl hover:shadow-indigo-500/5 transition-all duration-500">
                                             <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700" />
