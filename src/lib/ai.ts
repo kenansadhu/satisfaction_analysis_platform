@@ -59,9 +59,8 @@ function estimateCost(modelId: string, inputTokens: number, outputTokens: number
 function logUsage(params: { functionName: string; modelId: string; inputTokens: number; outputTokens: number }): void {
     const cost = estimateCost(params.modelId, params.inputTokens, params.outputTokens);
     // Fire-and-forget: never blocks the response to the user
-    supabaseServer
-        .from("ai_usage_logs")
-        .insert({
+    Promise.resolve(
+        supabaseServer.from("ai_usage_logs").insert({
             function_name: params.functionName,
             model_id:       params.modelId,
             input_tokens:   params.inputTokens,
@@ -69,8 +68,7 @@ function logUsage(params: { functionName: string; modelId: string; inputTokens: 
             total_tokens:   params.inputTokens + params.outputTokens,
             estimated_cost_usd: cost,
         })
-        .then(() => {})
-        .catch((e: any) => console.error("[logUsage] error:", e));
+    ).catch((e: any) => console.error("[logUsage] error:", e));
 }
 
 // --- Core AI Call ---
