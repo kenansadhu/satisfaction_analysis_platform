@@ -31,7 +31,7 @@ type ExecutiveReportData = {
     closing_statement: string;
 };
 
-export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: { unitId: string; surveyId?: string; fullPage?: boolean }) {
+export default function UnitInsightChat({ unitId, surveyId, fullPage = false, unitName, surveyTitle, surveyYear }: { unitId: string; surveyId?: string; fullPage?: boolean; unitName?: string; surveyTitle?: string; surveyYear?: number }) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -39,9 +39,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
     const [report, setReport] = useState<ExecutiveReportData | null>(null);
     const [lastSaved, setLastSaved] = useState<string | null>(null);
     const [reportError, setReportError] = useState<string | null>(null);
-    const [downloadingPdf, setDownloadingPdf] = useState(false);
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const reportContentRef = useRef<HTMLDivElement>(null);
 
     // 1. Fetch persistent history and report on mount
     useEffect(() => {
@@ -170,36 +168,88 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
         }
     };
 
-    const downloadPdf = async () => {
-        if (!reportContentRef.current || !report) return;
-        setDownloadingPdf(true);
-        try {
-            const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-                import("html2canvas"),
-                import("jspdf"),
-            ]);
-            const el = reportContentRef.current;
-            const canvas = await html2canvas(el, {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: "#ffffff",
-                height: el.scrollHeight,
-                onclone: (clonedDoc) => {
-                    clonedDoc.documentElement.classList.remove("dark");
-                },
-                logging: false,
-            });
-            const imgWidth = 210;
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-            const pdf = new jsPDF({ unit: "mm", format: [imgWidth, imgHeight] });
-            pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, imgWidth, imgHeight);
-            pdf.save("strategic-analysis-report.pdf");
-            toast.success("PDF downloaded");
-        } catch {
-            toast.error("PDF generation failed — try again");
-        } finally {
-            setDownloadingPdf(false);
-        }
+    const openPrintView = () => {
+        if (!report) return;
+        const esc = (str: string) =>
+            str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        const verdictBg: Record<string, string> = {
+            Excellent: "#059669", Good: "#4f46e5", "Needs Improvement": "#d97706", Critical: "#dc2626",
+        };
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>Executive Analysis Report</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#1e293b;max-width:860px;margin:0 auto;padding:48px 56px 80px}
+  .header{margin-bottom:32px;padding-bottom:24px;border-bottom:2px solid #e2e8f0}
+  .unit-name{font-size:13px;font-weight:700;color:#6366f1;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+  .title{font-size:28px;font-weight:900;color:#0f172a;letter-spacing:-0.5px}
+  .subtitle{font-size:10px;color:#94a3b8;letter-spacing:2px;text-transform:uppercase;margin-top:6px}
+  .verdict{display:inline-block;margin-top:14px;padding:6px 16px;border-radius:6px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+  .section{margin-bottom:32px}
+  .section-label{font-size:9px;font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:14px}
+  .summary-block{border-left:4px solid #818cf8;padding:8px 0 8px 20px}
+  .summary-text{font-size:14px;font-style:italic;color:#334155;line-height:1.75}
+  .card{border-radius:10px;padding:20px 24px;margin-bottom:12px;border:1px solid;page-break-inside:avoid}
+  .strength-card{background:#f0fdf4;border-color:#86efac}
+  .concern-card{background:#fff5f5;border-color:#fca5a5}
+  .reco-card{background:#fafafa;border-color:#c7d2fe;border-width:2px}
+  .card-num{font-size:15px;font-weight:800;margin-bottom:8px}
+  .card-detail{font-size:13px;color:#475569;line-height:1.65;margin-bottom:10px}
+  .quote{border-left:3px solid #cbd5e1;padding:6px 0 6px 14px;margin-top:10px}
+  .quote-text{font-size:12px;font-style:italic;color:#64748b;line-height:1.6}
+  .badge{display:inline-block;padding:4px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:14px}
+  .col-label{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px}
+  .col-text{font-size:13px;color:#334155;line-height:1.6}
+  .closing{margin-top:32px;padding-top:28px;border-top:1px solid #e2e8f0;text-align:center}
+  .closing-text{font-size:14px;font-style:italic;color:#64748b;max-width:580px;margin:0 auto;line-height:1.75}
+  @media print{body{padding:0}.card{break-inside:avoid}}
+</style></head><body>
+<div class="header">
+  ${unitName ? `<div class="unit-name">${esc(unitName)}</div>` : ""}
+  <div class="title">Executive Analysis Report</div>
+  <div class="subtitle">
+    ${surveyTitle ? esc(surveyTitle) : ""}${surveyYear ? ` &middot; ${surveyYear}` : ""}${(surveyTitle || surveyYear) ? " &middot; " : ""}AI-Generated Strategic Overview
+  </div>
+  <span class="verdict" style="background:${verdictBg[report.overall_verdict] ?? "#64748b"}">Verdict: ${esc(report.overall_verdict)}</span>
+</div>
+<div class="section">
+  <div class="section-label" style="color:#4f46e5">Executive Summary</div>
+  <div class="summary-block"><div class="summary-text">${esc(report.executive_summary)}</div></div>
+</div>
+<div class="section">
+  <div class="section-label" style="color:#16a34a">Key Competitive Advantages</div>
+  ${report.strengths.map((item, i) => `<div class="card strength-card">
+    <div class="card-num" style="color:#15803d">0${i + 1}. ${esc(item.title)}</div>
+    <div class="card-detail">${esc(item.detail)}</div>
+    ${item.evidence ? `<div class="quote" style="border-color:#4ade80"><div class="quote-text">"${esc(item.evidence)}"</div></div>` : ""}
+  </div>`).join("")}
+</div>
+<div class="section">
+  <div class="section-label" style="color:#dc2626">Strategic Vulnerabilities</div>
+  ${report.concerns.map((item, i) => `<div class="card concern-card">
+    <div class="card-num" style="color:#b91c1c">0${i + 1}. ${esc(item.title)}</div>
+    <span class="badge" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5">${esc(item.severity)} Severity</span>
+    <div class="card-detail">${esc(item.detail)}</div>
+    ${item.evidence ? `<div class="quote" style="border-color:#f87171"><div class="quote-text">"${esc(item.evidence)}"</div></div>` : ""}
+  </div>`).join("")}
+</div>
+<div class="section">
+  <div class="section-label" style="color:#4f46e5">Actionable Roadmaps</div>
+  ${report.recommendations.map((item, i) => `<div class="card reco-card">
+    <span class="badge" style="background:#4f46e5;color:#fff">${esc(item.priority)} Impact</span>
+    <div class="card-num" style="color:#1e1b4b;margin-bottom:14px">${esc(item.title)}</div>
+    <div class="two-col">
+      <div><div class="col-label" style="color:#6366f1">Strategic Action</div><div class="col-text" style="font-weight:700">${esc(item.action)}</div></div>
+      <div><div class="col-label" style="color:#ec4899">Expected Outcome</div><div class="col-text" style="font-style:italic">${esc(item.impact)}</div></div>
+    </div>
+  </div>`).join("")}
+</div>
+<div class="closing"><div class="closing-text">"${esc(report.closing_statement)}"</div></div>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400))</script>
+</body></html>`;
+        const w = window.open("", "_blank");
+        if (w) { w.document.write(html); w.document.close(); }
     };
 
     return (
@@ -245,13 +295,11 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
 
                                 {report && (
                                     <Button
-                                        onClick={downloadPdf}
-                                        disabled={downloadingPdf}
+                                        onClick={openPrintView}
                                         variant="outline"
                                         className="w-full gap-2 text-xs h-10 font-bold rounded-xl border-slate-200 dark:border-slate-700"
                                     >
-                                        {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                        {downloadingPdf ? "Generating PDF..." : "Download as PDF"}
+                                        <Download className="w-4 h-4" /> Export / Print PDF
                                     </Button>
                                 )}
 
@@ -293,7 +341,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false }: 
                                 </CardHeader>
 
                                 <CardContent className="p-0 overflow-y-auto">
-                                    <div ref={reportContentRef} className="p-10 space-y-12 max-w-5xl mx-auto">
+                                    <div className="p-10 space-y-12 max-w-5xl mx-auto">
                                         {/* Summary Section */}
                                         <div className="bg-slate-50/50 dark:bg-slate-900/70 border border-slate-200/50 dark:border-slate-800 rounded-[2rem] p-10 relative overflow-hidden group hover:shadow-2xl hover:shadow-indigo-500/5 transition-all duration-500">
                                             <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700" />

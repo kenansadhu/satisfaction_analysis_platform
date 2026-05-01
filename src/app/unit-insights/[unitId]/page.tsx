@@ -80,7 +80,7 @@ export default function UnitInsightsDetailPage() {
                     <TabsContent value="ai" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                         <ErrorBoundary fallbackTitle="AI Specialist crashed">
                             {surveyId ? (
-                                <UnitInsightChat unitId={unitId} surveyId={surveyId} fullPage={true} />
+                                <UnitInsightChat unitId={unitId} surveyId={surveyId} fullPage={true} unitName={unitName} surveyTitle={activeSurvey?.title} surveyYear={activeSurvey?.year} />
                             ) : noSurveyPlaceholder(<Sparkles className="w-10 h-10 mx-auto opacity-30" />, "Select a survey to use the AI Specialist")}
                         </ErrorBoundary>
                     </TabsContent>

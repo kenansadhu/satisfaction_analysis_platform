@@ -11,7 +11,9 @@
       "Bash(npx tsc *)",
       "Bash(npx next *)",
       "Bash(python3 -c ' *)",
-      "Bash(grep -o '\"role\":\"user\",\"content\":\\\\[{\"type\":\"text\",\"text\":\"[^\"]*\"')"
+      "Bash(grep -o '\"role\":\"user\",\"content\":\\\\[{\"type\":\"text\",\"text\":\"[^\"]*\"')",
+      "Bash(npm install *)",
+      "Bash(del \"src\\\\components\\\\analysis\\\\StrategicReportPdf.tsx\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",
