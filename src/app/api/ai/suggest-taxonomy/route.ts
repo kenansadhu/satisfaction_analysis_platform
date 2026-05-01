@@ -1,4 +1,4 @@
-import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
+import { callGemini, wrapUserData, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { suggestTaxonomySchema } from "@/lib/validators";
 import { CORE_CATEGORIES } from "@/lib/constants";
@@ -13,6 +13,7 @@ export async function POST(req: Request) {
     }
 
     const { unitName, unitDesc, sampleComments, existingCategories, mode, additionalContext } = validation.data;
+    const { modelId, addendum } = await getAgentSettings("suggest-taxonomy");
 
     let prompt = "";
 
@@ -60,7 +61,9 @@ export async function POST(req: Request) {
       `;
     }
 
-    const result = await callGemini(prompt);
+    const result = await callGemini(prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
+      model: modelId, functionId: "suggest-taxonomy",
+    });
     return NextResponse.json(result);
 
   } catch (error) {

@@ -1,4 +1,4 @@
-import { callGemini, wrapUserData, handleAIError } from "@/lib/ai";
+import { callGemini, wrapUserData, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { mapIdentitySchema } from "@/lib/validators";
 
@@ -12,6 +12,7 @@ export async function POST(req: Request) {
     }
 
     const { headers } = validation.data;
+    const { modelId, addendum } = await getAgentSettings("map-identity");
 
     const prompt = `
       You are a data analyst. Analyze these CSV headers and categorize them into 4 Identity Groups.
@@ -31,7 +32,9 @@ export async function POST(req: Request) {
       Format: { "location": [], "faculty": [], "major": [], "year": [] }
     `;
 
-    const mapping = await callGemini(prompt);
+    const mapping = await callGemini(prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
+      model: modelId, functionId: "map-identity",
+    });
     return NextResponse.json({ mapping });
 
   } catch (error) {

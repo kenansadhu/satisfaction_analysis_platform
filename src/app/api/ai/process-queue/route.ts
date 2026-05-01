@@ -1,4 +1,4 @@
-import { callGemini, handleAIError } from "@/lib/ai";
+import { callGemini, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { processQueueSchema } from "@/lib/validators";
@@ -43,6 +43,7 @@ export async function POST(req: Request) {
         }
 
         const customInstructions = instrRows?.map((r: any) => r.instruction) || [];
+        const { modelId, addendum } = await getAgentSettings("process-queue");
 
         // 4. Find the NEXT Batch of Comments (up to 50)
         let rawItems: any[] = [];
@@ -201,8 +202,10 @@ export async function POST(req: Request) {
             ]
         `;
 
-        // 6. Call Gemini (using default model from ai.ts)
-        const aiResponse = await callGemini(prompt, { jsonMode: true });
+        // 6. Call Gemini with dynamic model + addendum from platform_settings
+        const aiResponse = await callGemini(prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""), {
+            jsonMode: true, model: modelId, functionId: "process-queue",
+        });
         const aiParsed = typeof aiResponse === 'string' ? JSON.parse(aiResponse) : aiResponse;
 
         // 7. Save to Database

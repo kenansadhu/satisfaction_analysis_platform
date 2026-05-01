@@ -1,4 +1,4 @@
-import { callGemini, handleAIError, wrapUserData } from "@/lib/ai";
+import { callGemini, handleAIError, wrapUserData, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 
@@ -22,6 +22,8 @@ export async function POST(req: Request) {
         if (!messages || messages.length === 0) {
             return NextResponse.json({ error: "No messages provided" }, { status: 400 });
         }
+
+        const { modelId, addendum } = await getAgentSettings("chat-analyst");
 
         // 1. Load cached dataset
         let globalDataset: any[] = [];
@@ -182,9 +184,11 @@ ${conversationHistory}
 Respond as the ASSISTANT. Be helpful and insightful.`;
 
         // 5. Call Gemini Pro
-        const rawResponse = await callGemini(systemPrompt, {
+        const finalPrompt = systemPrompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : "");
+        const rawResponse = await callGemini(finalPrompt, {
             jsonMode: false,
-            model: "gemini-2.5-flash",
+            model: modelId,
+            functionId: "chat-analyst",
         }) as string;
 
         // 6. Parse response — extract charts

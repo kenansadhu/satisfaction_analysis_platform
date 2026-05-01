@@ -1,4 +1,4 @@
-import { callGemini, handleAIError } from "@/lib/ai";
+import { callGemini, handleAIError, getAgentSettings } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 
@@ -9,6 +9,8 @@ export async function POST(req: Request) {
     if (!unitId) {
       return NextResponse.json({ error: "unitId is required" }, { status: 400 });
     }
+
+    const { modelId, addendum } = await getAgentSettings("generate-report");
 
     // 1. Fetch Basic Context (Unit, Survey Population)
     const [unitRes, respRes] = await Promise.all([
@@ -146,12 +148,14 @@ Produce a boardroom-quality JSON report.
 
 Return ONLY valid JSON. Exactly 3 items per list.`;
 
+    const finalPrompt = prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : "");
+
     let parsed;
     let retries = 0;
     const maxRetries = 2;
 
     while (retries <= maxRetries) {
-      const reportJson = await callGemini(prompt, { jsonMode: true });
+      const reportJson = await callGemini(finalPrompt, { jsonMode: true, model: modelId, functionId: retries === 0 ? "generate-report" : undefined });
       try {
         parsed = typeof reportJson === 'string' ? JSON.parse(reportJson) : reportJson;
         // Verify it didn't hallucinate an empty object

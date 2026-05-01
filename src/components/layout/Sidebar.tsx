@@ -14,6 +14,7 @@ import {
     PieChart,
     UserCog,
     BrainCircuit,
+    Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, canAccessAdminPages, isOwner } from "@/context/AuthContext";
@@ -148,7 +149,10 @@ export function Sidebar({
                             </>
                         )}
                         {isOwner(role) && (
-                            <NavItem href="/users" icon={UserCog} label="User Management" active={pathname === "/users"} />
+                            <>
+                                <NavItem href="/users" icon={UserCog} label="User Management" active={pathname === "/users"} />
+                                <NavItem href="/ai-control" icon={Bot} label="AI Control Panel" active={pathname === "/ai-control"} />
+                            </>
                         )}
                     </div>
                 ) : null}
