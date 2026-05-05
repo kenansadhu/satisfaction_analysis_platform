@@ -25,6 +25,7 @@ interface CampusParticipation {
     respondents: number;
 }
 interface ProdiParticipation {
+    campus: string;
     prodi: string;
     respondents: number;
     faculty: string | null;
@@ -433,12 +434,14 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                     <CardContent>
                         <div className="space-y-1 max-h-[420px] overflow-y-auto custom-scrollbar pr-1">
                             {sortedProdi.map((pp, i) => (
-                                <div key={pp.prodi} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                                <div key={`${pp.campus}|||${pp.prodi}`} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
                                     <div className="flex items-center gap-3 min-w-0">
                                         <span className="text-xs font-bold text-slate-400 w-6 shrink-0">{i + 1}.</span>
                                         <div className="min-w-0">
                                             <span className="text-sm text-slate-700 dark:text-slate-300 truncate block">{pp.prodi}</span>
-                                            {pp.faculty && <span className="text-xs text-slate-400">{pp.faculty}</span>}
+                                            <span className="text-xs text-slate-400 truncate block">
+                                                {[pp.campus, pp.faculty].filter(Boolean).join(' • ')}
+                                            </span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0 ml-2">

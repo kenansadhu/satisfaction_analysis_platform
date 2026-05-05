@@ -54,27 +54,34 @@ export async function GET(req: NextRequest) {
         .map(([campus, count]) => ({ campus, respondents: count }))
         .sort((a, b) => b.respondents - a.respondents);
 
-    // Prodi participation
-    const prodiMap = new Map<string, number>();
+    // Prodi participation — grouped by campus + study_program to avoid collisions
+    // across campuses with identically-named programs (e.g. "S1 Informatika" at two campuses)
+    const prodiMap = new Map<string, { campus: string; prodi: string; respondents: number }>();
     respList.forEach(r => {
+        const campus = r.location || "Unknown";
         const prodi = r.study_program || "Unknown";
-        prodiMap.set(prodi, (prodiMap.get(prodi) || 0) + 1);
+        const key = `${campus}|||${prodi}`;
+        if (!prodiMap.has(key)) prodiMap.set(key, { campus, prodi, respondents: 0 });
+        prodiMap.get(key)!.respondents++;
     });
-    const prodiParticipation = Array.from(prodiMap.entries())
-        .map(([prodi, count]) => ({ prodi, respondents: count }))
+    const prodiParticipation = Array.from(prodiMap.values())
         .sort((a, b) => b.respondents - a.respondents);
 
     // 3. Prodi enrollment (for response rate per study program)
     const { data: prodiEnroll } = await supabase
         .from('prodi_enrollment')
-        .select('study_program, faculty, student_count')
+        .select('study_program, faculty, student_count, location')
         .eq('survey_id', parseInt(surveyId));
 
-    const prodiEnrollMap = new Map((prodiEnroll || []).map(e => [e.study_program, e]));
+    // Key by campus + study_program so same-named programs at different campuses match correctly
+    const prodiEnrollMap = new Map((prodiEnroll || []).map(e => [
+        `${e.location || 'Unknown'}|||${e.study_program}`, e
+    ]));
     const totalEnrolled = (prodiEnroll || []).reduce((sum: number, e: any) => sum + (e.student_count || 0), 0);
 
     const prodiParticipationEnriched = prodiParticipation.map(pp => {
-        const enrollment = prodiEnrollMap.get(pp.prodi);
+        const key = `${pp.campus}|||${pp.prodi}`;
+        const enrollment = prodiEnrollMap.get(key);
         return {
             ...pp,
             faculty: enrollment?.faculty || null,

@@ -7,46 +7,77 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { GraduationCap, ArrowRight, Search, Users, BarChart3, TrendingUp, MessageSquare } from "lucide-react";
+import {
+    GraduationCap, ArrowRight, Search, Users, BookOpen,
+    Building2, CheckCircle2, AlertTriangle, XCircle, Target
+} from "lucide-react";
 import Link from "next/link";
 import { useActiveSurvey } from "@/context/SurveyContext";
 
-type FacultyRow = {
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface SentimentData {
+    positive: number; negative: number; neutral: number; total: number;
+    positive_pct: number; negative_pct: number;
+}
+
+interface FacultyListEntry {
+    faculty: string;
+    respondents: number;
+    enrolled: number;
+    response_rate: number | null;
+    programQuality: { avg_score: number | null; sentiment: SentimentData };
+    campusExperience: { avg_score: number | null; sentiment: SentimentData };
+}
+
+interface FacultyRow {
     id: number;
     name: string;
     short_name: string | null;
     description: string | null;
-    respondent_count?: number;
-    score?: number;
-    total_segments?: number;
-    positive?: number;
-    negative?: number;
-    neutral?: number;
-};
-
-function SentimentBar({ positive = 0, neutral = 0, negative = 0 }: { positive?: number; neutral?: number; negative?: number }) {
-    const total = positive + neutral + negative;
-    if (total === 0) return null;
-    return (
-        <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-            {positive > 0 && <div style={{ width: `${(positive / total) * 100}%` }} className="bg-emerald-500" />}
-            {neutral > 0 && <div style={{ width: `${(neutral / total) * 100}%` }} className="bg-amber-400" />}
-            {negative > 0 && <div style={{ width: `${(negative / total) * 100}%` }} className="bg-red-400" />}
-        </div>
-    );
+    data?: FacultyListEntry;
 }
 
-function scoreColor(s: number) {
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function scoreColor(score: number | null) {
+    if (score === null) return "text-slate-400 dark:text-slate-600";
+    if (score >= 3.20) return "text-emerald-600 dark:text-emerald-400";
+    if (score >= 3.00) return "text-amber-600 dark:text-amber-400";
+    return "text-red-600 dark:text-red-400";
+}
+
+function scoreBorderBg(score: number | null) {
+    if (score === null) return "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50";
+    if (score >= 3.20) return "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30";
+    if (score >= 3.00) return "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30";
+    return "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30";
+}
+
+function sentimentColor(s: number) {
     if (s >= 70) return "text-emerald-600 dark:text-emerald-400";
     if (s >= 50) return "text-amber-500 dark:text-amber-400";
     return "text-red-500 dark:text-red-400";
 }
 
-function scoreBadgeStyle(s: number) {
-    if (s >= 70) return "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30";
-    if (s >= 50) return "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30";
-    return "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30";
+function SentimentIcon({ score }: { score: number }) {
+    if (score >= 70) return <CheckCircle2 className="w-3 h-3" />;
+    if (score >= 50) return <AlertTriangle className="w-3 h-3" />;
+    return <XCircle className="w-3 h-3" />;
 }
+
+function MiniSentimentBar({ s }: { s: SentimentData }) {
+    if (s.total === 0) return <div className="h-1 rounded-full bg-slate-100 dark:bg-slate-800" />;
+    return (
+        <div className="flex h-1 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+            {s.positive > 0 && <div style={{ width: `${s.positive_pct}%` }} className="bg-emerald-500" />}
+            {s.neutral > 0 && <div style={{ width: `${100 - s.positive_pct - s.negative_pct}%` }} className="bg-amber-400" />}
+            {s.negative > 0 && <div style={{ width: `${s.negative_pct}%` }} className="bg-red-400" />}
+        </div>
+    );
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FacultyInsightsPage() {
     const { activeSurveyId, activeSurvey } = useActiveSurvey();
@@ -55,47 +86,31 @@ export default function FacultyInsightsPage() {
     const [search, setSearch] = useState("");
 
     useEffect(() => {
+        setLoading(true);
+        setFaculties([]);
         loadFaculties();
     }, [activeSurveyId]);
 
     async function loadFaculties() {
-        setLoading(true);
         try {
-            const { data: facultyRows } = await supabase
-                .from('faculties')
-                .select('id, name, short_name, description')
-                .order('name');
+            const { data: rows } = await supabase
+                .from("faculties")
+                .select("id, name, short_name, description")
+                .order("name");
+            if (!rows) { setFaculties([]); return; }
 
-            if (!facultyRows) { setFaculties([]); return; }
-
-            // Fetch rollup data for sentiment + respondent counts
-            const rollupMap = new Map<string, any>();
-            if (activeSurveyId && activeSurveyId !== "all") {
-                try {
-                    const res = await fetch(`/api/executive/faculty-rollup?surveyId=${activeSurveyId}`);
-                    if (res.ok) {
-                        const { faculties: rollupData } = await res.json();
-                        for (const f of (rollupData || [])) rollupMap.set(f.faculty, f);
-                    }
-                } catch {}
+            if (!activeSurveyId || activeSurveyId === "all") {
+                setFaculties(rows.map(r => ({ ...r })));
+                return;
             }
 
-            setFaculties(facultyRows.map(f => {
-                const rollup = rollupMap.get(f.name);
-                const pos = rollup?.sentiment?.positive ?? 0;
-                const neg = rollup?.sentiment?.negative ?? 0;
-                const neu = rollup?.sentiment?.neutral ?? 0;
-                const total = rollup?.sentiment?.total ?? 0;
-                return {
-                    ...f,
-                    respondent_count: rollup?.respondents,
-                    score: total > 0 ? computeSentimentScore(pos, neu, neg) : undefined,
-                    total_segments: total || undefined,
-                    positive: pos || undefined,
-                    negative: neg || undefined,
-                    neutral: neu || undefined,
-                };
-            }));
+            const res = await fetch(`/api/executive/faculty-list?surveyId=${activeSurveyId}`);
+            const json = res.ok ? await res.json() : { faculties: [] };
+            const dataMap = new Map<string, FacultyListEntry>(
+                (json.faculties || []).map((f: FacultyListEntry) => [f.faculty, f])
+            );
+
+            setFaculties(rows.map(r => ({ ...r, data: dataMap.get(r.name) })));
         } finally {
             setLoading(false);
         }
@@ -103,28 +118,22 @@ export default function FacultyInsightsPage() {
 
     const filtered = faculties.filter(f =>
         f.name.toLowerCase().includes(search.toLowerCase()) ||
-        (f.short_name || '').toLowerCase().includes(search.toLowerCase())
+        (f.short_name || "").toLowerCase().includes(search.toLowerCase())
     );
 
-    const totalRespondents = faculties.reduce((s, f) => s + (f.respondent_count || 0), 0);
-    const analyzedFaculties = faculties.filter(f => f.score !== undefined);
-    const avgScore = analyzedFaculties.length > 0
-        ? Math.round(analyzedFaculties.reduce((s, f) => s + (f.score || 0), 0) / analyzedFaculties.length)
-        : null;
-    const totalSegments = faculties.reduce((s, f) => s + (f.total_segments || 0), 0);
-
-    const summaryStats = [
-        { label: "Total Faculties", value: faculties.length, icon: GraduationCap, color: "text-teal-600 dark:text-teal-400", bg: "bg-teal-50 dark:bg-teal-950/40" },
-        { label: "Total Respondents", value: totalRespondents.toLocaleString(), icon: Users, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-50 dark:bg-blue-950/40" },
-        { label: "Avg. Score", value: avgScore !== null ? String(avgScore) : "—", icon: TrendingUp, color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-50 dark:bg-indigo-950/40" },
-        { label: "Total Segments", value: totalSegments.toLocaleString(), icon: MessageSquare, color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-50 dark:bg-purple-950/40" },
-    ];
+    const withData = faculties.filter(f => f.data);
+    const totalRespondents = withData.reduce((s, f) => s + (f.data?.respondents || 0), 0);
+    const totalEnrolled = withData.reduce((s, f) => s + (f.data?.enrolled || 0), 0);
+    const pqScores = withData.map(f => f.data?.programQuality.avg_score).filter((s): s is number => s !== null);
+    const ceScores = withData.map(f => f.data?.campusExperience.avg_score).filter((s): s is number => s !== null);
+    const avgPQ = pqScores.length > 0 ? (pqScores.reduce((a, b) => a + b, 0) / pqScores.length).toFixed(2) : null;
+    const avgCE = ceScores.length > 0 ? (ceScores.reduce((a, b) => a + b, 0) / ceScores.length).toFixed(2) : null;
 
     return (
         <PageShell>
             <PageHeader
                 title={<span className="flex items-center gap-2"><GraduationCap className="w-6 h-6 text-teal-500" /> Faculty Insights</span>}
-                description="Breakdown of student satisfaction results by faculty."
+                description="Program Quality and Campus Experience scores per faculty."
                 actions={
                     activeSurvey ? (
                         <Badge variant="outline" className="bg-teal-50/50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-800 gap-1.5 px-3 py-1">
@@ -136,113 +145,193 @@ export default function FacultyInsightsPage() {
 
             <div className="max-w-7xl mx-auto px-8 py-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-                {/* Summary Strip */}
+                {/* Hero banner */}
+                {!loading && withData.length > 0 && (
+                    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-600 p-6 text-white shadow-lg">
+                        <div className="absolute -top-8 -right-8 w-36 h-36 bg-white/10 rounded-full pointer-events-none" />
+                        <div className="absolute top-3 right-12 w-16 h-16 bg-white/5 rounded-full pointer-events-none" />
+                        <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div>
+                                <h2 className="text-lg font-black mb-1">Faculty Performance Overview</h2>
+                                <p className="text-teal-100 text-sm">
+                                    {totalRespondents.toLocaleString()} respondents across {withData.length} faculties
+                                    {totalEnrolled > 0 && ` · ${((totalRespondents / totalEnrolled) * 100).toFixed(1)}% response rate`}
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-5 shrink-0">
+                                <div className="text-center">
+                                    <div className="text-3xl font-black tabular-nums">{avgPQ ?? "—"}</div>
+                                    <div className="flex items-center gap-1 justify-center mt-0.5">
+                                        <BookOpen className="w-3 h-3 text-teal-200" />
+                                        <span className="text-xs text-teal-100">Avg Program Quality</span>
+                                    </div>
+                                </div>
+                                <div className="w-px h-10 bg-white/25 shrink-0" />
+                                <div className="text-center">
+                                    <div className="text-3xl font-black tabular-nums">{avgCE ?? "—"}</div>
+                                    <div className="flex items-center gap-1 justify-center mt-0.5">
+                                        <Building2 className="w-3 h-3 text-teal-200" />
+                                        <span className="text-xs text-teal-100">Avg Campus Experience</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Stat cards — Faculties + Respondents */}
                 {!loading && faculties.length > 0 && (
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        {summaryStats.map(stat => (
+                    <div className="grid grid-cols-2 gap-3">
+                        {[
+                            { label: "Faculties", value: faculties.length, icon: GraduationCap, color: "text-teal-600", bg: "bg-teal-50 dark:bg-teal-950/40" },
+                            { label: "Respondents", value: totalRespondents > 0 ? totalRespondents.toLocaleString() : "—", icon: Users, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950/40" },
+                        ].map(stat => (
                             <div key={stat.label} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-5 py-4 flex items-center gap-3">
                                 <div className={`p-2 rounded-lg ${stat.bg} shrink-0`}>
                                     <stat.icon className={`w-4 h-4 ${stat.color}`} />
                                 </div>
                                 <div className="min-w-0">
                                     <div className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums leading-tight">{stat.value}</div>
-                                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">{stat.label}</div>
+                                    <div className="text-xs text-slate-500 font-medium">{stat.label}</div>
                                 </div>
                             </div>
                         ))}
                     </div>
                 )}
 
+                {/* Legend */}
+                {!loading && withData.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-3 h-3 rounded bg-violet-500 opacity-70" />
+                            <span>Program Quality — what students say about their study program's academic services</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-3 h-3 rounded bg-cyan-500 opacity-70" />
+                            <span>Campus Experience — how satisfied students in this faculty are with campus services</span>
+                        </div>
+                    </div>
+                )}
+
                 {/* Search */}
                 <div className="relative max-w-sm">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input
-                        placeholder="Search faculties..."
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        className="pl-9"
-                    />
+                    <Input placeholder="Search faculties..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
                 </div>
 
                 {/* Grid */}
                 {loading ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                            <Skeleton key={i} className="h-52 rounded-2xl" />
-                        ))}
+                        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-64 rounded-2xl" />)}
                     </div>
                 ) : filtered.length === 0 ? (
                     <div className="text-center py-20 text-slate-400">
                         <GraduationCap className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                        <p className="font-medium">No faculties found</p>
-                        {faculties.length === 0 && (
-                            <p className="text-sm mt-1 text-slate-400">Add faculties in the management page first.</p>
-                        )}
+                        <p className="font-medium">{faculties.length === 0 ? "No faculties found. Add faculties in the management page first." : "No faculties match your search."}</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {filtered.map(faculty => {
-                            const hasAnalysis = faculty.score !== undefined;
-                            const total = faculty.total_segments || 0;
-                            const posPct = total > 0 ? Math.round(((faculty.positive || 0) / total) * 100) : 0;
-                            const negPct = total > 0 ? Math.round(((faculty.negative || 0) / total) * 100) : 0;
+                            const d = faculty.data;
+                            const pqScore = d?.programQuality.avg_score ?? null;
+                            const ceScore = d?.campusExperience.avg_score ?? null;
+                            const pqSent = d ? computeSentimentScore(d.programQuality.sentiment.positive, d.programQuality.sentiment.neutral, d.programQuality.sentiment.negative) : null;
+                            const ceSent = d ? computeSentimentScore(d.campusExperience.sentiment.positive, d.campusExperience.sentiment.neutral, d.campusExperience.sentiment.negative) : null;
 
                             return (
                                 <Link key={faculty.id} href={`/faculty-insights/${faculty.id}`} className="group">
                                     <div className="h-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-teal-300 dark:hover:border-teal-700 hover:shadow-xl dark:hover:shadow-teal-950/20 transition-all duration-200 group-hover:-translate-y-1 overflow-hidden flex flex-col">
 
                                         <div className="p-5 flex-1 space-y-4">
-                                            {/* Top row: icon + score or respondent count */}
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="p-2.5 bg-teal-50 dark:bg-teal-950/40 rounded-xl shrink-0">
-                                                    <GraduationCap className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                                            {/* Faculty name row */}
+                                            <div className="flex items-start gap-3">
+                                                <div className="p-2.5 bg-teal-50 dark:bg-teal-950/40 rounded-xl shrink-0 mt-0.5">
+                                                    <GraduationCap className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                                                 </div>
-                                                {hasAnalysis ? (
-                                                    <div className={`rounded-xl border px-3 py-1.5 text-right ${scoreBadgeStyle(faculty.score!)}`}>
-                                                        <span className={`text-2xl font-black tabular-nums leading-none ${scoreColor(faculty.score!)}`}>{faculty.score}</span>
-                                                        <span className="text-[10px] text-slate-400 ml-0.5">/100</span>
-                                                    </div>
-                                                ) : faculty.respondent_count !== undefined ? (
-                                                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-1.5 text-right">
-                                                        <div className="text-2xl font-black tabular-nums leading-none text-slate-700 dark:text-slate-300">{faculty.respondent_count.toLocaleString()}</div>
-                                                        <div className="text-[10px] text-slate-400">respondents</div>
-                                                    </div>
-                                                ) : null}
+                                                <div className="min-w-0">
+                                                    <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base leading-snug group-hover:text-teal-700 dark:group-hover:text-teal-400 transition-colors">
+                                                        {faculty.name}
+                                                    </h3>
+                                                    {faculty.short_name && (
+                                                        <Badge variant="secondary" className="text-[10px] mt-1 font-medium">{faculty.short_name}</Badge>
+                                                    )}
+                                                </div>
                                             </div>
 
-                                            {/* Name + short name */}
-                                            <div>
-                                                <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base leading-snug group-hover:text-teal-700 dark:group-hover:text-teal-400 transition-colors">
-                                                    {faculty.name}
-                                                </h3>
-                                                {faculty.short_name && (
-                                                    <Badge variant="secondary" className="text-[10px] mt-1.5 font-medium">{faculty.short_name}</Badge>
-                                                )}
-                                            </div>
+                                            {d ? (
+                                                <>
+                                                    {/* Two score blocks side by side */}
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {/* Program Quality */}
+                                                        <div className={`rounded-xl border p-3 ${scoreBorderBg(pqScore)}`}>
+                                                            <div className="flex items-center gap-1 mb-1.5">
+                                                                <BookOpen className="w-3 h-3 text-violet-500 dark:text-violet-400 shrink-0" />
+                                                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Program Quality</span>
+                                                            </div>
+                                                            <div className="flex items-end gap-2">
+                                                                {pqScore !== null ? (
+                                                                    <span className={`text-2xl font-black tabular-nums leading-none ${scoreColor(pqScore)}`}>{pqScore}</span>
+                                                                ) : (
+                                                                    <span className="text-base font-bold text-slate-300">—</span>
+                                                                )}
+                                                                {pqSent !== null && (
+                                                                    <span className={`text-xs font-semibold flex items-center gap-0.5 pb-0.5 ${sentimentColor(pqSent)}`}>
+                                                                        <SentimentIcon score={pqSent} />{pqSent}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {d.programQuality.sentiment.total > 0 && (
+                                                                <MiniSentimentBar s={d.programQuality.sentiment} />
+                                                            )}
+                                                        </div>
 
-                                            {/* Sentiment bar + stats */}
-                                            {hasAnalysis && (
-                                                <div className="space-y-2">
-                                                    <SentimentBar positive={faculty.positive} neutral={faculty.neutral} negative={faculty.negative} />
-                                                    <div className="flex items-center gap-2 text-[10px] font-semibold">
-                                                        <span className="text-emerald-600 dark:text-emerald-400">{posPct}% pos</span>
-                                                        <span className="text-slate-300 dark:text-slate-700">·</span>
-                                                        <span className="text-red-500 dark:text-red-400">{negPct}% neg</span>
-                                                        <span className="text-slate-300 dark:text-slate-700">·</span>
-                                                        <span className="text-slate-400">{faculty.respondent_count?.toLocaleString() ?? 0} respondents</span>
+                                                        {/* Campus Experience */}
+                                                        <div className={`rounded-xl border p-3 ${scoreBorderBg(ceScore)}`}>
+                                                            <div className="flex items-center gap-1 mb-1.5">
+                                                                <Building2 className="w-3 h-3 text-cyan-500 dark:text-cyan-400 shrink-0" />
+                                                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Campus Exp.</span>
+                                                            </div>
+                                                            <div className="flex items-end gap-2">
+                                                                {ceScore !== null ? (
+                                                                    <span className={`text-2xl font-black tabular-nums leading-none ${scoreColor(ceScore)}`}>{ceScore}</span>
+                                                                ) : (
+                                                                    <span className="text-base font-bold text-slate-300">—</span>
+                                                                )}
+                                                                {ceSent !== null && (
+                                                                    <span className={`text-xs font-semibold flex items-center gap-0.5 pb-0.5 ${sentimentColor(ceSent)}`}>
+                                                                        <SentimentIcon score={ceSent} />{ceSent}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {d.campusExperience.sentiment.total > 0 && (
+                                                                <MiniSentimentBar s={d.campusExperience.sentiment} />
+                                                            )}
+                                                        </div>
                                                     </div>
+
+                                                    {/* Participation row */}
+                                                    <div className="flex items-center gap-3 text-xs text-slate-400">
+                                                        <span className="flex items-center gap-1">
+                                                            <Users className="w-3 h-3" />
+                                                            {d.respondents.toLocaleString()} respondents
+                                                        </span>
+                                                        {d.response_rate !== null && (
+                                                            <span className={`flex items-center gap-1 font-semibold ${d.response_rate >= 80 ? "text-emerald-600" : d.response_rate >= 50 ? "text-amber-500" : "text-red-500"}`}>
+                                                                <Target className="w-3 h-3" />
+                                                                {d.response_rate}% response
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                                                    <Users className="w-3.5 h-3.5" />
+                                                    {activeSurveyId && activeSurveyId !== "all"
+                                                        ? "No data for this survey"
+                                                        : "Select a survey to see scores"}
                                                 </div>
                                             )}
 
-                                            {/* Respondent count row when no sentiment yet */}
-                                            {!hasAnalysis && faculty.respondent_count !== undefined && (
-                                                <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                                                    <Users className="w-3.5 h-3.5 shrink-0" />
-                                                    <span>{faculty.respondent_count.toLocaleString()} respondents · No analysis yet</span>
-                                                </div>
-                                            )}
-
-                                            {/* Description */}
                                             {faculty.description && (
                                                 <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-2 leading-relaxed">
                                                     {faculty.description}
@@ -253,7 +342,7 @@ export default function FacultyInsightsPage() {
                                         {/* Footer */}
                                         <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
                                             <span className="text-xs font-semibold text-slate-400 group-hover:text-teal-600 dark:group-hover:text-teal-400 flex items-center gap-1 transition-colors">
-                                                View Insights
+                                                View Details
                                                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                                             </span>
                                         </div>

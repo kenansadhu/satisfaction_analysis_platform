@@ -19,7 +19,7 @@ import { OrganizationUnit } from "@/types";
 import {
     Save, Loader2, AlertTriangle, GraduationCap,
     FileText, Calendar, Info, Users, Columns3, Plus, Trash2,
-    Eye, Search, ChevronDown, ChevronRight, BrainCircuit, CheckCircle2
+    Eye, Search, ChevronDown, ChevronRight, BrainCircuit, CheckCircle2, MapPin
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +47,7 @@ interface ColumnMapping {
 
 interface ProdiEnrollmentEntry {
     id?: number;
+    campus: string;
     study_program: string;
     faculty: string;
     student_count: number;
@@ -95,6 +96,7 @@ export default function SurveyManagePage() {
     const [savingProdi, setSavingProdi] = useState(false);
     const [newProdiName, setNewProdiName] = useState('');
     const [newProdiFaculty, setNewProdiFaculty] = useState('');
+    const [newProdiCampus, setNewProdiCampus] = useState('');
     const [showAddProdi, setShowAddProdi] = useState(false);
 
     const [loading, setLoading] = useState(true);
@@ -274,18 +276,31 @@ export default function SurveyManagePage() {
     const loadProdiEnrollments = useCallback(async () => {
         setLoadingProdi(true);
 
-        // Get study programs + faculties from respondents (to know the hierarchy)
-        const { data: respondents } = await supabase
-            .from('respondents')
-            .select('study_program, faculty')
-            .eq('survey_id', parseInt(surveyId));
+        // Get study programs + faculties + location (campus) from respondents (paginated)
+        const respondents: any[] = [];
+        let from = 0;
+        const PAGE = 1000;
+        while (true) {
+            const { data: batch } = await supabase
+                .from('respondents')
+                .select('study_program, faculty, location')
+                .eq('survey_id', parseInt(surveyId))
+                .range(from, from + PAGE - 1);
+            if (!batch || batch.length === 0) break;
+            respondents.push(...batch);
+            if (batch.length < PAGE) break;
+            from += PAGE;
+        }
 
-        const prodiCounts = new Map<string, { count: number; faculty: string }>();
+        // Composite key: "campus|||study_program" to distinguish same-named programs at different campuses
+        const prodiCounts = new Map<string, { count: number; faculty: string; campus: string; prodi: string }>();
         (respondents || []).forEach((r: any) => {
-            const p = r.study_program || 'Unknown';
-            const f = r.faculty || 'Unknown';
-            if (!prodiCounts.has(p)) prodiCounts.set(p, { count: 0, faculty: f });
-            prodiCounts.get(p)!.count++;
+            const prodi = r.study_program || 'Unknown';
+            const fac = r.faculty || 'Unknown';
+            const campus = r.location || 'Unknown';
+            const key = `${campus}|||${prodi}`;
+            if (!prodiCounts.has(key)) prodiCounts.set(key, { count: 0, faculty: fac, campus, prodi });
+            prodiCounts.get(key)!.count++;
         });
 
         // Get existing prodi enrollment data
@@ -294,31 +309,34 @@ export default function SurveyManagePage() {
             .select('*')
             .eq('survey_id', parseInt(surveyId));
 
-        const existingMap = new Map((existing || []).map(e => [e.study_program, e]));
+        const existingMap = new Map<string, any>((existing || []).map(e => [
+            `${e.location || 'Unknown'}|||${e.study_program}`, e
+        ]));
 
         // Merge: respondent data + saved enrollment + any saved entries not in respondent data
-        const seenPrograms = new Set<string>();
+        const seenKeys = new Set<string>();
         const entries: ProdiEnrollmentEntry[] = [];
 
-        // First, add all programs from respondent data
-        for (const [prodi, info] of prodiCounts.entries()) {
-            if (prodi === 'Unknown') continue;
-            seenPrograms.add(prodi);
-            const ex = existingMap.get(prodi);
+        for (const [key, info] of prodiCounts.entries()) {
+            if (info.prodi === 'Unknown') continue;
+            seenKeys.add(key);
+            const ex = existingMap.get(key);
             entries.push({
                 id: ex?.id,
-                study_program: prodi,
+                campus: info.campus,
+                study_program: info.prodi,
                 faculty: ex?.faculty || info.faculty,
                 student_count: ex?.student_count || 0,
                 actual_respondents: info.count,
             });
         }
 
-        // Then, add any saved programs with 0 respondents (manually added)
-        for (const ex of (existing || [])) {
-            if (!seenPrograms.has(ex.study_program)) {
+        // Also add manually saved programs with 0 respondents
+        for (const [key, ex] of existingMap.entries()) {
+            if (!seenKeys.has(key)) {
                 entries.push({
                     id: ex.id,
+                    campus: ex.location || 'Unknown',
                     study_program: ex.study_program,
                     faculty: ex.faculty || 'Unknown',
                     student_count: ex.student_count,
@@ -327,8 +345,12 @@ export default function SurveyManagePage() {
             }
         }
 
-        // Sort by faculty then program name
-        entries.sort((a, b) => a.faculty.localeCompare(b.faculty) || a.study_program.localeCompare(b.study_program));
+        // Sort by campus, then faculty, then program name
+        entries.sort((a, b) =>
+            a.campus.localeCompare(b.campus) ||
+            a.faculty.localeCompare(b.faculty) ||
+            a.study_program.localeCompare(b.study_program)
+        );
 
         setProdiEnrollments(entries);
         setLoadingProdi(false);
@@ -347,6 +369,7 @@ export default function SurveyManagePage() {
                 .filter(e => e.student_count > 0)
                 .map(e => ({
                     survey_id: parseInt(surveyId),
+                    location: e.campus,
                     study_program: e.study_program,
                     faculty: e.faculty,
                     student_count: e.student_count,
@@ -370,12 +393,15 @@ export default function SurveyManagePage() {
 
     // --- Add Study Program ---
     const handleAddProdi = () => {
-        if (!newProdiName.trim() || !newProdiFaculty.trim()) return;
-        if (prodiEnrollments.some(e => e.study_program === newProdiName.trim())) {
-            toast.error('This study program already exists.');
+        if (!newProdiName.trim() || !newProdiFaculty.trim() || !newProdiCampus.trim()) return;
+        if (prodiEnrollments.some(e =>
+            e.study_program === newProdiName.trim() && e.campus === newProdiCampus.trim()
+        )) {
+            toast.error('This study program already exists for that campus.');
             return;
         }
         setProdiEnrollments(prev => [...prev, {
+            campus: newProdiCampus.trim(),
             study_program: newProdiName.trim(),
             faculty: newProdiFaculty.trim(),
             student_count: 0,
@@ -383,6 +409,7 @@ export default function SurveyManagePage() {
         }]);
         setNewProdiName('');
         setNewProdiFaculty('');
+        setNewProdiCampus('');
         setShowAddProdi(false);
     };
 
@@ -1281,113 +1308,202 @@ export default function SurveyManagePage() {
                         </Card>
                     </TabsContent>
 
-                    <TabsContent value="enrollments" className="space-y-8 max-w-5xl mx-auto">
+                    <TabsContent value="enrollments" className="space-y-6 max-w-5xl mx-auto">
                         {/* SECTION 3: Prodi Enrollment */}
-                        <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                            <div className="h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2 text-lg">
-                                    <GraduationCap className="w-5 h-5 text-emerald-600" /> Student Enrollment by Study Program
-                                </CardTitle>
-                                <CardDescription>
-                                    Enter total enrolled students per study program. Faculty totals are auto-calculated. Used for response rate in reports.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                {loadingProdi ? (
-                                    <div className="space-y-3">
-                                        {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+                        {loadingProdi ? (
+                            <div className="space-y-3">
+                                {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-16 w-full rounded-2xl" />)}
+                            </div>
+                        ) : (() => {
+                            // Build campus > faculty > programs hierarchy
+                            const campusMap = new Map<string, Map<string, ProdiEnrollmentEntry[]>>();
+                            prodiEnrollments.forEach(e => {
+                                if (!campusMap.has(e.campus)) campusMap.set(e.campus, new Map());
+                                const facMap = campusMap.get(e.campus)!;
+                                if (!facMap.has(e.faculty)) facMap.set(e.faculty, []);
+                                facMap.get(e.faculty)!.push(e);
+                            });
+
+                            const allPrograms = prodiEnrollments;
+                            const totalEnrolledAll = allPrograms.reduce((s, p) => s + p.student_count, 0);
+                            const totalRespAll = allPrograms.reduce((s, p) => s + p.actual_respondents, 0);
+                            const overallRate = totalEnrolledAll > 0 ? ((totalRespAll / totalEnrolledAll) * 100).toFixed(1) : null;
+
+                            return (
+                                <>
+                                    {/* Summary strip */}
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                        {[
+                                            { label: 'Campuses', value: campusMap.size, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30', border: 'border-blue-100 dark:border-blue-900' },
+                                            { label: 'Study Programs', value: allPrograms.length, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-950/30', border: 'border-purple-100 dark:border-purple-900' },
+                                            { label: 'Total Enrolled', value: totalEnrolledAll > 0 ? totalEnrolledAll.toLocaleString() : '\u2014', color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-50 dark:bg-slate-900/50', border: 'border-slate-100 dark:border-slate-800' },
+                                            { label: 'Overall Rate', value: overallRate ? `${overallRate}%` : '\u2014', color: overallRate ? (parseFloat(overallRate) >= 80 ? 'text-emerald-600' : parseFloat(overallRate) >= 50 ? 'text-amber-600' : 'text-red-500') : 'text-slate-400', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-100 dark:border-emerald-900' },
+                                        ].map(({ label, value, color, bg, border }) => (
+                                            <div key={label} className={`${bg} ${border} border rounded-2xl p-4`}>
+                                                <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                                                <div className="text-xs text-slate-500 mt-0.5">{label}</div>
+                                            </div>
+                                        ))}
                                     </div>
-                                ) : (
+
+                                    {/* Campus sections */}
                                     <div className="space-y-4">
-                                        {/* Group by Faculty */}
-                                        {(() => {
-                                            const faculties = new Map<string, ProdiEnrollmentEntry[]>();
-                                            prodiEnrollments.forEach(e => {
-                                                if (!faculties.has(e.faculty)) faculties.set(e.faculty, []);
-                                                faculties.get(e.faculty)!.push(e);
-                                            });
-                                            return Array.from(faculties.entries()).map(([faculty, programs]) => {
-                                                const facTotal = programs.reduce((s, p) => s + p.student_count, 0);
-                                                const facResp = programs.reduce((s, p) => s + p.actual_respondents, 0);
-                                                const facRate = facTotal > 0 ? ((facResp / facTotal) * 100).toFixed(1) : null;
-                                                return (
-                                                    <div key={faculty} className="space-y-2">
-                                                        <div className="flex items-center justify-between px-1">
-                                                            <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">{faculty}</h4>
-                                                            <span className="text-xs text-slate-500">
-                                                                {facResp.toLocaleString()} respondents / {facTotal > 0 ? facTotal.toLocaleString() : '?'} enrolled
-                                                                {facRate && <span className="ml-1 font-semibold text-emerald-600">({facRate}%)</span>}
-                                                            </span>
+                                        {Array.from(campusMap.entries()).map(([campus, faculties]) => {
+                                            const campusPrograms = Array.from(faculties.values()).flat();
+                                            const campusTotal = campusPrograms.reduce((s, p) => s + p.student_count, 0);
+                                            const campusResp = campusPrograms.reduce((s, p) => s + p.actual_respondents, 0);
+                                            const campusRate = campusTotal > 0 ? ((campusResp / campusTotal) * 100) : null;
+                                            const campusRateStr = campusRate !== null ? campusRate.toFixed(1) : null;
+                                            const rateColor = campusRate === null ? '' : campusRate >= 80 ? 'text-emerald-600' : campusRate >= 50 ? 'text-amber-600' : 'text-red-500';
+
+                                            return (
+                                                <Card key={campus} className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                                                    {/* Campus header */}
+                                                    <div className="px-5 py-3.5 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/20 border-b border-blue-100 dark:border-blue-900/50 flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+                                                                <MapPin className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                                                            </div>
+                                                            <span className="font-bold text-blue-900 dark:text-blue-200 text-sm">{campus}</span>
+                                                            <Badge variant="secondary" className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border-0">
+                                                                {campusPrograms.length} program{campusPrograms.length !== 1 ? 's' : ''}
+                                                            </Badge>
                                                         </div>
-                                                        <div className="grid gap-2">
-                                                            {programs.map(entry => {
-                                                                const rate = entry.student_count > 0 ? ((entry.actual_respondents / entry.student_count) * 100).toFixed(1) : null;
-                                                                return (
-                                                                    <div key={entry.study_program} className="flex items-center gap-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800">
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate block">{entry.study_program}</span>
-                                                                            <span className="text-xs text-slate-400">
-                                                                                {entry.actual_respondents} respondents
-                                                                                {rate ? ` \u2022 ${rate}% response rate` : ''}
-                                                                                {entry.actual_respondents === 0 && ' \u2022 Manually added'}
-                                                                            </span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2 shrink-0">
-                                                                            <Users className="w-4 h-4 text-slate-400" />
-                                                                            <Input type="number" value={entry.student_count || ''} onChange={(e) => { const val = parseInt(e.target.value) || 0; setProdiEnrollments(prev => prev.map(pe => pe.study_program === entry.study_program ? { ...pe, student_count: val } : pe)); }} placeholder="Total" min={0} className="w-28 bg-white dark:bg-slate-900 text-right" />
-                                                                            <span className="text-xs text-slate-400 w-16">enrolled</span>
-                                                                            {entry.actual_respondents === 0 && (
-                                                                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-400 hover:text-red-600" onClick={() => setProdiEnrollments(prev => prev.filter(pe => pe.study_program !== entry.study_program))}>
-                                                                                    <Trash2 className="w-3 h-3" />
-                                                                                </Button>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                );
-                                                            })}
+                                                        <div className="text-right">
+                                                            <div className="text-xs text-slate-500">{campusResp.toLocaleString()} / {campusTotal > 0 ? campusTotal.toLocaleString() : <span className="text-amber-500">not set</span>} enrolled</div>
+                                                            {campusRateStr && <div className={`text-sm font-bold ${rateColor}`}>{campusRateStr}% response</div>}
                                                         </div>
                                                     </div>
-                                                );
-                                            });
-                                        })()}
 
-                                        {/* Add Study Program */}
-                                        {showAddProdi ? (
-                                            <div className="p-4 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 space-y-3">
-                                                <div className="grid grid-cols-2 gap-3">
+                                                    {/* Faculty groups within campus */}
+                                                    <CardContent className="p-4 space-y-4">
+                                                        {Array.from(faculties.entries()).map(([faculty, programs]) => {
+                                                            const facTotal = programs.reduce((s, p) => s + p.student_count, 0);
+                                                            const facResp = programs.reduce((s, p) => s + p.actual_respondents, 0);
+                                                            const facRateNum = facTotal > 0 ? (facResp / facTotal * 100) : null;
+                                                            const facRateStr = facRateNum !== null ? facRateNum.toFixed(1) : null;
+                                                            return (
+                                                                <div key={faculty} className="space-y-2">
+                                                                    {/* Faculty sub-header */}
+                                                                    <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                                                                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{faculty}</span>
+                                                                        <span className="text-xs text-slate-400">
+                                                                            {facResp.toLocaleString()} / {facTotal > 0 ? facTotal.toLocaleString() : '?'} enrolled
+                                                                            {facRateStr && <span className="ml-1.5 font-semibold text-emerald-600">{facRateStr}%</span>}
+                                                                        </span>
+                                                                    </div>
+                                                                    {/* Program rows */}
+                                                                    <div className="space-y-1.5">
+                                                                        {programs.map(entry => {
+                                                                            const rateNum = entry.student_count > 0 ? (entry.actual_respondents / entry.student_count * 100) : null;
+                                                                            const rateStr = rateNum !== null ? rateNum.toFixed(1) : null;
+                                                                            const barColor = rateNum === null ? '' : rateNum >= 80 ? 'bg-emerald-500' : rateNum >= 50 ? 'bg-amber-500' : 'bg-red-400';
+                                                                            return (
+                                                                                <div key={`${entry.campus}|||${entry.study_program}`} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 transition-colors group">
+                                                                                    {/* Program info */}
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{entry.study_program}</span>
+                                                                                            {entry.actual_respondents === 0 && <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-slate-400 border-slate-300">manual</Badge>}
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-3">
+                                                                                            <span className="text-xs text-slate-400">{entry.actual_respondents.toLocaleString()} respondents</span>
+                                                                                            {rateStr && (
+                                                                                                <div className="flex items-center gap-1.5">
+                                                                                                    <div className="w-16 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                                                                                        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(parseFloat(rateStr), 100)}%` }} />
+                                                                                                    </div>
+                                                                                                    <span className="text-xs font-medium text-slate-500">{rateStr}%</span>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    {/* Enrollment input */}
+                                                                                    <div className="flex items-center gap-2 shrink-0">
+                                                                                        <Input
+                                                                                            type="number"
+                                                                                            value={entry.student_count || ''}
+                                                                                            onChange={(e) => {
+                                                                                                const val = parseInt(e.target.value) || 0;
+                                                                                                setProdiEnrollments(prev => prev.map(pe =>
+                                                                                                    pe.study_program === entry.study_program && pe.campus === entry.campus
+                                                                                                        ? { ...pe, student_count: val } : pe
+                                                                                                ));
+                                                                                            }}
+                                                                                            placeholder="Enrolled"
+                                                                                            min={0}
+                                                                                            className="w-28 bg-white dark:bg-slate-900 text-right h-8 text-sm"
+                                                                                        />
+                                                                                        {entry.actual_respondents === 0 && (
+                                                                                            <Button
+                                                                                                variant="ghost"
+                                                                                                size="sm"
+                                                                                                className="h-8 w-8 p-0 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                                                onClick={() => setProdiEnrollments(prev => prev.filter(pe =>
+                                                                                                    !(pe.study_program === entry.study_program && pe.campus === entry.campus)
+                                                                                                ))}
+                                                                                            >
+                                                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                                                            </Button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </CardContent>
+                                                </Card>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Add Study Program */}
+                                    {showAddProdi ? (
+                                        <Card className="border-2 border-dashed border-slate-300 dark:border-slate-700 shadow-none">
+                                            <CardContent className="p-4 space-y-3">
+                                                <div className="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-1">Add Study Program with 0% response</div>
+                                                <div className="grid grid-cols-3 gap-3">
                                                     <div>
-                                                        <label className="text-xs font-medium text-slate-500 mb-1 block">Study Program Name</label>
+                                                        <label className="text-xs font-medium text-slate-500 mb-1.5 block">Campus (Location)</label>
+                                                        <Input value={newProdiCampus} onChange={(e) => setNewProdiCampus(e.target.value)} placeholder="e.g. Kampus LV" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-500 mb-1.5 block">Study Program</label>
                                                         <Input value={newProdiName} onChange={(e) => setNewProdiName(e.target.value)} placeholder="e.g. S1 Pendidikan Kimia" />
                                                     </div>
                                                     <div>
-                                                        <label className="text-xs font-medium text-slate-500 mb-1 block">Faculty</label>
+                                                        <label className="text-xs font-medium text-slate-500 mb-1.5 block">Faculty</label>
                                                         <Input value={newProdiFaculty} onChange={(e) => setNewProdiFaculty(e.target.value)} placeholder="e.g. Fakultas Ilmu Pendidikan" />
                                                     </div>
                                                 </div>
                                                 <div className="flex justify-end gap-2">
-                                                    <Button variant="ghost" size="sm" onClick={() => { setShowAddProdi(false); setNewProdiName(''); setNewProdiFaculty(''); }}>Cancel</Button>
-                                                    <Button size="sm" onClick={handleAddProdi} disabled={!newProdiName.trim() || !newProdiFaculty.trim()} className="bg-emerald-600 hover:bg-emerald-700 gap-1">
-                                                        <Plus className="w-3 h-3" /> Add
+                                                    <Button variant="ghost" size="sm" onClick={() => { setShowAddProdi(false); setNewProdiName(''); setNewProdiFaculty(''); setNewProdiCampus(''); }}>Cancel</Button>
+                                                    <Button size="sm" onClick={handleAddProdi} disabled={!newProdiName.trim() || !newProdiFaculty.trim() || !newProdiCampus.trim()} className="bg-emerald-600 hover:bg-emerald-700 gap-1">
+                                                        <Plus className="w-3 h-3" /> Add Program
                                                     </Button>
                                                 </div>
-                                            </div>
-                                        ) : (
-                                            <Button variant="outline" className="w-full border-dashed gap-2 text-slate-500 hover:text-emerald-600 hover:border-emerald-300" onClick={() => setShowAddProdi(true)}>
-                                                <Plus className="w-4 h-4" /> Add Study Program (0% response)
-                                            </Button>
-                                        )}
+                                            </CardContent>
+                                        </Card>
+                                    ) : (
+                                        <Button variant="outline" className="w-full border-dashed gap-2 text-slate-400 hover:text-emerald-600 hover:border-emerald-300 h-11" onClick={() => setShowAddProdi(true)}>
+                                            <Plus className="w-4 h-4" /> Add Study Program (manually \u2014 0 respondents)
+                                        </Button>
+                                    )}
 
-                                        <div className="flex justify-end">
-                                            <Button onClick={handleSaveProdiEnrollment} disabled={savingProdi} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
-                                                {savingProdi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                                Save Enrollment Data
-                                            </Button>
-                                        </div>
+                                    {/* Save button */}
+                                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                                        <p className="text-xs text-slate-400">Enrollment figures are used to calculate response rates in the executive report.</p>
+                                        <Button onClick={handleSaveProdiEnrollment} disabled={savingProdi} className="bg-emerald-600 hover:bg-emerald-700 gap-2 shrink-0">
+                                            {savingProdi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                            Save Enrollment Data
+                                        </Button>
                                     </div>
-                                )}
-                            </CardContent>
-                        </Card>
+                                </>
+                            );
+                        })()}
                     </TabsContent>
                 </Tabs>
             </div>
