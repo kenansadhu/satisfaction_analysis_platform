@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useAuth, canAccessAdminPages } from "@/context/AuthContext";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,12 +16,22 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Survey } from "@/types";
 
 export default function SurveysPage() {
+  const { role, loading: authLoading, profileLoading } = useAuth();
+  const router = useRouter();
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetchSurveys();
-  }, []);
+    if (!authLoading && !profileLoading && !canAccessAdminPages(role)) {
+      router.replace("/");
+    }
+  }, [authLoading, profileLoading, role, router]);
+
+  useEffect(() => {
+    if (!authLoading && !profileLoading && canAccessAdminPages(role)) {
+      fetchSurveys();
+    }
+  }, [authLoading, profileLoading, role]);
 
   async function fetchSurveys() {
     setIsLoading(true);
