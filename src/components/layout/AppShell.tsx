@@ -27,7 +27,7 @@ function getPageTitle(pathname: string): string {
     if (pathname.startsWith("/unit-insights/")) return "Unit Insights";
     if (pathname.startsWith("/faculty-insights/")) return "Faculty Insights";
     if (pathname.startsWith("/surveys/")) return "Survey Detail";
-    return "Student Voice Platform";
+    return "Satisfaction Voice";
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -82,9 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-950">
                 <div className="flex flex-col items-center gap-4">
-                    <div className="px-3 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
-                        <span className="text-xl font-bold text-white">SVP</span>
-                    </div>
+                    <img src="/logo-icon.svg" alt="Satisfaction Voice" className="w-10 h-10 rounded-xl" />
                     <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
                 </div>
             </div>
@@ -163,7 +161,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/50 backdrop-blur-md shrink-0 transition-colors print:hidden">
                         <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between text-xs text-slate-400">
                             <span>© 2026 Kenan Sadhu</span>
-                            <span>Student Voice Platform</span>
+                            <span>Satisfaction Voice</span>
                         </div>
                     </footer>
                 </main>

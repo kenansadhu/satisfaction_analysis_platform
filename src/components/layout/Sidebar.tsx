@@ -84,21 +84,15 @@ export function Sidebar({
             {/* Logo — matches top bar height */}
             <div className="h-14 flex items-center px-4 border-b border-slate-800/60 shrink-0">
                 {!isCollapsed || isMobile ? (
-                    <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
-                        <div className="px-2.5 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-900/30">
-                            <span className="text-sm font-bold text-white">SVP</span>
-                        </div>
-                        <span className="text-sm font-semibold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-                            Student Voice
+                    <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity min-w-0">
+                        <img src="/logo-icon.svg" alt="" className="w-8 h-8 rounded-lg shrink-0" />
+                        <span className="text-sm font-semibold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent truncate">
+                            Satisfaction Voice
                         </span>
                     </Link>
                 ) : (
-                    <Link
-                        href="/"
-                        className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-900/30 mx-auto hover:from-blue-400 hover:to-indigo-500 transition-colors"
-                        title="Home"
-                    >
-                        <span className="text-sm font-bold text-white">S</span>
+                    <Link href="/" className="w-8 h-8 rounded-lg overflow-hidden mx-auto hover:opacity-90 transition-opacity shrink-0 block" title="Home">
+                        <img src="/logo-icon.svg" alt="Satisfaction Voice" className="w-full h-full" />
                     </Link>
                 )}
             </div>

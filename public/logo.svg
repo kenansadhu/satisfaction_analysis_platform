@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+    <defs>
+        <radialGradient id="bgGradient" cx="50%" cy="45%" r="60%">
+            <stop offset="0%" stop-color="#112949" />
+            <stop offset="100%" stop-color="#07111f" />
+        </radialGradient>
+        <linearGradient id="neonGradient" x1="250" y1="0" x2="600" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#1a6ee8" />
+            <stop offset="35%" stop-color="#2196f3" />
+            <stop offset="70%" stop-color="#00e1ff" />
+            <stop offset="100%" stop-color="#ccffff" />
+        </linearGradient>
+        <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur1" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur2" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur3" />
+            <feMerge>
+                <feMergeNode in="blur3" />
+                <feMergeNode in="blur2" />
+                <feMergeNode in="blur1" />
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
+        <filter id="dotGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+            <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
+    </defs>
+
+    <rect width="100%" height="100%" fill="url(#bgGradient)" />
+
+    <g stroke="#ffffff" stroke-width="1.5" opacity="0.03">
+        <path d="M 0,100 L 120,100 M 0,160 L 180,160 M 60,0 L 60,200 M 120,0 L 120,160" />
+        <path d="M 0,480 L 180,480 M 0,540 L 120,540 M 60,420 L 60,600 M 120,480 L 120,600" />
+        <path d="M 680,100 L 800,100 M 620,160 L 800,160 M 740,0 L 740,200 M 680,0 L 680,160" />
+        <path d="M 620,480 L 800,480 M 680,540 L 800,540 M 740,420 L 740,600 M 680,480 L 680,600" />
+    </g>
+
+    <path d="M 760,550 Q 770,550 770,540 Q 770,550 780,550 Q 770,550 770,560 Q 770,550 760,550 Z" fill="#4c779e" opacity="0.4" />
+
+    <g filter="url(#neonGlow)" stroke="url(#neonGradient)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <g transform="translate(0, -10)">
+            <path d="M 270,340
+                     C 320,340 320,240 330,190
+                     C 340,140 390,140 405,170
+                     C 415,185 410,195 405,200
+                     C 415,205 415,210 405,215
+                     C 415,225 410,235 395,240
+                     C 380,245 370,260 385,275
+                     C 400,290 420,260 440,240
+                     S 480,200 500,220
+                     S 540,260 550,230" stroke-width="4.5" />
+            <path d="M 250,360
+                     C 300,360 300,260 310,210
+                     C 320,160 370,160 380,190
+                     C 390,220 410,210 430,190
+                     S 470,150 490,180
+                     S 530,230 540,200" stroke-width="4.5" />
+            <path d="M 230,380
+                     C 290,380 320,320 340,290
+                     C 360,260 380,280 400,290
+                     C 420,300 440,280 460,260
+                     S 500,240 510,260
+                     S 540,280 550,260" stroke-width="4.5" />
+            <path d="M 457, 167 A 75 75 0 1 1 457, 273" stroke-width="5" />
+            <path d="M 565, 275 L 605, 315 A 8 8 0 0 0 615, 305 L 575, 265" stroke-width="5" />
+            <line x1="575" y1="280" x2="605" y2="310" stroke-width="2.5" />
+            <circle cx="485" cy="185" r="4" fill="#ffffff" stroke="none" />
+            <circle cx="525" cy="210" r="3" fill="#ffffff" stroke="none" />
+            <circle cx="505" cy="245" r="5" fill="#ffffff" stroke="none" />
+        </g>
+    </g>
+
+    <text x="400" y="445" font-family="'Montserrat', 'Segoe UI', 'Helvetica Neue', sans-serif" font-size="44" text-anchor="middle" letter-spacing="0.5">
+        <tspan fill="#ffffff" font-weight="400">satisfaction</tspan>
+        <tspan fill="#00e1ff" font-weight="600">voice</tspan>
+    </text>
+
+    <g id="bottom-ui">
+        <path d="M 470, 520 L 530, 520 A 10 10 0 0 0 540, 510 L 540, 460" fill="none" stroke="#4c779e" stroke-width="1.5" stroke-linejoin="round" />
+        <circle cx="540" cy="457" r="3" fill="#07111f" stroke="#00e1ff" stroke-width="1.5" filter="url(#dotGlow)" />
+        <g stroke="#4c779e" fill="none">
+            <rect x="340" y="480" width="130" height="70" rx="6" stroke-width="1.5" fill="#0d1b2a" opacity="0.8" />
+            <line x1="340" y1="495" x2="470" y2="495" stroke-width="1.5" />
+            <circle cx="350" cy="487.5" r="2" fill="#4c779e" />
+            <circle cx="360" cy="487.5" r="2" fill="#4c779e" />
+            <circle cx="370" cy="487.5" r="2" fill="#4c779e" />
+            <circle cx="365" cy="520" r="7" stroke-width="1.5" />
+            <path d="M 353,538 A 14 14 0 0 1 377,538" stroke-width="1.5" />
+            <line x1="390" y1="515" x2="425" y2="515" stroke-width="1.5" stroke-linecap="round" />
+            <line x1="390" y1="528" x2="435" y2="528" stroke-width="1.5" stroke-linecap="round" />
+            <rect x="442" y="515" width="20" height="12" rx="6" stroke-width="1.5" />
+            <circle cx="456" cy="521" r="3" fill="#4c779e" />
+        </g>
+    </g>
+</svg>

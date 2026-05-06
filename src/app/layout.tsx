@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Student Voice Platform",
+  title: "Satisfaction Voice",
   description: "Transforming raw student feedback into actionable intelligence.",
 };
 
