@@ -57,7 +57,7 @@ export function SurveyProvider({ children }: { children: ReactNode }) {
 
             // Check which surveys have analyzed data (avoid slow respondents!inner join)
             const checks = await Promise.all(
-                data.map(async (s) => {
+                data.map(async (s: { id: number; title: string; year?: number }) => {
                     let respIds: number[] = [];
                     let rPage = 0;
                     while (true) {
