@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { useAuth, canAccessAdminPages } from "@/context/AuthContext";
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,30 +14,41 @@ import {
 } from "lucide-react";
 
 export default function HomePage() {
+    const { role, loading: authLoading, profileLoading } = useAuth();
+    const isAdmin = canAccessAdminPages(role);
     const [surveys, setSurveys] = useState<any[]>([]);
     const [totalUnits, setTotalUnits] = useState(0);
     const [totalSegments, setTotalSegments] = useState(0);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (authLoading || profileLoading) return;
         const load = async () => {
-            const [surveysRes, unitsRes, segmentsRes] = await Promise.all([
-                supabase.from("surveys").select("*, respondents(count)").order("created_at", { ascending: false }),
+            const queries: Promise<any>[] = [
                 supabase.from("organization_units").select("*", { count: "exact", head: true }),
                 supabase.from("feedback_segments").select("*", { count: "exact", head: true }),
-            ]);
-            setSurveys(surveysRes.data || []);
-            setTotalUnits(unitsRes.count || 0);
-            setTotalSegments(segmentsRes.count || 0);
+            ];
+            if (isAdmin) {
+                queries.unshift(supabase.from("surveys").select("*, respondents(count)").order("created_at", { ascending: false }));
+            }
+            const results = await Promise.all(queries);
+            if (isAdmin) {
+                setSurveys(results[0].data || []);
+                setTotalUnits(results[1].count || 0);
+                setTotalSegments(results[2].count || 0);
+            } else {
+                setTotalUnits(results[0].count || 0);
+                setTotalSegments(results[1].count || 0);
+            }
             setLoading(false);
         };
         load();
-    }, []);
+    }, [authLoading, profileLoading, isAdmin]);
 
     const totalRespondents = surveys.reduce((acc, s) => acc + (s.respondents?.[0]?.count || 0), 0);
 
     const quickActions = [
-        {
+        ...(isAdmin ? [{
             href: "/surveys",
             icon: LayoutDashboard,
             label: "Surveys",
@@ -46,7 +58,7 @@ export default function HomePage() {
             iconColor: "text-purple-600 dark:text-purple-400",
             hoverBorder: "hover:border-purple-300 dark:hover:border-purple-700",
             hoverArrow: "group-hover:text-purple-500",
-        },
+        }] : []),
         {
             href: "/faculty-insights",
             icon: GraduationCap,
@@ -123,10 +135,12 @@ export default function HomePage() {
                     </div>
 
                     {/* Stats */}
-                    <div className="grid grid-cols-4 gap-4 mt-12">
+                    <div className={`grid gap-4 mt-12 ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
                         {[
-                            { label: "Active Surveys", value: loading ? "—" : surveys.length, icon: Database },
-                            { label: "Respondents", value: loading ? "—" : totalRespondents.toLocaleString(), icon: Users },
+                            ...(isAdmin ? [
+                                { label: "Active Surveys", value: loading ? "—" : surveys.length, icon: Database },
+                                { label: "Respondents", value: loading ? "—" : totalRespondents.toLocaleString(), icon: Users },
+                            ] : []),
                             { label: "Units Tracked", value: loading ? "—" : totalUnits, icon: Building2 },
                             { label: "AI Segments", value: loading ? "—" : totalSegments.toLocaleString(), icon: Zap },
                         ].map((stat, i) => (
@@ -166,8 +180,8 @@ export default function HomePage() {
                     </div>
                 </div>
 
-                {/* Survey Grid */}
-                <div className="space-y-4">
+                {/* Survey Grid — admin/owner only */}
+                {isAdmin && <div className="space-y-4">
                     <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                         <TrendingUp className="w-5 h-5 text-slate-400" /> Recent Survey Projects
                     </h2>
@@ -223,7 +237,7 @@ export default function HomePage() {
                             </Link>
                         </div>
                     )}
-                </div>
+                </div>}
 
             </div>
         </div>
