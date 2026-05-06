@@ -48,10 +48,7 @@ export function SurveyProvider({ children }: { children: ReactNode }) {
             return;
         }
         const load = async () => {
-            const { data } = await supabase
-                .from("surveys")
-                .select("id, title, year")
-                .order("created_at", { ascending: false });
+            const { data } = await supabase.rpc("get_surveys_list");
 
             if (!data || data.length === 0) {
                 setLoading(false);
