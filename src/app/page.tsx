@@ -17,35 +17,22 @@ export default function HomePage() {
     const { role, loading: authLoading, profileLoading } = useAuth();
     const isAdmin = canAccessAdminPages(role);
     const [surveys, setSurveys] = useState<any[]>([]);
-    const [totalUnits, setTotalUnits] = useState(0);
-    const [totalSegments, setTotalSegments] = useState(0);
+    const [stats, setStats] = useState({ survey_count: 0, respondent_count: 0, unit_count: 0, segment_count: 0 });
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         if (authLoading || profileLoading) return;
         const load = async () => {
-            const queries: Promise<any>[] = [
-                supabase.from("organization_units").select("*", { count: "exact", head: true }),
-                supabase.from("feedback_segments").select("*", { count: "exact", head: true }),
-            ];
-            if (isAdmin) {
-                queries.unshift(supabase.from("surveys").select("*, respondents(count)").order("created_at", { ascending: false }));
-            }
-            const results = await Promise.all(queries);
-            if (isAdmin) {
-                setSurveys(results[0].data || []);
-                setTotalUnits(results[1].count || 0);
-                setTotalSegments(results[2].count || 0);
-            } else {
-                setTotalUnits(results[0].count || 0);
-                setTotalSegments(results[1].count || 0);
-            }
+            const promises: Promise<any>[] = [supabase.rpc("get_platform_stats")];
+            if (isAdmin) promises.push(supabase.from("surveys").select("*, respondents(count)").order("created_at", { ascending: false }));
+            const [statsRes, surveysRes] = await Promise.all(promises);
+            const s = statsRes.data?.[0];
+            if (s) setStats({ survey_count: Number(s.survey_count) || 0, respondent_count: Number(s.respondent_count) || 0, unit_count: Number(s.unit_count) || 0, segment_count: Number(s.segment_count) || 0 });
+            if (isAdmin) setSurveys(surveysRes?.data || []);
             setLoading(false);
         };
         load();
     }, [authLoading, profileLoading, isAdmin]);
-
-    const totalRespondents = surveys.reduce((acc, s) => acc + (s.respondents?.[0]?.count || 0), 0);
 
     const quickActions = [
         ...(isAdmin ? [{
@@ -135,14 +122,12 @@ export default function HomePage() {
                     </div>
 
                     {/* Stats */}
-                    <div className={`grid gap-4 mt-12 ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
+                    <div className="grid grid-cols-4 gap-4 mt-12">
                         {[
-                            ...(isAdmin ? [
-                                { label: "Active Surveys", value: loading ? "—" : surveys.length, icon: Database },
-                                { label: "Respondents", value: loading ? "—" : totalRespondents.toLocaleString(), icon: Users },
-                            ] : []),
-                            { label: "Units Tracked", value: loading ? "—" : totalUnits, icon: Building2 },
-                            { label: "AI Segments", value: loading ? "—" : totalSegments.toLocaleString(), icon: Zap },
+                            { label: "Active Surveys", value: loading ? "—" : stats.survey_count, icon: Database },
+                            { label: "Respondents", value: loading ? "—" : stats.respondent_count.toLocaleString(), icon: Users },
+                            { label: "Units Tracked", value: loading ? "—" : stats.unit_count, icon: Building2 },
+                            { label: "AI Segments", value: loading ? "—" : stats.segment_count.toLocaleString(), icon: Zap },
                         ].map((stat, i) => (
                             <div key={i} className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-5 hover:bg-white/10 transition-all duration-300">
                                 <stat.icon className="w-5 h-5 text-blue-400 mb-2" />
