@@ -23,12 +23,13 @@ export default function HomePage() {
     useEffect(() => {
         if (authLoading || profileLoading) return;
         const load = async () => {
-            const promises: Promise<any>[] = [supabase.rpc("get_platform_stats")];
-            if (isAdmin) promises.push(supabase.from("surveys").select("*, respondents(count)").order("created_at", { ascending: false }));
-            const [statsRes, surveysRes] = await Promise.all(promises);
+            const [statsRes, surveysRes] = await Promise.all([
+                supabase.rpc("get_platform_stats"),
+                isAdmin ? supabase.from("surveys").select("*, respondents(count)").order("created_at", { ascending: false }) : Promise.resolve({ data: [] }),
+            ]);
             const s = statsRes.data?.[0];
             if (s) setStats({ survey_count: Number(s.survey_count) || 0, respondent_count: Number(s.respondent_count) || 0, unit_count: Number(s.unit_count) || 0, segment_count: Number(s.segment_count) || 0 });
-            if (isAdmin) setSurveys(surveysRes?.data || []);
+            if (isAdmin) setSurveys((surveysRes as any)?.data || []);
             setLoading(false);
         };
         load();
