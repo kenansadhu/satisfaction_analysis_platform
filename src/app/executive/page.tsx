@@ -264,7 +264,7 @@ export default function ExecutiveDashboard() {
                     </TabsContent>
 
                     <TabsContent value="depmap" className="focus-visible:ring-0 animate-in fade-in">
-                        <div className="h-[600px] w-full bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <div className="h-[1080px] w-full bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
                             <DependencyGraph surveyId={selectedSurvey || "all"} />
                         </div>
                     </TabsContent>

@@ -6,15 +6,16 @@ export const AI_MODEL = process.env.AI_MODEL || "gemini-2.5-flash";
 const MAX_INPUT_LENGTH = 50000;
 
 export const GEMINI_MODELS = [
-    { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", description: "Fastest & cheapest — for simple classification tasks", inputRate: 0.018, outputRate: 0.072, tier: "fast" },
-    { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash",      description: "Fast & balanced — recommended for most analysis",       inputRate: 0.075, outputRate: 0.30,  tier: "balanced" },
-    { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro",        description: "Highest quality reasoning — complex reports & analysis", inputRate: 1.25,  outputRate: 10.00, tier: "pro" },
+    { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", description: "Fastest & cheapest — for simple classification tasks", inputRate: 0.10, outputRate: 0.40,  thinkingRate: 0,    tier: "fast" },
+    { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash",      description: "Fast & balanced — recommended for most analysis",       inputRate: 0.15, outputRate: 0.60,  thinkingRate: 3.50, tier: "balanced" },
+    { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro",        description: "Highest quality reasoning — complex reports & analysis", inputRate: 1.25, outputRate: 10.00, thinkingRate: 3.50, tier: "pro" },
 ];
 
-const TOKEN_PRICING: Record<string, { input: number; output: number }> = {
-    "gemini-2.5-flash-lite": { input: 0.018, output: 0.072 },
-    "gemini-2.5-flash":      { input: 0.075, output: 0.30  },
-    "gemini-2.5-pro":        { input: 1.25,  output: 10.00 },
+// Rates are $/1M tokens. Thinking tokens (thoughtsTokenCount) are billed separately from output tokens.
+const TOKEN_PRICING: Record<string, { input: number; output: number; thinking: number }> = {
+    "gemini-2.5-flash-lite": { input: 0.10, output: 0.40,  thinking: 0    },
+    "gemini-2.5-flash":      { input: 0.15, output: 0.60,  thinking: 3.50 },
+    "gemini-2.5-pro":        { input: 1.25, output: 10.00, thinking: 3.50 },
 };
 
 // --- Sanitization (Prompt Injection Guard) ---
@@ -51,13 +52,13 @@ export async function getAgentSettings(functionId: string): Promise<{ modelId: s
 }
 
 // --- Usage Logging ---
-function estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
-    const rates = TOKEN_PRICING[modelId] ?? { input: 0, output: 0 };
-    return (inputTokens * rates.input + outputTokens * rates.output) / 1_000_000;
+function estimateCost(modelId: string, inputTokens: number, outputTokens: number, thinkingTokens = 0): number {
+    const rates = TOKEN_PRICING[modelId] ?? { input: 0, output: 0, thinking: 0 };
+    return (inputTokens * rates.input + outputTokens * rates.output + thinkingTokens * rates.thinking) / 1_000_000;
 }
 
-function logUsage(params: { functionName: string; modelId: string; inputTokens: number; outputTokens: number }): void {
-    const cost = estimateCost(params.modelId, params.inputTokens, params.outputTokens);
+function logUsage(params: { functionName: string; modelId: string; inputTokens: number; outputTokens: number; thinkingTokens: number }): void {
+    const cost = estimateCost(params.modelId, params.inputTokens, params.outputTokens, params.thinkingTokens);
     // Fire-and-forget: never blocks the response to the user
     Promise.resolve(
         supabaseServer.from("ai_usage_logs").insert({
@@ -126,10 +127,11 @@ export async function callGemini(
     if (options.functionId) {
         const usage = result.response.usageMetadata;
         logUsage({
-            functionName: options.functionId,
+            functionName:   options.functionId,
             modelId,
-            inputTokens:  usage?.promptTokenCount     ?? 0,
-            outputTokens: usage?.candidatesTokenCount ?? 0,
+            inputTokens:    usage?.promptTokenCount     ?? 0,
+            outputTokens:   usage?.candidatesTokenCount ?? 0,
+            thinkingTokens: usage?.thoughtsTokenCount   ?? 0,
         });
     }
 

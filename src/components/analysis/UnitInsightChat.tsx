@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Loader2, Send, Sparkles, Bot, User, CornerDownRight,
     Download, Trash2, History, Lightbulb, CheckCircle2,
@@ -37,6 +38,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
     const [isLoading, setIsLoading] = useState(false);
     const [generatingReport, setGeneratingReport] = useState(false);
     const [report, setReport] = useState<ExecutiveReportData | null>(null);
+    const [customInstructions, setCustomInstructions] = useState("");
     const [lastSaved, setLastSaved] = useState<string | null>(null);
     const [reportError, setReportError] = useState<string | null>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -143,7 +145,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
             const res = await fetch('/api/ai/generate-report', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ unitId, surveyId })
+                body: JSON.stringify({ unitId, surveyId, customInstructions: customInstructions.trim() || undefined })
             });
 
             const data = await res.json();
@@ -176,7 +178,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
             Excellent: "#059669", Good: "#4f46e5", "Needs Improvement": "#d97706", Critical: "#dc2626",
         };
         const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<title>Executive Analysis Report</title>
+<title>Unit Analysis Report</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#1e293b;max-width:860px;margin:0 auto;padding:48px 56px 80px}
@@ -207,9 +209,9 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
 </style></head><body>
 <div class="header">
   ${unitName ? `<div class="unit-name">${esc(unitName)}</div>` : ""}
-  <div class="title">Executive Analysis Report</div>
+  <div class="title">Unit Analysis Report</div>
   <div class="subtitle">
-    ${surveyTitle ? esc(surveyTitle) : ""}${surveyYear ? ` &middot; ${surveyYear}` : ""}${(surveyTitle || surveyYear) ? " &middot; " : ""}AI-Generated Strategic Overview
+    ${surveyTitle ? esc(surveyTitle) : ""}${surveyYear ? ` &middot; ${surveyYear}` : ""}
   </div>
   <span class="verdict" style="background:${verdictBg[report.overall_verdict] ?? "#64748b"}">Verdict: ${esc(report.overall_verdict)}</span>
 </div>
@@ -303,9 +305,19 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
                                     </Button>
                                 )}
 
-                                <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                                <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 flex items-center gap-1.5">
+                                        <FileText className="w-3 h-3" /> Analyst Context
+                                    </label>
+                                    <Textarea
+                                        value={customInstructions}
+                                        onChange={(e) => setCustomInstructions(e.target.value)}
+                                        placeholder="Optional: guide the AI before generating. e.g. 'Ignore utilization rate — this service has a limited user base by design.'"
+                                        className="text-xs resize-none min-h-[90px] rounded-xl border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 placeholder:text-slate-300 dark:placeholder:text-slate-600 focus-visible:ring-indigo-500"
+                                        disabled={generatingReport}
+                                    />
                                     <p className="text-[10px] text-slate-400 leading-relaxed italic">
-                                        Our AI Specialist will process all qualitative feedback and quantitative metrics to build a comprehensive strategic overview.
+                                        These instructions are sent to the AI on each generation run.
                                     </p>
                                 </div>
                             </CardContent>
@@ -330,9 +342,9 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <CardTitle className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter flex items-center gap-3">
-                                                <Lightbulb className="w-7 h-7 text-amber-500" /> Executive Analysis Report
+                                                <Lightbulb className="w-7 h-7 text-amber-500" /> Unit Analysis Report
                                             </CardTitle>
-                                            <CardDescription className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-widest">AI-Generated Insights Summary</CardDescription>
+                                            <CardDescription className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-widest">Insights Summary</CardDescription>
                                         </div>
                                         <Badge className={`px-5 py-2 text-xs font-black uppercase tracking-[0.2em] shadow-lg ${report.overall_verdict === 'Excellent' ? 'bg-emerald-500' : report.overall_verdict === 'Good' ? 'bg-indigo-600' : report.overall_verdict === 'Needs Improvement' ? 'bg-amber-600' : 'bg-red-600'}`}>
                                             Verdict: {report.overall_verdict}

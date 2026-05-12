@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useActiveSurvey, SurveyInfo } from "@/context/SurveyContext";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw, ShieldAlert, Calendar, Users } from "lucide-react";
+import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw, ShieldAlert, Calendar, BarChart2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -26,6 +26,43 @@ export default function SettingsPage() {
     const [clearingCache, setClearingCache] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<SurveyInfo | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    const [allUnits, setAllUnits] = useState<{ id: number; name: string }[]>([]);
+    const [excludedUnitIds, setExcludedUnitIds] = useState<number[]>([]);
+    const [savingExclusions, setSavingExclusions] = useState(false);
+
+    useEffect(() => {
+        fetch("/api/settings/excluded-score-units")
+            .then(r => r.json())
+            .then(d => setExcludedUnitIds(d.excludedUnitIds || []));
+        import("@/lib/supabase").then(({ supabase }) =>
+            supabase.from("organization_units").select("id, name").order("name")
+                .then(({ data }) => setAllUnits(data || []))
+        );
+    }, []);
+
+    const toggleUnitExclusion = (id: number) => {
+        setExcludedUnitIds(prev =>
+            prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+        );
+    };
+
+    const saveExclusions = async () => {
+        setSavingExclusions(true);
+        try {
+            const res = await fetch("/api/settings/excluded-score-units", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ excludedUnitIds }),
+            });
+            if (res.ok) toast.success("Score calculation settings saved.");
+            else toast.error("Failed to save settings.");
+        } catch {
+            toast.error("Failed to save settings.");
+        } finally {
+            setSavingExclusions(false);
+        }
+    };
 
     const handleSurveyClick = (survey: SurveyInfo) => {
         if (survey.id.toString() === activeSurveyId) return;
@@ -182,10 +219,10 @@ export default function SettingsPage() {
                             <div className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
                                 <RefreshCcw className="w-4 h-4 text-slate-500" />
                             </div>
-                            <CardTitle className="text-base">Score Cache</CardTitle>
+                            <CardTitle className="text-base">Data Cache</CardTitle>
                         </div>
                         <CardDescription>
-                            Quantitative satisfaction scores are cached for faster loading. Clear if you re-imported survey data.
+                            Scores and cross-unit mention data are cached for faster loading. Clear if you re-ran analysis or re-imported survey data.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -209,6 +246,81 @@ export default function SettingsPage() {
                                 Clear Cache
                             </Button>
                         </div>
+                    </CardContent>
+                </Card>
+
+                {/* ── Executive Score Calculation ──────────────── */}
+                <Card className="shadow-sm">
+                    <CardHeader className="pb-4">
+                        <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                                <BarChart2 className="w-4 h-4 text-slate-500" />
+                            </div>
+                            <CardTitle className="text-base">Executive Score Calculation</CardTitle>
+                        </div>
+                        <CardDescription>
+                            Choose which units count toward the overall Satisfaction Index on the Executive Insights page. Uncheck units whose questions use a different scale or shouldn't factor into the institution-wide average.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        {allUnits.length === 0 ? (
+                            <div className="flex items-center justify-center py-6">
+                                <Loader2 className="w-5 h-5 animate-spin text-slate-300" />
+                            </div>
+                        ) : (
+                            <>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {allUnits.map(unit => {
+                                        const excluded = excludedUnitIds.includes(unit.id);
+                                        return (
+                                            <button
+                                                key={unit.id}
+                                                onClick={() => toggleUnitExclusion(unit.id)}
+                                                className={cn(
+                                                    "flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all duration-150",
+                                                    excluded
+                                                        ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 opacity-50"
+                                                        : "border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/20"
+                                                )}
+                                            >
+                                                <div className={cn(
+                                                    "w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors",
+                                                    excluded
+                                                        ? "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
+                                                        : "border-indigo-500 bg-indigo-500"
+                                                )}>
+                                                    {!excluded && (
+                                                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 8">
+                                                            <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                                <span className={cn(
+                                                    "text-sm font-medium truncate",
+                                                    excluded ? "text-slate-400 dark:text-slate-600" : "text-slate-700 dark:text-slate-300"
+                                                )}>
+                                                    {unit.name}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <div className="flex items-center justify-between pt-2">
+                                    <p className="text-xs text-slate-400">
+                                        {allUnits.length - excludedUnitIds.length} of {allUnits.length} units included
+                                    </p>
+                                    <Button
+                                        size="sm"
+                                        onClick={saveExclusions}
+                                        disabled={savingExclusions}
+                                        className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+                                    >
+                                        {savingExclusions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                        Save
+                                    </Button>
+                                </div>
+                            </>
+                        )}
                     </CardContent>
                 </Card>
 

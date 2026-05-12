@@ -4,7 +4,7 @@ import { supabaseServer as supabase } from "@/lib/supabase-server";
 
 export async function POST(req: Request) {
   try {
-    const { unitId, surveyId } = await req.json();
+    const { unitId, surveyId, customInstructions } = await req.json();
 
     if (!unitId) {
       return NextResponse.json({ error: "unitId is required" }, { status: 400 });
@@ -21,15 +21,29 @@ export async function POST(req: Request) {
     const unit = unitRes.data;
     const totalSurveyPopulation = respRes.count || 0;
 
-    // 2. Fetch Proper Qualitative Data (feedback_segments) with Isolation
-    const { data: surveyResps } = await supabase.from('respondents').select('id').eq('survey_id', surveyId);
-    const surveyRespIds = (surveyResps || []).map(r => r.id);
+    // 2. Fetch ALL respondent IDs for this survey (paginated — Supabase caps at 1000/request)
+    const PAGE_SIZE = 1000;
+    const CHUNK = 500;
+    let surveyRespIds: number[] = [];
+    for (let page = 0; ; page++) {
+      const { data: pageData } = await supabase
+        .from('respondents').select('id').eq('survey_id', surveyId)
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (!pageData || pageData.length === 0) break;
+      surveyRespIds.push(...pageData.map((r: any) => r.id));
+      if (pageData.length < PAGE_SIZE) break;
+    }
 
-    const { data: rawInputs } = await supabase
-      .from('raw_feedback_inputs')
-      .select('id, raw_text, source_column, respondent_id')
-      .eq('target_unit_id', unitId)
-      .in('respondent_id', surveyRespIds);
+    // Fetch raw inputs in chunks to avoid huge IN clauses
+    const rawInputs: any[] = [];
+    for (let i = 0; i < surveyRespIds.length; i += CHUNK) {
+      const { data } = await supabase
+        .from('raw_feedback_inputs')
+        .select('id, raw_text, source_column, respondent_id')
+        .eq('target_unit_id', unitId)
+        .in('respondent_id', surveyRespIds.slice(i, i + CHUNK));
+      if (data) rawInputs.push(...data);
+    }
 
     const inputIds = (rawInputs || []).map(ri => ri.id);
 
@@ -68,14 +82,18 @@ export async function POST(req: Request) {
       return acc;
     }, {});
 
-    // 3. Fetch Quantitative Scores with SCALE AWARENESS & Isolation
-    const { data: quantData } = await supabase
-      .from('raw_feedback_inputs')
-      .select('source_column, numerical_score, respondent_id')
-      .eq('target_unit_id', unitId)
-      .eq('is_quantitative', true)
-      .in('respondent_id', surveyRespIds)
-      .not('numerical_score', 'is', null);
+    // 3. Fetch Quantitative Scores with SCALE AWARENESS & Isolation (chunked)
+    const quantData: any[] = [];
+    for (let i = 0; i < surveyRespIds.length; i += CHUNK) {
+      const { data } = await supabase
+        .from('raw_feedback_inputs')
+        .select('source_column, numerical_score, respondent_id')
+        .eq('target_unit_id', unitId)
+        .eq('is_quantitative', true)
+        .in('respondent_id', surveyRespIds.slice(i, i + CHUNK))
+        .not('numerical_score', 'is', null);
+      if (data) quantData.push(...data);
+    }
 
     const quantStats = (quantData || []).reduce((acc: any, q) => {
       if (!acc[q.source_column]) acc[q.source_column] = { sum: 0, count: 0, max: 0 };
@@ -105,6 +123,59 @@ Qualitative Data: ${finalQualitativeData.length} items provided. Sentiment Distr
 
     const categoryPrompt = Object.entries(categories).map(([name, count]) => `${name} (${count})`).join(', ');
 
+    // 4. Cross-unit signals
+    // Outgoing: segments from this unit's respondents that tag other units
+    const outgoingSegs: any[] = [];
+    for (let i = 0; i < inputIds.length; i += CHUNK) {
+      const { data } = await supabase
+        .from('feedback_segments')
+        .select('related_unit_ids, sentiment')
+        .in('raw_input_id', inputIds.slice(i, i + CHUNK))
+        .not('related_unit_ids', 'is', null);
+      if (data) outgoingSegs.push(...data);
+    }
+
+    const outgoingUnitCounts = new Map<number, { total: number; positive: number; negative: number; neutral: number }>();
+    for (const seg of outgoingSegs) {
+      if (!Array.isArray(seg.related_unit_ids)) continue;
+      for (const rid of seg.related_unit_ids) {
+        if (rid === parseInt(unitId)) continue;
+        if (!outgoingUnitCounts.has(rid)) outgoingUnitCounts.set(rid, { total: 0, positive: 0, negative: 0, neutral: 0 });
+        const e = outgoingUnitCounts.get(rid)!;
+        e.total++;
+        if (seg.sentiment === 'Positive') e.positive++;
+        else if (seg.sentiment === 'Negative') e.negative++;
+        else e.neutral++;
+      }
+    }
+
+    let outgoingPrompt = "None detected.";
+    if (outgoingUnitCounts.size > 0) {
+      const unitIds = [...outgoingUnitCounts.keys()];
+      const { data: outNames } = await supabase.from('organization_units').select('id, name').in('id', unitIds);
+      const outNameMap = new Map((outNames || []).map((u: any) => [u.id, u.name]));
+      outgoingPrompt = [...outgoingUnitCounts.entries()]
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([id, c]) => `• ${outNameMap.get(id) || `Unit ${id}`}: ${c.total} mentions (${c.positive} positive, ${c.negative} negative, ${c.neutral} neutral)`)
+        .join('\n');
+    }
+
+    // Incoming: read from cache (instant if previously computed; skip if not)
+    let incomingPrompt = "Not yet computed — run the unit insights page first to populate.";
+    const { data: cachedIncoming } = await supabase
+      .from('survey_cross_mentions_cache')
+      .select('total_mentions, source_unit_count, positive_count, negative_count, neutral_count, source_units_breakdown')
+      .eq('survey_id', surveyId)
+      .eq('mentioned_unit_id', unitId)
+      .maybeSingle();
+
+    if (cachedIncoming && cachedIncoming.total_mentions > 0) {
+      const topSources = ((cachedIncoming.source_units_breakdown as any[]) || []).slice(0, 5)
+        .map((s: any) => `• ${s.source_unit_name}: ${s.total} mentions (${s.positive} positive, ${s.negative} negative)`)
+        .join('\n');
+      incomingPrompt = `${cachedIncoming.total_mentions} total mentions from ${cachedIncoming.source_unit_count} other units (${cachedIncoming.positive_count} positive, ${cachedIncoming.negative_count} negative, ${cachedIncoming.neutral_count} neutral).\nTop sources:\n${topSources}`;
+    }
+
     // 4. RESTORE OBJECTIVE DATA INTELLIGENCE ENGINE PROMPT WITH ENHANCED CONTEXT & WEIGHTING
     const prompt = `You are an objective Data Intelligence Engine tasked with writing an Executive Analysis Report for the "${unit?.name || 'Unit'}" department. 
 
@@ -121,8 +192,15 @@ ${statsPrompt}
 - CATEGORIES: ${categoryPrompt}
 - EVIDENCE SAMPLES (VERBATIM): ${JSON.stringify(finalQualitativeData.slice(0, 80).map(s => ({ text: s.segment_text, sentiment: s.sentiment, category: s.category_name })))}
 
+=== CROSS-UNIT SIGNALS ===
+OUTGOING — students processed by this unit whose feedback mentions other departments:
+${outgoingPrompt}
+
+INCOMING — students from other units who reference this unit in their feedback:
+${incomingPrompt}
+
 IMPORTANT INTERPRETATION RULES:
-1. "Utilization Weighting": A low utilization rate (e.g., < 30%) is a CRITICAL concern for "Reach", but do not let it completely invalidate high satisfaction scores. If satisfaction (3.16/4) is good, report it as a "Key Advantage" (Quality) while flagging utilization as a "Vulnerability" (Reach).
+1. "Utilization Weighting": A low utilization rate (e.g., < 30%) is a CRITICAL concern for "Reach", but do not let it completely invalidate high satisfaction scores. If satisfaction scores are high, report them as a "Key Advantage" (Quality) while flagging utilization as a "Vulnerability" (Reach). Always use the actual scores from QUANTITATIVE METRICS above — never invent or assume numbers.
 2. "Quant Scales":
    - "Likert (1-4)": 2.5 is average, 3.5+ is excellent.
    - "Binary/Percentage (0-1)": 0.8 is 80% positivity, 0.2 is 20%. 
@@ -148,7 +226,9 @@ Produce a boardroom-quality JSON report.
 
 Return ONLY valid JSON. Exactly 3 items per list.`;
 
-    const finalPrompt = prompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : "");
+    const finalPrompt = prompt
+      + (customInstructions ? `\n\n---\nANALYST CONTEXT (provided by report owner — follow these directives):\n${customInstructions}` : "")
+      + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : "");
 
     let parsed;
     let retries = 0;

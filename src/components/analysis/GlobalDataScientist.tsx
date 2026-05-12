@@ -537,7 +537,7 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
                     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-xl overflow-hidden p-6">
                         <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">Institutional Cross-Unit Dependency Graph</h3>
                         <p className="text-sm text-slate-500 mb-6">Visualizing operational friction points between departments based on qualitative feedback overlaps.</p>
-                        <div className="h-[600px] w-full bg-slate-50 rounded-xl border border-slate-100">
+                        <div className="h-[1080px] w-full bg-slate-50 rounded-xl border border-slate-100">
                             <DependencyGraph surveyId={surveyId || "all"} />
                         </div>
                     </div>

@@ -9,15 +9,14 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "surveyId required" }, { status: 400 });
     }
 
-    // Clear existing quant cache
-    await supabase.from('survey_quant_cache').delete().eq('survey_id', parseInt(surveyId));
+    const sid = parseInt(surveyId);
+    await Promise.all([
+        supabase.from('survey_quant_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid),
+        supabase.from('surveys').update({ ai_dataset_cache: null, ai_dataset_updated_at: null }).eq('id', sid),
+    ]);
 
-    // Clear AI dataset cache
-    await supabase.from('surveys')
-        .update({ ai_dataset_cache: null, ai_dataset_updated_at: null })
-        .eq('id', parseInt(surveyId));
-
-    // Next request to /api/executive/report will recompute and cache
     return NextResponse.json({ message: `Cache cleared for survey ${surveyId}. Next report load will recompute.` });
 }
 
@@ -27,18 +26,16 @@ export async function DELETE(req: NextRequest) {
         return NextResponse.json({ error: "surveyId required" }, { status: 400 });
     }
 
-    const { error } = await supabase.from('survey_quant_cache').delete().eq('survey_id', parseInt(surveyId));
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const sid = parseInt(surveyId);
+    const [q, c, f, a] = await Promise.all([
+        supabase.from('survey_quant_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid),
+        supabase.from('surveys').update({ ai_dataset_cache: null, ai_dataset_updated_at: null }).eq('id', sid),
+    ]);
 
-    const { error: aiError } = await supabase.from('surveys')
-        .update({ ai_dataset_cache: null, ai_dataset_updated_at: null })
-        .eq('id', parseInt(surveyId));
-
-    if (aiError) {
-        return NextResponse.json({ error: aiError.message }, { status: 500 });
-    }
+    const err = q.error || c.error || f.error || a.error;
+    if (err) return NextResponse.json({ error: err.message }, { status: 500 });
 
     return NextResponse.json({ message: `Cache cleared for survey ${surveyId}` });
 }

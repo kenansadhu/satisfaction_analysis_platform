@@ -15,7 +15,13 @@
       "Bash(npm install *)",
       "Bash(del \"src\\\\components\\\\analysis\\\\StrategicReportPdf.tsx\")",
       "Bash(Get-ChildItem -Path \"src\" -Recurse -Filter \"*survey*\")",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(git fetch *)",
+      "Bash(npm run *)",
+      "PowerShell($procs = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue; if \\($procs\\) { $procs | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }; Write-Host \"Port 3000 cleared\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\" -Directory)",
+      "Bash(Select-Object Name)",
+      "mcp__claude_ai_Supabase__execute_sql"
     ],
     "additionalDirectories": [
       "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",

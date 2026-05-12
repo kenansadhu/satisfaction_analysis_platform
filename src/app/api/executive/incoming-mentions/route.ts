@@ -40,42 +40,37 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Cache miss: compute from raw data ──────────────────────────────────────
-    // Step 1: All respondents for this survey
+    // Step 1: Get ALL input IDs from OTHER units for this survey.
+    // Uses an !inner join on respondents to filter by survey_id without a
+    // separate respondent-ID fetch — avoids the 1000-row cap on chunked IN queries.
     const PAGE = 1000;
-    const allRespIds: number[] = [];
-    let from = 0;
-    while (true) {
-        const { data } = await supabase.from("respondents")
-            .select("id").eq("survey_id", sid).range(from, from + PAGE - 1);
-        if (!data || data.length === 0) break;
-        for (const r of data) allRespIds.push(r.id);
-        if (data.length < PAGE) break;
-        from += PAGE;
-    }
-
-    // Step 2: All input IDs from OTHER units' analyses (target_unit_id != uid)
     const CHUNK = 400;
     const MAX_CONCURRENT = 5;
     const inputTargetMap = new Map<number, number>(); // input_id → source unit_id
 
-    for (let bStart = 0; bStart < allRespIds.length; bStart += CHUNK * MAX_CONCURRENT) {
-        const chunks: number[][] = [];
-        for (let i = bStart; i < Math.min(bStart + CHUNK * MAX_CONCURRENT, allRespIds.length); i += CHUNK)
-            chunks.push(allRespIds.slice(i, i + CHUNK));
-        const results = await Promise.all(chunks.map(chunk =>
-            supabase.from("raw_feedback_inputs").select("id, target_unit_id")
-                .in("respondent_id", chunk)
-                .eq("is_quantitative", false)
-                .neq("target_unit_id", uid)
-        ));
-        for (const res of results) {
-            if (!res.data) continue;
-            for (const inp of res.data)
-                if (inp.target_unit_id) inputTargetMap.set(inp.id, inp.target_unit_id);
+    let page = 0;
+    while (true) {
+        const { data, error } = await supabase
+            .from("raw_feedback_inputs")
+            .select("id, target_unit_id, respondents!inner(survey_id)")
+            .eq("respondents.survey_id", sid)
+            .neq("target_unit_id", uid)
+            .eq("is_quantitative", false)
+            .range(page * PAGE, (page + 1) * PAGE - 1);
+
+        if (error) {
+            console.error("[incoming-mentions] input fetch error:", error.message);
+            break;
         }
+        if (!data || data.length === 0) break;
+        for (const inp of data) {
+            if (inp.target_unit_id) inputTargetMap.set(inp.id, inp.target_unit_id);
+        }
+        if (data.length < PAGE) break;
+        page++;
     }
 
-    // Step 3: Segments from those inputs that mention this unit
+    // Step 2: Segments from those inputs that mention this unit
     const allInputIds = [...inputTargetMap.keys()];
     type SourceCounts = { positive: number; negative: number; neutral: number; total: number };
     const sourceBreakdown = new Map<number, SourceCounts>();

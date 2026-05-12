@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback, MutableRefObject } from "react";
 import dynamic from "next/dynamic";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Network, ArrowRight } from "lucide-react";
+import { Loader2, Network, ArrowRight, RotateCcw } from "lucide-react";
 // Explicitly resolve .default to handle both CJS and ESM builds
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d").then(m => (m as any).default || m), { ssr: false }) as any;
@@ -32,6 +32,7 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
     const [isClient, setIsClient] = useState(false);
     const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const graphRef = useRef<any>(null);
     const [dimensions, setDimensions] = useState({ width: 800, height: 460 });
 
     useEffect(() => { setIsClient(true); }, []);
@@ -102,6 +103,13 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
         return { nodes, links };
     }, [mentions]);
 
+    useEffect(() => {
+        if (!graphRef.current || !graphData.nodes.length) return;
+        graphRef.current.d3Force('charge')?.strength(-400);
+        graphRef.current.d3Force('link')?.distance(180);
+        graphRef.current.d3ReheatSimulation();
+    }, [graphData]);
+
     const maxReceived = useMemo(() =>
         Math.max(...graphData.nodes.map(n => n.received), 1),
         [graphData.nodes]
@@ -150,6 +158,23 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
         ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
         ctx.fill();
     }, []);
+
+    const handleNodeDragEnd = useCallback((node: any) => {
+        node.fx = node.x;
+        node.fy = node.y;
+    }, []);
+
+    const resetPositions = useCallback(() => {
+        graphData.nodes.forEach((node: any) => {
+            node.fx = undefined;
+            node.fy = undefined;
+        });
+        if (graphRef.current) {
+            graphRef.current.d3Force('charge')?.strength(-400);
+            graphRef.current.d3Force('link')?.distance(180);
+            graphRef.current.d3ReheatSimulation();
+        }
+    }, [graphData.nodes]);
 
     const topMentions = mentions.slice(0, 6);
 
@@ -226,8 +251,15 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
                             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block" /> Moderate</span>
                             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" /> Low</span>
                         </div>
+                        <button
+                            onClick={resetPositions}
+                            className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm rounded-lg px-2.5 py-1.5 border border-slate-100 dark:border-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-200 dark:hover:border-indigo-800 transition-colors"
+                        >
+                            <RotateCcw className="w-3 h-3" /> Reset positions
+                        </button>
                         {isClient && (
                             <ForceGraph2D
+                                ref={graphRef}
                                 graphData={graphData}
                                 width={dimensions.width}
                                 height={dimensions.height}
@@ -235,17 +267,18 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
                                 nodeCanvasObjectMode={() => 'replace'}
                                 nodePointerAreaPaint={nodePointerAreaPaint}
                                 linkWidth={(link: { value: number }) => Math.log(link.value + 1) * 1.5 + 0.5}
-                                linkDirectionalArrowLength={7}
-                                linkDirectionalArrowRelPos={1}
-                                linkColor={() => 'rgba(99,102,241,0.22)'}
-                                linkDirectionalParticles={2}
-                                linkDirectionalParticleWidth={(link: { value: number }) => Math.log(link.value + 1)}
-                                linkDirectionalParticleColor={() => '#818cf8'}
+                                linkDirectionalArrowLength={0}
+                                linkColor={() => 'rgba(99,102,241,0.35)'}
+                                linkDirectionalParticles={3}
+                                linkDirectionalParticleWidth={(link: { value: number }) => Math.log(link.value + 1) + 1}
+                                linkDirectionalParticleColor={() => '#6366f1'}
+                                onNodeDragEnd={handleNodeDragEnd}
                                 onNodeHover={(node: GraphNode | null) => setHoveredNode(node || null)}
                                 backgroundColor="transparent"
-                                d3AlphaDecay={0.015}
-                                d3VelocityDecay={0.35}
-                                cooldownTicks={120}
+                                d3AlphaDecay={0.01}
+                                d3VelocityDecay={0.25}
+                                cooldownTicks={200}
+                                onEngineStop={() => graphRef.current?.zoomToFit(400, 40)}
                                 enableZoomInteraction
                                 enablePanInteraction
                             />

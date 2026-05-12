@@ -96,6 +96,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
         setIsFiltering(true);
         const timer = setTimeout(() => {
             applyFiltersAndMetrics();
+            setRawDataPage(0);
             setIsFiltering(false);
         }, 30);
         return () => clearTimeout(timer);
@@ -352,7 +353,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                 segment_text: s.segment_text,
                                 sentiment: s.sentiment,
                                 category_name: catName,
-                                tagged_units: otherNames
+                                tagged_units: otherNames,
+                                related_unit_ids: s.related_unit_ids as number[]
                             });
                         }
                     }
@@ -753,6 +755,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         catCounts={catCounts}
                         handleQualDrillDown={handleQualDrillDown}
                         crossUnitSegments={crossUnitSegments}
+                        allUnits={allUnits}
+                        unitId={unitId}
+                        surveyId={surveyId}
                     />
                     <RawDataExplorer
                         rawDataTab={rawDataTab}

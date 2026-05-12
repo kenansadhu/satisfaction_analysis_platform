@@ -39,6 +39,7 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     const [showSaveConfirm, setShowSaveConfirm] = useState(false);
     const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
     const [instructionToDelete, setInstructionToDelete] = useState<number | null>(null);
+    const pendingDeleteIdRef = useRef<number | null>(null);
 
     // Unsaved changes tracking
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -168,13 +169,16 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
     };
 
     const promptDeleteInstruction = (id: number) => {
+        pendingDeleteIdRef.current = id;
         setInstructionToDelete(id);
     };
 
     const confirmDeleteInstruction = async () => {
-        if (!instructionToDelete) return;
-        await supabase.from('unit_analysis_instructions').delete().eq('id', instructionToDelete);
-        setInstructions(instructions.filter(i => i.id !== instructionToDelete));
+        const id = pendingDeleteIdRef.current;
+        if (!id) return;
+        await supabase.from('unit_analysis_instructions').delete().eq('id', id);
+        setInstructions(prev => prev.filter(i => i.id !== id));
+        pendingDeleteIdRef.current = null;
         setInstructionToDelete(null);
     };
 
@@ -553,12 +557,17 @@ export default function CategorizationEngine({ unitId, surveyId, onDataChange }:
                             />
                             <Button onClick={addInstruction} className="bg-purple-600 hover:bg-purple-700">Add Rule</Button>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="space-y-2">
                             {instructions.map(inst => (
-                                <Badge key={inst.id} variant="secondary" className="bg-white border-purple-200 text-purple-800 p-2 pl-3 gap-2 text-sm font-normal">
-                                    {inst.instruction}
-                                    <Trash2 className="w-3 h-3 cursor-pointer hover:text-red-500" onClick={() => promptDeleteInstruction(inst.id)} />
-                                </Badge>
+                                <div key={inst.id} className="flex items-start gap-2 bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm text-purple-800">
+                                    <span className="flex-1 break-words min-w-0">{inst.instruction}</span>
+                                    <button
+                                        onClick={() => promptDeleteInstruction(inst.id)}
+                                        className="shrink-0 mt-0.5 p-1 rounded text-purple-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
                             ))}
                             {instructions.length === 0 && <span className="text-slate-400 text-sm italic">No instructions yet. AI will use general knowledge.</span>}
                         </div>

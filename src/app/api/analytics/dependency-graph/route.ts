@@ -14,15 +14,21 @@ export async function GET(request: Request) {
         let segments: { related_unit_ids: number[]; target_unit_id: number | null }[] = [];
 
         if (surveyId && surveyId !== 'all') {
-            // Single RPC join — replaces the slow respondents→inputs→segments chain
-            const { data, error } = await supabase.rpc('get_survey_cross_mentions', {
-                p_survey_id: parseInt(surveyId, 10),
-            });
-            if (error) throw error;
-            segments = (data || []).map((r: any) => ({
-                related_unit_ids: r.related_unit_ids,
-                target_unit_id: r.target_unit_id,
-            }));
+            // Paginated RPC — avoids Supabase's 1000-row default cap
+            let page = 0;
+            while (true) {
+                const { data, error } = await supabase.rpc('get_survey_cross_mentions', {
+                    p_survey_id: parseInt(surveyId, 10),
+                }).range(page * 1000, (page + 1) * 1000 - 1);
+                if (error) throw error;
+                const batch = data || [];
+                segments.push(...batch.map((r: any) => ({
+                    related_unit_ids: r.related_unit_ids,
+                    target_unit_id: r.target_unit_id,
+                })));
+                if (batch.length < 1000) break;
+                page++;
+            }
         } else {
             // Global: paginate directly (no survey filter needed)
             let page = 0;

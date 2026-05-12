@@ -28,6 +28,14 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "surveyId required" }, { status: 400 });
     }
 
+    // 0. Load excluded units setting
+    const { data: settingRow } = await supabase
+        .from("platform_settings")
+        .select("value")
+        .eq("key", "excluded_score_unit_ids")
+        .maybeSingle();
+    const excludedUnitIds: number[] = settingRow?.value ? JSON.parse(settingRow.value) : [];
+
     // 1. Survey info
     const { data: survey } = await supabase
         .from('surveys')
@@ -131,35 +139,92 @@ export async function GET(req: NextRequest) {
             overall.count += count;
         }
     } else {
-        // Cache miss — use server-side RPC to aggregate in one SQL query instead of
-        // fetching thousands of raw rows across many round trips.
+        // Cache miss — try RPC first (fast), fall back to paginated raw query
         const { data: rpcRows, error: rpcErr } = await supabase.rpc(
             'get_quant_summary_by_unit_campus',
             { p_survey_id: parseInt(surveyId) }
         );
 
-        if (rpcErr) {
-            console.error('[quant RPC] error:', rpcErr.message);
-        }
+        if (!rpcErr && rpcRows && rpcRows.length > 0) {
+            // RPC succeeded — populate maps (excludes binary columns)
+            for (const row of rpcRows) {
+                if (parseFloat(row.max_score) <= 1) continue;
+                const unitId = row.unit_id;
+                const campus = row.campus || 'Unknown';
+                const avg = parseFloat(row.avg_score);
+                const count = parseInt(row.cnt);
+                if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
+                unitScores.get(unitId)!.set(campus, { avg, count });
+                campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
+                if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
+                const overall = unitOverall.get(unitId)!;
+                overall.sum += avg * count;
+                overall.count += count;
+            }
+        } else {
+            // RPC unavailable or returned nothing — paginated raw query via !inner join
+            if (rpcErr) console.error('[quant RPC] error (falling back to raw query):', rpcErr.message);
 
-        // Exclude binary columns (max_score <= 1) — same logic as before
-        for (const row of (rpcRows || [])) {
-            const maxScore = parseFloat(row.max_score);
-            if (maxScore <= 1) continue;
+            // unitId → campus → sourceColumn → { sum, count, max }
+            type ColAccum = { sum: number; count: number; max: number };
+            const rawAccum = new Map<number, Map<string, Map<string, ColAccum>>>();
 
-            const unitId = row.unit_id;
-            const campus = row.campus || 'Unknown';
-            const avg = parseFloat(row.avg_score);
-            const count = parseInt(row.cnt);
+            const Q_PAGE = 1000;
+            let quantPage = 0;
+            while (true) {
+                const { data: batch, error: bErr } = await supabase
+                    .from('raw_feedback_inputs')
+                    .select('target_unit_id, source_column, numerical_score, respondents!inner(location)')
+                    .eq('respondents.survey_id', parseInt(surveyId))
+                    .eq('is_quantitative', true)
+                    .not('numerical_score', 'is', null)
+                    .not('target_unit_id', 'is', null)
+                    .range(quantPage * Q_PAGE, (quantPage + 1) * Q_PAGE - 1);
 
-            if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
-            unitScores.get(unitId)!.set(campus, { avg, count });
-            campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
+                if (bErr) { console.error('[quant fallback] fetch error:', bErr.message); break; }
+                if (!batch || batch.length === 0) break;
 
-            if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
-            const overall = unitOverall.get(unitId)!;
-            overall.sum += avg * count;
-            overall.count += count;
+                for (const row of batch) {
+                    const unitId = row.target_unit_id as number;
+                    const campus = (row.respondents as any)?.location || 'Unknown';
+                    const col = row.source_column as string;
+                    const score = parseFloat(row.numerical_score);
+
+                    if (!rawAccum.has(unitId)) rawAccum.set(unitId, new Map());
+                    const uMap = rawAccum.get(unitId)!;
+                    if (!uMap.has(campus)) uMap.set(campus, new Map());
+                    const cMap = uMap.get(campus)!;
+                    if (!cMap.has(col)) cMap.set(col, { sum: 0, count: 0, max: 0 });
+                    const entry = cMap.get(col)!;
+                    entry.sum += score;
+                    entry.count++;
+                    if (score > entry.max) entry.max = score;
+                }
+
+                if (batch.length < Q_PAGE) break;
+                quantPage++;
+            }
+
+            // Aggregate per unit+campus — only Likert columns (max > 1)
+            for (const [unitId, campusMap] of rawAccum) {
+                for (const [campus, colMap] of campusMap) {
+                    let sum = 0, count = 0;
+                    for (const [, colEntry] of colMap) {
+                        if (colEntry.max <= 1) continue;
+                        sum += colEntry.sum;
+                        count += colEntry.count;
+                    }
+                    if (count === 0) continue;
+                    const avg = sum / count;
+                    if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
+                    unitScores.get(unitId)!.set(campus, { avg, count });
+                    campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
+                    if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
+                    const overall = unitOverall.get(unitId)!;
+                    overall.sum += avg * count;
+                    overall.count += count;
+                }
+            }
         }
 
         // Store to cache (fire-and-forget, don't block response)
@@ -180,7 +245,6 @@ export async function GET(req: NextRequest) {
                 .upsert(cacheRows, { onConflict: 'survey_id,unit_id,campus' })
                 .then(({ error }) => {
                     if (error) console.error('[cache] write error:', error.message);
-                    else console.log(`[cache] wrote ${cacheRows.length} rows for survey ${surveyId}`);
                 });
         }
     }
@@ -289,19 +353,21 @@ export async function GET(req: NextRequest) {
                 categories: categoryBreakdown,
             } : null,
         };
-    }).filter(u => u.satisfaction_index !== null || (u.qualitative && u.qualitative.total > 0));
+    }).filter(u => !excludedUnitIds.includes(u.unit_id) && (u.satisfaction_index !== null || (u.qualitative && u.qualitative.total > 0)));
 
-    // Global satisfaction index
+    // Global satisfaction index — excludes opted-out units
     let globalSum = 0, globalCount = 0;
-    for (const entry of unitOverall.values()) {
+    for (const [unitId, entry] of unitOverall.entries()) {
+        if (excludedUnitIds.includes(unitId)) continue;
         globalSum += entry.sum;
         globalCount += entry.count;
     }
 
-    // Per-campus satisfaction index
+    // Per-campus satisfaction index — excludes opted-out units
     const campusSatMap = new Map<string, { sum: number; count: number }>();
     for (const [key, acc] of campusScoreAccum) {
-        const campus = key.split('__')[1];
+        const [unitIdStr, campus] = key.split('__');
+        if (excludedUnitIds.includes(parseInt(unitIdStr))) continue;
         if (!campusSatMap.has(campus)) campusSatMap.set(campus, { sum: 0, count: 0 });
         const entry = campusSatMap.get(campus)!;
         entry.sum += acc.avg * acc.count;
