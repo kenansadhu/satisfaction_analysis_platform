@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useActiveSurvey } from "@/context/SurveyContext";
+import { NpsBucketBar } from "@/components/nps/NpsBucketBar";
+import { computeNpsScore, npsBenchmarkColor, NpsCounts, emptyNpsCounts } from "@/lib/nps";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +38,7 @@ interface FacultyRow {
     short_name: string | null;
     description: string | null;
     data?: FacultyListEntry;
+    nps?: NpsCounts;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,13 +107,25 @@ export default function FacultyInsightsPage() {
                 return;
             }
 
-            const res = await fetch(`/api/executive/faculty-list?surveyId=${activeSurveyId}`);
-            const json = res.ok ? await res.json() : { faculties: [] };
+            const [facultyRes, npsRes] = await Promise.all([
+                fetch(`/api/executive/faculty-list?surveyId=${activeSurveyId}`).then(r => r.ok ? r.json() : { faculties: [] }),
+                fetch(`/api/executive/nps?surveyId=${activeSurveyId}`).then(r => r.ok ? r.json() : { faculties: [] }),
+            ]);
             const dataMap = new Map<string, FacultyListEntry>(
-                (json.faculties || []).map((f: FacultyListEntry) => [f.faculty, f])
+                (facultyRes.faculties || []).map((f: FacultyListEntry) => [f.faculty, f])
             );
+            // Sum NPS across all NPS units per faculty — handles the multi-NPS-column case.
+            const npsByFaculty = new Map<string, NpsCounts>();
+            for (const r of (npsRes.faculties || []) as Array<{ faculty: string; detractors: number; passives: number; promoters: number; total: number }>) {
+                const cur = npsByFaculty.get(r.faculty) || emptyNpsCounts();
+                cur.detractor += r.detractors;
+                cur.passive += r.passives;
+                cur.promoter += r.promoters;
+                cur.total += r.total;
+                npsByFaculty.set(r.faculty, cur);
+            }
 
-            setFaculties(rows.map(r => ({ ...r, data: dataMap.get(r.name) })));
+            setFaculties(rows.map(r => ({ ...r, data: dataMap.get(r.name), nps: npsByFaculty.get(r.name) })));
         } finally {
             setLoading(false);
         }
@@ -274,11 +289,6 @@ export default function FacultyInsightsPage() {
                                                                 ) : (
                                                                     <span className="text-base font-bold text-slate-300">—</span>
                                                                 )}
-                                                                {pqSent !== null && (
-                                                                    <span className={`text-xs font-semibold flex items-center gap-0.5 pb-0.5 ${sentimentColor(pqSent)}`}>
-                                                                        <SentimentIcon score={pqSent} />{pqSent}
-                                                                    </span>
-                                                                )}
                                                             </div>
                                                             {d.programQuality.sentiment.total > 0 && (
                                                                 <MiniSentimentBar s={d.programQuality.sentiment} />
@@ -297,11 +307,6 @@ export default function FacultyInsightsPage() {
                                                                 ) : (
                                                                     <span className="text-base font-bold text-slate-300">—</span>
                                                                 )}
-                                                                {ceSent !== null && (
-                                                                    <span className={`text-xs font-semibold flex items-center gap-0.5 pb-0.5 ${sentimentColor(ceSent)}`}>
-                                                                        <SentimentIcon score={ceSent} />{ceSent}
-                                                                    </span>
-                                                                )}
                                                             </div>
                                                             {d.campusExperience.sentiment.total > 0 && (
                                                                 <MiniSentimentBar s={d.campusExperience.sentiment} />
@@ -310,18 +315,33 @@ export default function FacultyInsightsPage() {
                                                     </div>
 
                                                     {/* Participation row */}
-                                                    <div className="flex items-center gap-3 text-xs text-slate-400">
-                                                        <span className="flex items-center gap-1">
-                                                            <Users className="w-3 h-3" />
-                                                            {d.respondents.toLocaleString()} respondents
-                                                        </span>
-                                                        {d.response_rate !== null && (
+                                                    {d.response_rate !== null && (
+                                                        <div className="flex items-center gap-3 text-xs text-slate-400">
                                                             <span className={`flex items-center gap-1 font-semibold ${d.response_rate >= 80 ? "text-emerald-600" : d.response_rate >= 50 ? "text-amber-500" : "text-red-500"}`}>
                                                                 <Target className="w-3 h-3" />
-                                                                {d.response_rate}% response
+                                                                {d.response_rate}% response rate
                                                             </span>
-                                                        )}
-                                                    </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* NPS strip — only when this faculty has NPS responses */}
+                                                    {faculty.nps && faculty.nps.total > 0 && (() => {
+                                                        const nps = computeNpsScore(faculty.nps);
+                                                        return (
+                                                            <div className="rounded-lg border border-blue-100 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 px-3 py-2">
+                                                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                                                                        <Target className="w-3 h-3" /> NPS
+                                                                    </span>
+                                                                    <span className={`text-base font-black tabular-nums ${npsBenchmarkColor(nps)}`}>
+                                                                        {nps === null ? "—" : nps > 0 ? `+${nps}` : nps}
+                                                                    </span>
+                                                                </div>
+                                                                <NpsBucketBar counts={faculty.nps} variant="mini" showLabels={false} />
+                                                                <p className="text-[10px] text-slate-400 mt-1.5">n = {faculty.nps.total.toLocaleString()}</p>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </>
                                             ) : (
                                                 <div className="text-xs text-slate-400 flex items-center gap-1.5">

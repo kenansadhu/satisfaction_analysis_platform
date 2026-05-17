@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
         supabase.from('survey_quant_cache').delete().eq('survey_id', sid),
         supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),
         supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_faculty_cache').delete().eq('survey_id', sid),
         supabase.from('surveys').update({ ai_dataset_cache: null, ai_dataset_updated_at: null }).eq('id', sid),
+        supabase.from('survey_ai_reports').delete().eq('survey_id', sid),
     ]);
 
     return NextResponse.json({ message: `Cache cleared for survey ${surveyId}. Next report load will recompute.` });
@@ -27,14 +29,16 @@ export async function DELETE(req: NextRequest) {
     }
 
     const sid = parseInt(surveyId);
-    const [q, c, f, a] = await Promise.all([
+    const [q, c, f, fc, a, r] = await Promise.all([
         supabase.from('survey_quant_cache').delete().eq('survey_id', sid),
         supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),
         supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_faculty_cache').delete().eq('survey_id', sid),
         supabase.from('surveys').update({ ai_dataset_cache: null, ai_dataset_updated_at: null }).eq('id', sid),
+        supabase.from('survey_ai_reports').delete().eq('survey_id', sid),
     ]);
 
-    const err = q.error || c.error || f.error || a.error;
+    const err = q.error || c.error || f.error || fc.error || a.error || r.error;
     if (err) return NextResponse.json({ error: err.message }, { status: 500 });
 
     return NextResponse.json({ message: `Cache cleared for survey ${surveyId}` });

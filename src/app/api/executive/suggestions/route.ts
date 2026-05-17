@@ -13,32 +13,51 @@ export async function GET(request: Request) {
         if (surveyId) {
             const { data: surveyData } = await supabase
                 .from('surveys')
-                .select('ai_dataset_cache')
+                .select('ai_dataset_cache, ai_dataset_updated_at')
                 .eq('id', parseInt(surveyId, 10))
                 .single();
             const cache = (surveyData as any)?.ai_dataset_cache;
             if (cache?.v === 2 && Array.isArray(cache.suggestions) && cache.suggestions.length > 0) {
                 console.log(`[suggestions] Cache hit: ${cache.suggestions.length} suggestions`);
-                return NextResponse.json(cache.suggestions);
+                return NextResponse.json({
+                    data: cache.suggestions,
+                    fromCache: true,
+                    cachedAt: (surveyData as any)?.ai_dataset_updated_at ?? null,
+                });
             }
         }
 
-        // Slow path: live RPC fallback
+        // Slow path: paginated RPC fallback (Supabase default cap is 1000 rows)
+        const PAGE = 1000;
         let rows: any[] = [];
         if (surveyId) {
-            const { data, error } = await supabase.rpc('get_survey_suggestions', {
-                p_survey_id: parseInt(surveyId, 10),
-            });
-            if (error) throw error;
-            rows = data || [];
+            let from = 0;
+            while (true) {
+                const { data, error } = await supabase
+                    .rpc('get_survey_suggestions', { p_survey_id: parseInt(surveyId, 10) })
+                    .range(from, from + PAGE - 1);
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                rows.push(...data);
+                if (data.length < PAGE) break;
+                from += PAGE;
+            }
         } else {
-            const { data, error } = await supabase.rpc('get_global_suggestions', {});
-            if (error) throw error;
-            rows = data || [];
+            let from = 0;
+            while (true) {
+                const { data, error } = await supabase
+                    .rpc('get_global_suggestions', {})
+                    .range(from, from + PAGE - 1);
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                rows.push(...data);
+                if (data.length < PAGE) break;
+                from += PAGE;
+            }
         }
 
         console.log(`[suggestions] RPC returned ${rows.length} rows for surveyId=${surveyId ?? 'global'}`);
-        if (rows.length === 0) return NextResponse.json([]);
+        if (rows.length === 0) return NextResponse.json({ data: [], fromCache: false, cachedAt: null });
 
         // Fetch categories and units (small lookups)
         const catIds = [...new Set(rows.map((r: any) => r.category_id).filter(Boolean))];
@@ -72,7 +91,7 @@ export async function GET(request: Request) {
             };
         });
 
-        return NextResponse.json(formattedData);
+        return NextResponse.json({ data: formattedData, fromCache: false, cachedAt: null });
     } catch (error: any) {
         console.error('Suggestion API Error:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });

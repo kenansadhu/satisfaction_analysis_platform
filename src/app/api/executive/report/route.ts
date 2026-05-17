@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
+import { parseSettingArray } from "@/lib/platformSettings";
 
 export const maxDuration = 300;
 
@@ -28,13 +29,15 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "surveyId required" }, { status: 400 });
     }
 
-    // 0. Load excluded units setting
-    const { data: settingRow } = await supabase
-        .from("platform_settings")
-        .select("value")
-        .eq("key", "excluded_score_unit_ids")
-        .maybeSingle();
-    const excludedUnitIds: number[] = settingRow?.value ? JSON.parse(settingRow.value) : [];
+    // 0. Load excluded-units + NPS-units settings (parallel)
+    const [excludedSettingRes, npsSettingRes] = await Promise.all([
+        supabase.from("platform_settings").select("value").eq("key", "excluded_score_unit_ids").maybeSingle(),
+        supabase.from("platform_settings").select("value").eq("key", "nps_unit_ids").maybeSingle(),
+    ]);
+    const excludedUnitIds: number[] = parseSettingArray<number>(excludedSettingRes.data?.value);
+    // NPS units are hidden from cross-unit views (Report tab, sentiment heatmap, etc.).
+    // They appear in the dedicated NPS tab instead.
+    const npsUnitIds = new Set<number>(parseSettingArray<number>(npsSettingRes.data?.value));
 
     // 1. Survey info
     const { data: survey } = await supabase
@@ -98,11 +101,12 @@ export async function GET(req: NextRequest) {
         };
     });
 
-    // 4. Organization units
-    const { data: units } = await supabase
+    // 4. Organization units — drop NPS units from the cross-unit report scope.
+    const { data: allUnits } = await supabase
         .from('organization_units')
         .select('id, name, short_name')
         .order('name');
+    const units = (allUnits || []).filter(u => !npsUnitIds.has(u.id));
 
     // 5. Aggregated data
     // 5a. Quantitative scores — with lazy caching (scores are immutable after import)
@@ -146,9 +150,12 @@ export async function GET(req: NextRequest) {
         );
 
         if (!rpcErr && rpcRows && rpcRows.length > 0) {
-            // RPC succeeded — populate maps (excludes binary columns)
+            // RPC succeeded — populate maps (excludes binary columns and non-Likert scales like NPS)
             for (const row of rpcRows) {
-                if (parseFloat(row.max_score) <= 1) continue;
+                const maxScore = parseFloat(row.max_score);
+                // Skip binary (≤1) and anything beyond Likert range (>5) — protects against NPS (0–10) leaking in
+                // when the RPC hasn't been updated to filter score_rule='NPS_0_10'.
+                if (maxScore <= 1 || maxScore > 5) continue;
                 const unitId = row.unit_id;
                 const campus = row.campus || 'Unknown';
                 const avg = parseFloat(row.avg_score);
@@ -162,55 +169,71 @@ export async function GET(req: NextRequest) {
                 overall.count += count;
             }
         } else {
-            // RPC unavailable or returned nothing — paginated raw query via !inner join
-            if (rpcErr) console.error('[quant RPC] error (falling back to raw query):', rpcErr.message);
+            // RPC unavailable or returned nothing — fall back to chunked queries by respondent_id.
+            // The previous fallback used a PostgREST `!inner` join with pagination, which forced
+            // Postgres to materialize the full join before slicing — fine for small surveys, but
+            // hits the statement timeout at 10k+ respondents. Chunking by respondent_id keeps each
+            // round-trip small (fits in a single 1000-row page) and uses the respondents/inputs indexes directly.
+            if (rpcErr) console.error('[quant RPC] error (falling back to chunked respondent queries):', rpcErr.message);
 
             // unitId → campus → sourceColumn → { sum, count, max }
             type ColAccum = { sum: number; count: number; max: number };
             const rawAccum = new Map<number, Map<string, Map<string, ColAccum>>>();
 
-            const Q_PAGE = 1000;
-            let quantPage = 0;
-            while (true) {
-                const { data: batch, error: bErr } = await supabase
-                    .from('raw_feedback_inputs')
-                    .select('target_unit_id, source_column, numerical_score, respondents!inner(location)')
-                    .eq('respondents.survey_id', parseInt(surveyId))
-                    .eq('is_quantitative', true)
-                    .not('numerical_score', 'is', null)
-                    .not('target_unit_id', 'is', null)
-                    .range(quantPage * Q_PAGE, (quantPage + 1) * Q_PAGE - 1);
+            // Chunk size of 50 respondents × ~20 score columns = ~1000 rows per query,
+            // which fits inside Supabase's default response cap. 5 chunks fetched in parallel
+            // for throughput without overwhelming the connection pool.
+            const RESP_CHUNK = 50;
+            const PARALLEL = 5;
 
-                if (bErr) { console.error('[quant fallback] fetch error:', bErr.message); break; }
-                if (!batch || batch.length === 0) break;
-
-                for (const row of batch) {
-                    const unitId = row.target_unit_id as number;
-                    const campus = (row.respondents as any)?.location || 'Unknown';
-                    const col = row.source_column as string;
-                    const score = parseFloat(row.numerical_score);
-
-                    if (!rawAccum.has(unitId)) rawAccum.set(unitId, new Map());
-                    const uMap = rawAccum.get(unitId)!;
-                    if (!uMap.has(campus)) uMap.set(campus, new Map());
-                    const cMap = uMap.get(campus)!;
-                    if (!cMap.has(col)) cMap.set(col, { sum: 0, count: 0, max: 0 });
-                    const entry = cMap.get(col)!;
-                    entry.sum += score;
-                    entry.count++;
-                    if (score > entry.max) entry.max = score;
+            for (let bStart = 0; bStart < respIds.length; bStart += RESP_CHUNK * PARALLEL) {
+                const wave: Promise<{ data: any[] | null; error: any }>[] = [];
+                for (let i = bStart; i < Math.min(bStart + RESP_CHUNK * PARALLEL, respIds.length); i += RESP_CHUNK) {
+                    const chunk = respIds.slice(i, i + RESP_CHUNK);
+                    wave.push((async () => {
+                        const r = await supabase
+                            .from('raw_feedback_inputs')
+                            .select('target_unit_id, source_column, numerical_score, score_rule, respondent_id')
+                            .in('respondent_id', chunk)
+                            .eq('is_quantitative', true)
+                            .not('numerical_score', 'is', null)
+                            .not('target_unit_id', 'is', null)
+                            .neq('score_rule', 'NPS_0_10');
+                        return { data: r.data, error: r.error };
+                    })());
                 }
+                const results = await Promise.all(wave);
 
-                if (batch.length < Q_PAGE) break;
-                quantPage++;
+                for (const res of results) {
+                    if (res.error) {
+                        console.error('[quant fallback] chunk error:', res.error.message);
+                        continue;
+                    }
+                    for (const row of (res.data || [])) {
+                        const unitId = row.target_unit_id as number;
+                        const campus = respLocationMap.get(row.respondent_id) || 'Unknown';
+                        const col = row.source_column as string;
+                        const score = parseFloat(row.numerical_score);
+
+                        if (!rawAccum.has(unitId)) rawAccum.set(unitId, new Map());
+                        const uMap = rawAccum.get(unitId)!;
+                        if (!uMap.has(campus)) uMap.set(campus, new Map());
+                        const cMap = uMap.get(campus)!;
+                        if (!cMap.has(col)) cMap.set(col, { sum: 0, count: 0, max: 0 });
+                        const entry = cMap.get(col)!;
+                        entry.sum += score;
+                        entry.count++;
+                        if (score > entry.max) entry.max = score;
+                    }
+                }
             }
 
-            // Aggregate per unit+campus — only Likert columns (max > 1)
+            // Aggregate per unit+campus — only Likert columns (1 < max ≤ 5; excludes binary and NPS-like scales)
             for (const [unitId, campusMap] of rawAccum) {
                 for (const [campus, colMap] of campusMap) {
                     let sum = 0, count = 0;
                     for (const [, colEntry] of colMap) {
-                        if (colEntry.max <= 1) continue;
+                        if (colEntry.max <= 1 || colEntry.max > 5) continue;
                         sum += colEntry.sum;
                         count += colEntry.count;
                     }
@@ -249,7 +272,9 @@ export async function GET(req: NextRequest) {
         }
     }
 
-    // 5b. Qualitative summary: COUNT grouped by unit × category × sentiment (~200 rows)
+    // 5b. Qualitative summary: COUNT grouped by unit × category × sentiment (~200 rows).
+    // Primary path: the qual RPC. Fallback: `ai_dataset_cache.units` (already populated by the
+    // "Rebuild Cache" flow), so the report still renders qual data even when the RPC times out.
     const { data: qualAgg, error: qualErr } = await supabase.rpc('get_qual_summary_by_unit', {
         p_survey_id: parseInt(surveyId),
     });
@@ -276,6 +301,7 @@ export async function GET(req: NextRequest) {
     for (const row of (qualAgg || [])) {
         const unitId = row.target_unit_id;
         if (unitId == null) continue;
+        if (npsUnitIds.has(unitId)) continue; // NPS units are reported separately
         const cnt = parseInt(row.cnt);
 
         if (!unitQualData.has(unitId)) {
@@ -301,6 +327,51 @@ export async function GET(req: NextRequest) {
             if (row.sentiment === "Positive") catData.positive += cnt;
             else if (row.sentiment === "Negative") catData.negative += cnt;
             else catData.neutral += cnt;
+        }
+    }
+
+    // Qual fallback — if the RPC failed or returned nothing, reconstruct unitQualData from
+    // the survey's ai_dataset_cache. The cache shape stores per-unit totals plus
+    // `category_<sanitized>`/`category_<sanitized>_pos`/`_neg` flat fields for each category.
+    if (unitQualData.size === 0) {
+        const { data: surveyCacheRow } = await supabase
+            .from('surveys')
+            .select('ai_dataset_cache')
+            .eq('id', parseInt(surveyId))
+            .single();
+        const cache = (surveyCacheRow as any)?.ai_dataset_cache;
+        if (cache?.v === 2 && Array.isArray(cache.units)) {
+            // Build a reverse map from sanitized-key → category name so we can decode flatCategories.
+            const sanitizedToName = new Map<string, string>();
+            for (const c of (categories || [])) {
+                sanitizedToName.set((c as any).name.replace(/[^a-zA-Z0-9]/g, '_'), (c as any).name);
+            }
+            for (const u of cache.units as any[]) {
+                if (typeof u.unit_id !== 'number' || (u.total_segments || 0) === 0) continue;
+                const total = u.total_segments || 0;
+                const pos = u.positive || 0;
+                const neg = u.negative || 0;
+                const neu = Math.max(0, total - pos - neg);
+                const data: QualData = {
+                    positive: pos, negative: neg, neutral: neu,
+                    suggestions: 0, // cache doesn't store the is_suggestion count separately
+                    total,
+                    categories: new Map(),
+                };
+                for (const [key, val] of Object.entries(u)) {
+                    if (!key.startsWith('category_')) continue;
+                    if (key.endsWith('_pos') || key.endsWith('_neg')) continue;
+                    const sanitized = key.substring('category_'.length);
+                    const name = sanitizedToName.get(sanitized) || sanitized;
+                    const catTotal = (val as number) || 0;
+                    if (catTotal === 0) continue;
+                    const catPos = (u[`${key}_pos`] as number) || 0;
+                    const catNeg = (u[`${key}_neg`] as number) || 0;
+                    const catNeu = Math.max(0, catTotal - catPos - catNeg);
+                    data.categories.set(name, { positive: catPos, negative: catNeg, neutral: catNeu });
+                }
+                unitQualData.set(u.unit_id, data);
+            }
         }
     }
 

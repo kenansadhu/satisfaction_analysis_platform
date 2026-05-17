@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const [scoreCacheResult, sentCacheResult] = await Promise.all([
         supabase
             .from("survey_faculty_score_cache")
-            .select("faculty, pq_avg_score, pq_score_count, ce_avg_score, ce_score_count")
+            .select("faculty, respondents, pq_avg_score, pq_score_count, ce_avg_score, ce_score_count")
             .eq("survey_id", sid),
         supabase
             .from("survey_faculty_cache")
@@ -43,14 +43,18 @@ export async function GET(req: NextRequest) {
         });
     }
 
-    const scoreCache = scoreCacheResult.data || [];
+    const scoreCache = (scoreCacheResult.data || []) as Array<{
+        faculty: string; respondents: number;
+        pq_avg_score: number | null; pq_score_count: number;
+        ce_avg_score: number | null; ce_score_count: number;
+    }>;
     const hasScores = scoreCache.some(r => (r.pq_score_count ?? 0) > 0 || (r.ce_score_count ?? 0) > 0);
 
     if (hasScores) {
         // Cache hit — combine score cache with sentiment cache
         const faculties = scoreCache.map(row => buildEntry(
             row.faculty,
-            sentMap.get(row.faculty)?.respondents ?? 0,
+            row.respondents ?? sentMap.get(row.faculty)?.respondents ?? 0,
             facEnrollMap.get(row.faculty) ?? 0,
             row.pq_avg_score != null ? parseFloat(Number(row.pq_avg_score).toFixed(2)) : null,
             row.ce_avg_score != null ? parseFloat(Number(row.ce_avg_score).toFixed(2)) : null,
@@ -65,71 +69,84 @@ export async function GET(req: NextRequest) {
         .select("id, name");
     const studyProgramUnitId = (units || []).find(u => u.name === "Study Program")?.id ?? null;
 
-    // 4. Paginate respondents to get faculty counts
+    // 4. Paginate respondents — capture id+faculty so we can score-fetch by respondent_id below.
     const respCountMap = new Map<string, number>();
+    const respFacultyMap = new Map<number, string>(); // respondent_id → faculty
     const PAGE = 1000;
     let from = 0;
     while (true) {
         const { data } = await supabase
             .from("respondents")
-            .select("faculty")
+            .select("id, faculty")
             .eq("survey_id", sid)
             .range(from, from + PAGE - 1);
         if (!data || data.length === 0) break;
         for (const r of data) {
             const fac = r.faculty || "Unknown";
             respCountMap.set(fac, (respCountMap.get(fac) || 0) + 1);
+            respFacultyMap.set(r.id, fac);
         }
         if (data.length < PAGE) break;
         from += PAGE;
     }
+    const respIds = [...respFacultyMap.keys()];
 
-    // 5. Paginate raw_feedback_inputs for scores (respondents!inner join — same approach as executive report)
-    // Track max per source_column to exclude binary (0/1) questions
+    // 5. Fetch raw_feedback_inputs scores chunked by respondent_id (avoids the slow `!inner`
+    //    join + pagination pattern that times out on large surveys). Parallel waves for throughput.
     type ColAccum = { sum: number; count: number; max: number };
     const facPQAccum = new Map<string, Map<string, ColAccum>>();
     const facCEAccum = new Map<string, Map<string, ColAccum>>();
 
-    let quantPage = 0;
-    while (true) {
-        const { data: batch, error } = await supabase
-            .from("raw_feedback_inputs")
-            .select("target_unit_id, source_column, numerical_score, respondents!inner(faculty)")
-            .eq("respondents.survey_id", sid)
-            .eq("is_quantitative", true)
-            .not("numerical_score", "is", null)
-            .not("target_unit_id", "is", null)
-            .range(quantPage * PAGE, (quantPage + 1) * PAGE - 1);
+    const RESP_CHUNK = 50;
+    const PARALLEL = 5;
 
-        if (error) { console.error("[faculty-list] score fetch error:", error.message); break; }
-        if (!batch || batch.length === 0) break;
-
-        for (const row of batch) {
-            const faculty = (row.respondents as any)?.faculty || "Unknown";
-            const col = row.source_column as string;
-            const score = parseFloat(row.numerical_score);
-            const unitId = row.target_unit_id as number;
-            const isPQ = studyProgramUnitId !== null && unitId === studyProgramUnitId;
-            const accMap = isPQ ? facPQAccum : facCEAccum;
-
-            if (!accMap.has(faculty)) accMap.set(faculty, new Map());
-            const colMap = accMap.get(faculty)!;
-            if (!colMap.has(col)) colMap.set(col, { sum: 0, count: 0, max: 0 });
-            const entry = colMap.get(col)!;
-            entry.sum += score;
-            entry.count++;
-            if (score > entry.max) entry.max = score;
+    for (let bStart = 0; bStart < respIds.length; bStart += RESP_CHUNK * PARALLEL) {
+        const wave: Promise<{ data: any[] | null; error: any }>[] = [];
+        for (let i = bStart; i < Math.min(bStart + RESP_CHUNK * PARALLEL, respIds.length); i += RESP_CHUNK) {
+            const chunk = respIds.slice(i, i + RESP_CHUNK);
+            wave.push((async () => {
+                const r = await supabase
+                    .from("raw_feedback_inputs")
+                    .select("target_unit_id, source_column, numerical_score, score_rule, respondent_id")
+                    .in("respondent_id", chunk)
+                    .eq("is_quantitative", true)
+                    .not("numerical_score", "is", null)
+                    .not("target_unit_id", "is", null)
+                    .neq("score_rule", "NPS_0_10");
+                return { data: r.data, error: r.error };
+            })());
         }
+        const results = await Promise.all(wave);
+        for (const res of results) {
+            if (res.error) {
+                console.error("[faculty-list] score chunk error:", res.error.message);
+                continue;
+            }
+            for (const row of (res.data || [])) {
+                const faculty = respFacultyMap.get(row.respondent_id) || "Unknown";
+                const col = row.source_column as string;
+                const score = parseFloat(row.numerical_score);
+                const unitId = row.target_unit_id as number;
+                const isPQ = studyProgramUnitId !== null && unitId === studyProgramUnitId;
+                const accMap = isPQ ? facPQAccum : facCEAccum;
 
-        if (batch.length < PAGE) break;
-        quantPage++;
+                if (!accMap.has(faculty)) accMap.set(faculty, new Map());
+                const colMap = accMap.get(faculty)!;
+                if (!colMap.has(col)) colMap.set(col, { sum: 0, count: 0, max: 0 });
+                const entry = colMap.get(col)!;
+                entry.sum += score;
+                entry.count++;
+                if (score > entry.max) entry.max = score;
+            }
+        }
     }
 
-    // 6. Aggregate scores per faculty — exclude binary columns (max ≤ 1)
+    // 6. Aggregate scores per faculty — only Likert columns (1 < max ≤ 5)
+    // Excludes binary (≤1) and non-Likert scales like NPS (>5) as a safety net.
     function aggregateScore(colMap: Map<string, ColAccum>) {
         let sum = 0, count = 0;
         for (const [, entry] of colMap) {
-            if (entry.max <= 1) continue;
+            if (entry.max <= 1 || entry.max > 5) continue;
             sum += entry.sum;
             count += entry.count;
         }
@@ -151,6 +168,7 @@ export async function GET(req: NextRequest) {
         cacheRows.push({
             survey_id: sid,
             faculty: fac,
+            respondents,
             pq_avg_score: pq.avg,
             pq_score_count: pq.count,
             ce_avg_score: ce.avg,

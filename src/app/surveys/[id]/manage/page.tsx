@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -19,13 +19,50 @@ import { OrganizationUnit } from "@/types";
 import {
     Save, Loader2, AlertTriangle, GraduationCap,
     FileText, Calendar, Info, Users, Columns3, Plus, Trash2,
-    Eye, Search, ChevronDown, ChevronRight, BrainCircuit, CheckCircle2, MapPin
+    Eye, Search, ChevronDown, ChevronRight, CheckCircle2, MapPin
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // --- Types ---
 type DataType = "TEXT" | "SCORE" | "CATEGORY" | "IGNORE";
-type ScoreRule = "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE" | "CUSTOM_MAPPING";
+type ScoreRule = "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE" | "CUSTOM_MAPPING" | "NPS_0_10";
+
+/**
+ * Resolve what numerical_score a raw cell value produces under a given rule.
+ * Priority: explicit customMapping → rule heuristic → null.
+ * Mirrors the import flow's priority so the manage page and import flow stay in sync.
+ */
+function resolveScore(rawValue: string, rule: ScoreRule, customMapping?: Record<string, number | null>): number | null {
+    if (customMapping && rawValue in customMapping) {
+        return customMapping[rawValue];
+    }
+    const lower = rawValue.toLowerCase();
+    switch (rule) {
+        case "LIKERT": {
+            const match = rawValue.match(/^(\d+)/);
+            return match ? parseInt(match[1]) : null;
+        }
+        case "BOOLEAN":
+            return (lower === "ya" || lower === "yes" || lower === "true") ? 1 : 0;
+        case "NUMBER": {
+            const n = parseFloat(rawValue);
+            return isNaN(n) ? null : n;
+        }
+        case "TEXT_SCALE":
+            if (lower.includes("tidak pernah") || lower.includes("sangat tidak") || lower.includes("never")) return 1;
+            if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) return 2;
+            if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) return 3;
+            if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) return 4;
+            return null;
+        case "NPS_0_10": {
+            const n = parseFloat(rawValue);
+            return (!isNaN(n) && n >= 0 && n <= 10) ? Math.round(n) : null;
+        }
+        case "CUSTOM_MAPPING":
+            // No fallback — only the explicit map counts.
+            return null;
+    }
+}
 
 interface ColumnMapping {
     source_column: string;
@@ -64,15 +101,6 @@ export default function SurveyManagePage() {
     const [description, setDescription] = useState("");
     const [savingMeta, setSavingMeta] = useState(false);
 
-    // AI Dataset Cache
-    const [aiCacheUpdatedAt, setAiCacheUpdatedAt] = useState<string | null>(null);
-    const [buildingAiCache, setBuildingAiCache] = useState(false);
-    const [buildElapsed, setBuildElapsed] = useState(0);
-    const buildTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-    type BuildSummary = { total_org_units: number; analyzed_units: number; quant_only_units: number; cached_units: number };
-    const [buildSummary, setBuildSummary] = useState<BuildSummary | null>(null);
-
     // Column mappings
     const [columns, setColumns] = useState<ColumnMapping[]>([]);
     const [units, setUnits] = useState<OrganizationUnit[]>([]);
@@ -107,7 +135,7 @@ export default function SurveyManagePage() {
             setLoading(true);
             const { data } = await supabase
                 .from('surveys')
-                .select('title, year, description, ai_dataset_updated_at')
+                .select('title, year, description')
                 .eq('id', surveyId)
                 .single();
 
@@ -115,14 +143,6 @@ export default function SurveyManagePage() {
                 setTitle(data.title || "");
                 setYear(data.year || "");
                 setDescription(data.description || "");
-                setAiCacheUpdatedAt(data.ai_dataset_updated_at || null);
-                // Restore persisted build summary
-                if (data.ai_dataset_updated_at) {
-                    try {
-                        const stored = localStorage.getItem(`ai_build_summary_${surveyId}`);
-                        if (stored) setBuildSummary(JSON.parse(stored));
-                    } catch {}
-                }
             }
             setLoading(false);
         };
@@ -568,55 +588,6 @@ export default function SurveyManagePage() {
         setSavingMeta(false);
     };
 
-    // --- Build AI Data Scientist Cache ---
-    const [buildPhase, setBuildPhase] = useState<1 | 2 | null>(null);
-
-    const handleBuildAiCache = async () => {
-        setBuildingAiCache(true);
-        setBuildElapsed(0);
-        buildTimerRef.current = setInterval(() => setBuildElapsed(e => e + 1), 1000);
-        try {
-            // Phase 1: heavy compute + write cache (up to 300s)
-            setBuildPhase(1);
-            const res1 = await fetch('/api/ai/cache-global-dataset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ surveyId, phase: 1 })
-            });
-            const data1 = await res1.json();
-            if (!res1.ok) throw new Error(data1.error || "Phase 1 failed");
-
-            // Phase 2: suggestions merge (up to 300s)
-            setBuildPhase(2);
-            const res2 = await fetch('/api/ai/cache-global-dataset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ surveyId, phase: 2 })
-            });
-            const data2 = await res2.json();
-            if (!res2.ok) throw new Error(data2.error || "Phase 2 failed");
-
-            const summary: BuildSummary = {
-                total_org_units: data1.total_org_units ?? 0,
-                analyzed_units: data1.analyzed_units ?? 0,
-                quant_only_units: data1.quant_only_units ?? 0,
-                cached_units: data1.count ?? 0,
-            };
-            setBuildSummary(summary);
-            try { localStorage.setItem(`ai_build_summary_${surveyId}`, JSON.stringify(summary)); } catch {}
-
-            const unanalyzed = summary.total_org_units - summary.analyzed_units;
-            toast.success(`AI Context Built! ${summary.analyzed_units}/${summary.total_org_units} units analyzed.${unanalyzed > 0 ? ` ${unanalyzed} unit(s) still need analysis.` : ''} ${data2.suggestions_count ?? 0} suggestions loaded.`);
-            setAiCacheUpdatedAt(new Date().toISOString());
-        } catch (e: any) {
-            toast.error(e.message);
-        } finally {
-            if (buildTimerRef.current) clearInterval(buildTimerRef.current);
-            setBuildingAiCache(false);
-            setBuildPhase(null);
-        }
-    };
-
     // --- Inline edit helpers ---
     const updateColumn = (sourceColumn: string, field: keyof ColumnMapping, value: any) => {
         setColumns(prev => prev.map(c => {
@@ -693,7 +664,11 @@ export default function SurveyManagePage() {
                     is_quantitative: isQuant,
                     requires_analysis: reqAnalysis,
                     score_rule: isQuant ? (col.newRule || "NUMBER") : null,
-                    custom_mapping: isQuant && col.newRule === "CUSTOM_MAPPING" ? col.customMapping : null,
+                    // Persist per-value overrides for any score rule (matches the import flow),
+                    // so the manage page can read them back next visit.
+                    custom_mapping: isQuant && col.customMapping && Object.keys(col.customMapping).length > 0
+                        ? col.customMapping
+                        : null,
                 };
 
                 if (!isQuant && col.is_quantitative) {
@@ -711,35 +686,14 @@ export default function SurveyManagePage() {
                         if (error) throw error;
                     }
                 } else {
-                    // Need to Recalculate Score since the rule mapped changed
+                    // Need to Recalculate Score since the rule mapping changed.
+                    // customMapping takes priority over the rule heuristic — matches the import flow,
+                    // so any per-value overrides set on the manage page are preserved.
                     const scoreMapping = new Map<number | null, number[]>();
+                    const rule = col.newRule || "NUMBER";
                     for (const input of inputsToUpdate) {
-                        let score: number | null = null;
                         const rawValue = String(input.raw_text || "");
-                        const rule = col.newRule || "NUMBER";
-
-                        if (rule === "LIKERT") {
-                            const match = rawValue.match(/^(\d+)/);
-                            if (match) score = parseInt(match[1]);
-                        } else if (rule === "BOOLEAN") {
-                            const lower = rawValue.toLowerCase();
-                            if (lower === "ya" || lower === "yes" || lower === "true") score = 1;
-                            else score = 0;
-                        } else if (rule === "NUMBER") {
-                            const parsed = parseFloat(rawValue);
-                            if (!isNaN(parsed)) score = parsed;
-                        } else if (rule === "TEXT_SCALE") {
-                            const lower = rawValue.toLowerCase();
-                            if (lower.includes("tidak pernah") || lower.includes("sangat tidak") || lower.includes("never")) score = 1;
-                            else if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) score = 2;
-                            else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) score = 3;
-                            else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) score = 4;
-                        } else if (rule === "CUSTOM_MAPPING") {
-                            const map = col.customMapping || {};
-                            if (rawValue in map) {
-                                score = map[rawValue];
-                            }
-                        }
+                        const score = resolveScore(rawValue, rule, col.customMapping);
 
                         if (!scoreMapping.has(score)) scoreMapping.set(score, []);
                         scoreMapping.get(score)!.push(input.id);
@@ -955,84 +909,6 @@ export default function SurveyManagePage() {
                             </CardContent>
                         </Card>
 
-                        {/* AI Data Scientist Context Cache */}
-                        <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                            <div className="h-1 bg-gradient-to-r from-purple-500 to-fuchsia-500" />
-                            <CardContent className="p-6">
-                                <div className="flex items-start justify-between gap-6">
-                                    <div className="space-y-1.5">
-                                        <h3 className="text-base font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                                            <BrainCircuit className="w-5 h-5 text-purple-600" /> AI Data Scientist Context
-                                        </h3>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-lg">
-                                            Compile and freeze the current analysis metrics into a single dataset. The AI Data Scientist uses this snapshot to instantly answer complex queries without loading the entire database.
-                                        </p>
-                                        {aiCacheUpdatedAt && (
-                                            <p className="text-xs text-green-600 dark:text-green-400 font-medium flex items-center gap-1 mt-2">
-                                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                                Context Built: {new Date(aiCacheUpdatedAt).toLocaleString()}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div className="flex-shrink-0 flex items-center justify-center min-w-[140px]">
-                                        <Button
-                                            onClick={handleBuildAiCache}
-                                            disabled={buildingAiCache}
-                                            className="w-full gap-2 bg-purple-600 hover:bg-purple-700 text-white"
-                                        >
-                                            {buildingAiCache ? (
-                                                <>
-                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                    {`Phase ${buildPhase ?? 1}/2 · ${buildElapsed > 0 ? `${Math.floor(buildElapsed / 60)}:${String(buildElapsed % 60).padStart(2, '0')}` : '...'}`}
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <BrainCircuit className="w-4 h-4" />
-                                                    {aiCacheUpdatedAt ? "Re-Build Context" : "Build Context"}
-                                                </>
-                                            )}
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                {buildSummary && (
-                                    <div className="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Coverage at Last Build</p>
-                                        <div className="grid grid-cols-3 gap-3">
-                                            <div className="bg-purple-50 dark:bg-purple-950/20 rounded-lg px-3 py-2.5 border border-purple-100 dark:border-purple-900/40">
-                                                <p className="text-[10px] text-purple-500 font-semibold uppercase tracking-wide mb-0.5">In Dataset</p>
-                                                <p className="text-xl font-black text-purple-700 dark:text-purple-300 tabular-nums">
-                                                    {buildSummary.cached_units}
-                                                    <span className="text-sm font-normal text-purple-400 ml-1">/ {buildSummary.total_org_units}</span>
-                                                </p>
-                                                <p className="text-[10px] text-purple-400 mt-0.5">org units with data</p>
-                                            </div>
-                                            <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2.5 border border-emerald-100 dark:border-emerald-900/40">
-                                                <p className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide mb-0.5">Analyzed</p>
-                                                <p className="text-xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums">
-                                                    {buildSummary.analyzed_units}
-                                                    <span className="text-sm font-normal text-emerald-400 ml-1">/ {buildSummary.total_org_units}</span>
-                                                </p>
-                                                <p className="text-[10px] text-emerald-500 mt-0.5">with qualitative analysis</p>
-                                            </div>
-                                            <div className={`rounded-lg px-3 py-2.5 border ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/40' : 'bg-slate-50 dark:bg-slate-900/40 border-slate-100 dark:border-slate-800'}`}>
-                                                <p className={`text-[10px] font-semibold uppercase tracking-wide mb-0.5 ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-600' : 'text-slate-400'}`}>Not Yet Analyzed</p>
-                                                <p className={`text-xl font-black tabular-nums ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400'}`}>
-                                                    {buildSummary.total_org_units - buildSummary.analyzed_units}
-                                                </p>
-                                                <p className={`text-[10px] mt-0.5 ${buildSummary.total_org_units - buildSummary.analyzed_units > 0 ? 'text-amber-500' : 'text-slate-400'}`}>units still pending</p>
-                                            </div>
-                                        </div>
-                                        {buildSummary.total_org_units - buildSummary.analyzed_units > 0 && (
-                                            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 rounded-lg px-3 py-2 flex items-center gap-2">
-                                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                                {buildSummary.total_org_units - buildSummary.analyzed_units} unit{buildSummary.total_org_units - buildSummary.analyzed_units !== 1 ? 's' : ''} had not been analyzed yet. Re-build context after completing all unit analyses for full coverage.
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
                     </TabsContent>
 
 
@@ -1211,6 +1087,7 @@ export default function SurveyManagePage() {
                                                                                 <SelectItem value="TEXT_SCALE">Scale (Sering=4)</SelectItem>
                                                                                 <SelectItem value="NUMBER">Raw Number</SelectItem>
                                                                                 <SelectItem value="CUSTOM_MAPPING">Custom Mapping</SelectItem>
+                                                                                <SelectItem value="NPS_0_10">NPS (0–10)</SelectItem>
                                                                             </SelectContent>
                                                                         </Select>
                                                                     </div>
@@ -1229,45 +1106,58 @@ export default function SurveyManagePage() {
                                                                                 <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                                                                                     Unique Values ({uniqueVals.length}):
                                                                                 </div>
-                                                                                {currentType === "SCORE" && col.newRule !== "CUSTOM_MAPPING" && uniqueVals.length <= 20 && (
-                                                                                    <Button
-                                                                                        variant="outline"
-                                                                                        size="sm"
-                                                                                        onClick={() => updateColumn(col.source_column, 'newRule', 'CUSTOM_MAPPING')}
-                                                                                        className="h-7 text-xs gap-1.5"
-                                                                                    >
-                                                                                        Switch to Custom Mapping
-                                                                                    </Button>
-                                                                                )}
+                                                                                {currentType === "SCORE" && col.newRule !== "NPS_0_10" && (() => {
+                                                                                    const nullCount = uniqueVals.filter(v => resolveScore(v, col.newRule || "NUMBER", col.customMapping) === null).length;
+                                                                                    if (nullCount === 0) return null;
+                                                                                    return (
+                                                                                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-0.5">
+                                                                                            {nullCount} value{nullCount === 1 ? "" : "s"} → NA (excluded from score)
+                                                                                        </span>
+                                                                                    );
+                                                                                })()}
                                                                             </div>
 
-                                                                            {/* Custom Mapping Grid (inline!) */}
-                                                                            {currentType === "SCORE" && col.newRule === "CUSTOM_MAPPING" ? (
+                                                                            {/* Editable mapping grid — visible for every SCORE rule except NPS_0_10
+                                                                                so users can verify and override per-value mappings post-import. */}
+                                                                            {currentType === "SCORE" && col.newRule !== "NPS_0_10" ? (
                                                                                 <div className="grid gap-2 border border-slate-200 dark:border-slate-800 rounded-lg p-3 bg-white dark:bg-slate-950 max-h-[400px] overflow-y-auto">
-                                                                                    {uniqueVals.map((v, i) => (
-                                                                                        <div key={i} className="flex items-center justify-between gap-4">
-                                                                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 break-all">{v || "(empty)"}</span>
-                                                                                            <Select
-                                                                                                value={col.customMapping?.[v] !== undefined ? (col.customMapping[v] === null ? "NA" : col.customMapping[v]?.toString()) : "NA"}
-                                                                                                onValueChange={val => handleUpdateCustomMapping(col.source_column, v, val === "NA" ? null : parseInt(val))}
-                                                                                            >
-                                                                                                <SelectTrigger className="w-[120px] h-8 bg-white dark:bg-slate-950 shrink-0">
-                                                                                                    <SelectValue placeholder="Map to..." />
-                                                                                                </SelectTrigger>
-                                                                                                <SelectContent>
-                                                                                                    <SelectItem value="1">1</SelectItem>
-                                                                                                    <SelectItem value="2">2</SelectItem>
-                                                                                                    <SelectItem value="3">3</SelectItem>
-                                                                                                    <SelectItem value="4">4</SelectItem>
-                                                                                                    <SelectItem value="0">0</SelectItem>
-                                                                                                    <SelectItem value="NA">NA / Ignore</SelectItem>
-                                                                                                </SelectContent>
-                                                                                            </Select>
-                                                                                        </div>
-                                                                                    ))}
+                                                                                    {uniqueVals.map((v, i) => {
+                                                                                        const resolved = resolveScore(v, col.newRule || "NUMBER", col.customMapping);
+                                                                                        const isOverride = !!(col.customMapping && v in col.customMapping);
+                                                                                        const selectValue = resolved === null ? "NA" : resolved.toString();
+                                                                                        return (
+                                                                                            <div key={i} className="flex items-center justify-between gap-4">
+                                                                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 break-all flex items-center gap-2">
+                                                                                                    {v || "(empty)"}
+                                                                                                    {isOverride && (
+                                                                                                        <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-1.5 py-0.5 rounded">override</span>
+                                                                                                    )}
+                                                                                                </span>
+                                                                                                <Select
+                                                                                                    value={selectValue}
+                                                                                                    onValueChange={val => handleUpdateCustomMapping(col.source_column, v, val === "NA" ? null : parseInt(val))}
+                                                                                                >
+                                                                                                    <SelectTrigger className={cn(
+                                                                                                        "w-[120px] h-8 shrink-0",
+                                                                                                        resolved === null ? "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-white dark:bg-slate-950"
+                                                                                                    )}>
+                                                                                                        <SelectValue placeholder="Map to..." />
+                                                                                                    </SelectTrigger>
+                                                                                                    <SelectContent>
+                                                                                                        <SelectItem value="1">1</SelectItem>
+                                                                                                        <SelectItem value="2">2</SelectItem>
+                                                                                                        <SelectItem value="3">3</SelectItem>
+                                                                                                        <SelectItem value="4">4</SelectItem>
+                                                                                                        <SelectItem value="0">0</SelectItem>
+                                                                                                        <SelectItem value="NA">NA / Ignore</SelectItem>
+                                                                                                    </SelectContent>
+                                                                                                </Select>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
                                                                                 </div>
                                                                             ) : (
-                                                                                /* Show values as badges */
+                                                                                /* Non-SCORE or NPS: just show raw values as badges */
                                                                                 <div className="flex flex-wrap gap-1.5">
                                                                                     {uniqueVals.map((v, i) => (
                                                                                         <Badge key={i} variant="outline" className="text-xs py-1 px-2.5 bg-white dark:bg-slate-900 font-normal">

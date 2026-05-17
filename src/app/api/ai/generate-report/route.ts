@@ -83,16 +83,24 @@ export async function POST(req: Request) {
     }, {});
 
     // 3. Fetch Quantitative Scores with SCALE AWARENESS & Isolation (chunked)
+    // NPS (0–10) is fetched separately so it can be presented to the AI as a distinct metric
+    // rather than mixed into Likert averages.
     const quantData: any[] = [];
+    const npsData: any[] = [];
     for (let i = 0; i < surveyRespIds.length; i += CHUNK) {
       const { data } = await supabase
         .from('raw_feedback_inputs')
-        .select('source_column, numerical_score, respondent_id')
+        .select('source_column, numerical_score, score_rule, respondent_id')
         .eq('target_unit_id', unitId)
         .eq('is_quantitative', true)
         .in('respondent_id', surveyRespIds.slice(i, i + CHUNK))
         .not('numerical_score', 'is', null);
-      if (data) quantData.push(...data);
+      if (data) {
+        for (const row of data) {
+          if (row.score_rule === 'NPS_0_10') npsData.push(row);
+          else quantData.push(row);
+        }
+      }
     }
 
     const quantStats = (quantData || []).reduce((acc: any, q) => {
@@ -103,7 +111,7 @@ export async function POST(req: Request) {
       return acc;
     }, {} as Record<string, { sum: number, count: number, max: number }>);
 
-    const unitUniqueResps = new Set((quantData || []).map(q => q.respondent_id));
+    const unitUniqueResps = new Set([...(quantData || []), ...npsData].map(q => q.respondent_id));
     (rawInputs || []).forEach(ri => unitUniqueResps.add(ri.respondent_id));
     const unitRespondentCount = unitUniqueResps.size;
 
@@ -112,6 +120,22 @@ export async function POST(req: Request) {
       const scaleType = data.max <= 1 ? "Binary/Percentage (0-1)" : "Likert Scale (1-4)";
       return `• ${col}: ${avg} avg (${data.count} responses) [Scale: ${scaleType}]`;
     }).join('\n');
+
+    // NPS summary: bucket into detractors (0–6), passives (7–8), promoters (9–10), then % promoters − % detractors.
+    const npsStats = npsData.reduce((acc: Record<string, { detractor: number; passive: number; promoter: number; total: number }>, q) => {
+      if (!acc[q.source_column]) acc[q.source_column] = { detractor: 0, passive: 0, promoter: 0, total: 0 };
+      const s = Number(q.numerical_score);
+      const bucket = s <= 6 ? 'detractor' : s <= 8 ? 'passive' : 'promoter';
+      acc[q.source_column][bucket]++;
+      acc[q.source_column].total++;
+      return acc;
+    }, {});
+    const npsPrompt = Object.entries(npsStats).map(([col, b]) => {
+      const pPct = (b.promoter / b.total) * 100;
+      const dPct = (b.detractor / b.total) * 100;
+      const nps = Math.round(pPct - dPct);
+      return `• ${col}: NPS = ${nps} (${b.promoter} promoters, ${b.passive} passives, ${b.detractor} detractors, n=${b.total}) [Scale: NPS 0–10]`;
+    }).join('\n') || "None.";
 
     // 3.5. EMPTY STATE EARLY RETURN
     if (finalQualitativeData.length === 0 && Object.keys(quantStats).length === 0) {
@@ -187,6 +211,9 @@ CONTEXT: ${unit?.description || 'No additional context provided.'}
 - QUANTITATIVE METRICS:
 ${quantPrompt || "No quantitative scores available."}
 
+- NPS (NET PROMOTER SCORE) METRICS:
+${npsPrompt}
+
 - QUALITATIVE STATE:
 ${statsPrompt}
 - CATEGORIES: ${categoryPrompt}
@@ -203,7 +230,8 @@ IMPORTANT INTERPRETATION RULES:
 1. "Utilization Weighting": A low utilization rate (e.g., < 30%) is a CRITICAL concern for "Reach", but do not let it completely invalidate high satisfaction scores. If satisfaction scores are high, report them as a "Key Advantage" (Quality) while flagging utilization as a "Vulnerability" (Reach). Always use the actual scores from QUANTITATIVE METRICS above — never invent or assume numbers.
 2. "Quant Scales":
    - "Likert (1-4)": 2.5 is average, 3.5+ is excellent.
-   - "Binary/Percentage (0-1)": 0.8 is 80% positivity, 0.2 is 20%. 
+   - "Binary/Percentage (0-1)": 0.8 is 80% positivity, 0.2 is 20%.
+   - "NPS 0–10": NPS ranges from −100 to +100. ≥50 is excellent, 0–49 is good, below 0 is a concern. Treat NPS as a standalone loyalty metric — never average it with Likert scores.
 3. "Evidence": You MUST provide verbatim quotes for every strength and concern. If the text is short, use it as is. NEVER return "N/A" for evidence if text is provided in the EVIDENCE SAMPLES.
 
 YOUR TASK:

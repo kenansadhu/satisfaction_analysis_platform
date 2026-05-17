@@ -44,11 +44,12 @@ export async function POST(req: Request) {
         const { data: rawInputs } = await supabase
             .from('raw_feedback_inputs')
             .select(`
-                id, 
-                raw_text, 
-                source_column, 
-                respondent_id, 
-                numerical_score, 
+                id,
+                raw_text,
+                source_column,
+                respondent_id,
+                numerical_score,
+                score_rule,
                 is_quantitative,
                 respondents(faculty)
             `)
@@ -95,20 +96,40 @@ export async function POST(req: Request) {
             return acc;
         }, { Positive: 0, Negative: 0, Neutral: 0 });
 
-        // CALCULATE QUANT STATS PRECISELY
-        const quantStats = (rawInputs || []).filter(ri => ri.is_quantitative && ri.numerical_score !== null).reduce((acc: any, q) => {
-            if (!acc[q.source_column]) acc[q.source_column] = { sum: 0, count: 0, max: 0 };
-            acc[q.source_column].sum += q.numerical_score as number;
-            acc[q.source_column].count++;
-            if (q.numerical_score as number > acc[q.source_column].max) acc[q.source_column].max = q.numerical_score as number;
-            return acc;
-        }, {} as Record<string, { sum: number, count: number, max: number }>);
+        // CALCULATE QUANT STATS PRECISELY (Likert + Binary)
+        const quantStats = (rawInputs || [])
+            .filter(ri => ri.is_quantitative && ri.numerical_score !== null && (ri as any).score_rule !== 'NPS_0_10')
+            .reduce((acc: any, q) => {
+                if (!acc[q.source_column]) acc[q.source_column] = { sum: 0, count: 0, max: 0 };
+                acc[q.source_column].sum += q.numerical_score as number;
+                acc[q.source_column].count++;
+                if (q.numerical_score as number > acc[q.source_column].max) acc[q.source_column].max = q.numerical_score as number;
+                return acc;
+            }, {} as Record<string, { sum: number, count: number, max: number }>);
 
         const quantPrompt = Object.entries(quantStats).map(([col, data]: [string, any]) => {
             const avg = (data.sum / data.count).toFixed(2);
             const scaleType = data.max <= 1 ? "Binary/Percentage (0-1)" : "Likert Scale (1-4)";
             return `• ${col}: ${avg} avg (${data.count} responses) [Scale: ${scaleType}]`;
         }).join('\n');
+
+        // NPS stats (separate scale: 0–10, bucketed detractor/passive/promoter)
+        const npsStats = (rawInputs || [])
+            .filter(ri => (ri as any).score_rule === 'NPS_0_10' && ri.numerical_score !== null)
+            .reduce((acc: Record<string, { detractor: number; passive: number; promoter: number; total: number }>, q) => {
+                if (!acc[q.source_column]) acc[q.source_column] = { detractor: 0, passive: 0, promoter: 0, total: 0 };
+                const s = Number(q.numerical_score);
+                const bucket = s <= 6 ? 'detractor' : s <= 8 ? 'passive' : 'promoter';
+                acc[q.source_column][bucket]++;
+                acc[q.source_column].total++;
+                return acc;
+            }, {});
+        const npsPrompt = Object.entries(npsStats).map(([col, b]) => {
+            const pPct = (b.promoter / b.total) * 100;
+            const dPct = (b.detractor / b.total) * 100;
+            const nps = Math.round(pPct - dPct);
+            return `• ${col}: NPS = ${nps} (${b.promoter} promoters, ${b.passive} passives, ${b.detractor} detractors, n=${b.total}) [Scale: NPS 0–10]`;
+        }).join('\n') || "None.";
 
         // EMPTY STATE EARLY RETURN
         if (segmentsView.length === 0 && Object.keys(quantStats).length === 0) {
@@ -130,10 +151,13 @@ CONTEXT: ${unitDescription}
 - Qualitative Sentiment Sample: ${sentimentCounts.Positive} Positive, ${sentimentCounts.Negative} Negative, ${sentimentCounts.Neutral} Neutral.
 - Quantitative Metrics:
 ${quantPrompt || "No quantitative scores available."}
+- NPS (Net Promoter Score) Metrics:
+${npsPrompt}
 
 SCALE INTERPRETATION RULES:
 - "Likert Scale (1-4)": Critical < 2.0 | Average ~2.5 | Excellent > 3.5
 - "Binary/Percentage (0-1)": 0.0 is 0% (low reach/utilization), 1.0 is 100% (full reach).
+- "NPS 0–10": Range −100 to +100. ≥50 excellent, 0–49 good, < 0 concern. Never blend NPS with Likert averages.
 
 === STRATEGIC OVERVIEW (EXECUTIVE REPORT) ===
 ${executiveReport ? `Summary: ${executiveReport.executive_summary}

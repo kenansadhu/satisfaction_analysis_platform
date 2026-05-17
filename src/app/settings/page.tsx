@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useActiveSurvey, SurveyInfo } from "@/context/SurveyContext";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -14,7 +14,8 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw, ShieldAlert, Calendar, BarChart2 } from "lucide-react";
+import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw, ShieldAlert, Calendar, BarChart2, AlertTriangle, Target } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -23,18 +24,121 @@ export default function SettingsPage() {
     const { surveys, activeSurveyId, setActiveSurveyId, activeSurvey, loading } = useActiveSurvey();
 
     const [confirmSurvey, setConfirmSurvey] = useState<SurveyInfo | null>(null);
-    const [clearingCache, setClearingCache] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<SurveyInfo | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    // Rebuild cache state
+    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'done' | 'error';
+    const [rebuildStep, setRebuildStep] = useState<RebuildStep>('idle');
+    const [rebuildElapsed, setRebuildElapsed] = useState(0);
+    const [rebuildError, setRebuildError] = useState<string | null>(null);
+    const [buildSummary, setBuildSummary] = useState<{ analyzed_units: number; total_org_units: number; cached_units: number; suggestions_count: number } | null>(null);
+    const [aiCacheUpdatedAt, setAiCacheUpdatedAt] = useState<string | null>(null);
+    const rebuildTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const [allUnits, setAllUnits] = useState<{ id: number; name: string }[]>([]);
     const [excludedUnitIds, setExcludedUnitIds] = useState<number[]>([]);
     const [savingExclusions, setSavingExclusions] = useState(false);
+    const [npsUnitIds, setNpsUnitIds] = useState<number[]>([]);
+    const [savingNpsUnits, setSavingNpsUnits] = useState(false);
+
+    // Load ai_dataset_updated_at for the active survey
+    useEffect(() => {
+        if (!activeSurveyId || activeSurveyId === 'all') return;
+        setAiCacheUpdatedAt(null);
+        setBuildSummary(null);
+        setRebuildStep('idle');
+        import("@/lib/supabase").then(({ supabase }) =>
+            supabase.from("surveys")
+                .select("ai_dataset_updated_at")
+                .eq("id", parseInt(activeSurveyId))
+                .single()
+                .then(({ data }) => {
+                    setAiCacheUpdatedAt((data as any)?.ai_dataset_updated_at ?? null);
+                    if ((data as any)?.ai_dataset_updated_at) {
+                        try {
+                            const stored = localStorage.getItem(`ai_build_summary_${activeSurveyId}`);
+                            if (stored) setBuildSummary(JSON.parse(stored));
+                        } catch {}
+                    }
+                })
+        );
+    }, [activeSurveyId]);
+
+    const REBUILD_STEPS: { key: RebuildStep; label: string }[] = [
+        { key: 'clearing', label: 'Clearing existing caches' },
+        { key: 'phase1',   label: 'Building analysis dataset' },
+        { key: 'phase2',   label: 'Indexing suggestions' },
+        { key: 'done',     label: 'Complete' },
+    ];
+
+    const formatElapsed = (secs: number) => {
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
+    };
+
+    const handleRebuildCache = async () => {
+        if (!activeSurveyId) return;
+        setRebuildStep('clearing');
+        setRebuildElapsed(0);
+        setRebuildError(null);
+        setBuildSummary(null);
+        rebuildTimerRef.current = setInterval(() => setRebuildElapsed(e => e + 1), 1000);
+        try {
+            // Step 1: clear all caches (quant, cross-mentions, faculty, ai_dataset, ai_reports)
+            const clearRes = await fetch(`/api/executive/cache-scores?surveyId=${activeSurveyId}`, { method: 'POST' });
+            if (!clearRes.ok) throw new Error('Failed to clear caches');
+
+            // Step 2: heavy compute — analysis metrics
+            setRebuildStep('phase1');
+            const res1 = await fetch('/api/ai/cache-global-dataset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ surveyId: activeSurveyId, phase: 1 }),
+            });
+            const data1 = await res1.json();
+            if (!res1.ok) throw new Error(data1.error || 'Phase 1 failed');
+
+            // Step 3: suggestions merge
+            setRebuildStep('phase2');
+            const res2 = await fetch('/api/ai/cache-global-dataset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ surveyId: activeSurveyId, phase: 2 }),
+            });
+            const data2 = await res2.json();
+            if (!res2.ok) throw new Error(data2.error || 'Phase 2 failed');
+
+            const summary = {
+                total_org_units: data1.total_org_units ?? 0,
+                analyzed_units: data1.analyzed_units ?? 0,
+                cached_units: data1.count ?? 0,
+                suggestions_count: data2.suggestions_count ?? 0,
+            };
+            setBuildSummary(summary);
+            try { localStorage.setItem(`ai_build_summary_${activeSurveyId}`, JSON.stringify(summary)); } catch {}
+            setAiCacheUpdatedAt(new Date().toISOString());
+            setRebuildStep('done');
+            toast.success(`Cache rebuilt! ${summary.analyzed_units}/${summary.total_org_units} units · ${summary.suggestions_count.toLocaleString()} suggestions indexed.`);
+        } catch (e: any) {
+            setRebuildError(e.message || 'Rebuild failed');
+            setRebuildStep('error');
+            toast.error('Cache rebuild failed: ' + (e.message || 'Unknown error'));
+        } finally {
+            if (rebuildTimerRef.current) clearInterval(rebuildTimerRef.current);
+        }
+    };
+
+    const isRebuilding = rebuildStep === 'clearing' || rebuildStep === 'phase1' || rebuildStep === 'phase2';
 
     useEffect(() => {
         fetch("/api/settings/excluded-score-units")
             .then(r => r.json())
             .then(d => setExcludedUnitIds(d.excludedUnitIds || []));
+        fetch("/api/settings/nps-units")
+            .then(r => r.json())
+            .then(d => setNpsUnitIds(d.npsUnitIds || []));
         import("@/lib/supabase").then(({ supabase }) =>
             supabase.from("organization_units").select("id, name").order("name")
                 .then(({ data }) => setAllUnits(data || []))
@@ -43,6 +147,12 @@ export default function SettingsPage() {
 
     const toggleUnitExclusion = (id: number) => {
         setExcludedUnitIds(prev =>
+            prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+        );
+    };
+
+    const toggleNpsUnit = (id: number) => {
+        setNpsUnitIds(prev =>
             prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
         );
     };
@@ -61,6 +171,23 @@ export default function SettingsPage() {
             toast.error("Failed to save settings.");
         } finally {
             setSavingExclusions(false);
+        }
+    };
+
+    const saveNpsUnits = async () => {
+        setSavingNpsUnits(true);
+        try {
+            const res = await fetch("/api/settings/nps-units", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ npsUnitIds }),
+            });
+            if (res.ok) toast.success("NPS unit settings saved.");
+            else toast.error("Failed to save NPS settings.");
+        } catch {
+            toast.error("Failed to save NPS settings.");
+        } finally {
+            setSavingNpsUnits(false);
         }
     };
 
@@ -93,21 +220,6 @@ export default function SettingsPage() {
             toast.error("Delete failed — please try again.");
         } finally {
             setIsDeleting(false);
-        }
-    };
-
-    const handleClearCache = async () => {
-        if (!activeSurveyId) return;
-        setClearingCache(true);
-        try {
-            const res = await fetch(`/api/executive/cache-scores?surveyId=${activeSurveyId}`, { method: 'POST' });
-            const data = await res.json();
-            if (res.ok) toast.success("Cache cleared — scores will recompute on next report load.");
-            else toast.error(data.error || "Failed to clear cache");
-        } catch {
-            toast.error("Failed to clear cache");
-        } finally {
-            setClearingCache(false);
         }
     };
 
@@ -212,7 +324,7 @@ export default function SettingsPage() {
                     </CardContent>
                 </Card>
 
-                {/* ── Score Cache ───────────────────────────────── */}
+                {/* ── Cache Rebuild ─────────────────────────────── */}
                 <Card className="shadow-sm">
                     <CardHeader className="pb-4">
                         <div className="flex items-center gap-2">
@@ -222,102 +334,268 @@ export default function SettingsPage() {
                             <CardTitle className="text-base">Data Cache</CardTitle>
                         </div>
                         <CardDescription>
-                            Scores and cross-unit mention data are cached for faster loading. Clear if you re-ran analysis or re-imported survey data.
+                            Rebuild all caches after importing new survey data. Clears existing caches, then recomputes the full analysis dataset and suggestions index. Run this once after each import — takes a few minutes.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <div>
-                                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                                    {activeSurvey?.title || "Active survey"}
-                                </p>
-                                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
-                                    Scores will recompute on the next executive report load
-                                </p>
+                        <div className="space-y-4 p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800">
+                            {/* Survey name + last built + button */}
+                            <div className="flex items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                        {activeSurvey?.title || "Active survey"}
+                                    </p>
+                                    {aiCacheUpdatedAt ? (
+                                        <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-0.5">
+                                            <CheckCircle2 className="w-3 h-3" />
+                                            Last rebuilt: {new Date(aiCacheUpdatedAt).toLocaleString()}
+                                        </p>
+                                    ) : (
+                                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                                            Cache not yet built for this survey
+                                        </p>
+                                    )}
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleRebuildCache}
+                                    disabled={isRebuilding || !activeSurveyId}
+                                    className="gap-2 shrink-0 min-w-[130px] justify-center"
+                                >
+                                    {isRebuilding ? (
+                                        <>
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            {formatElapsed(rebuildElapsed)}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <RefreshCcw className="w-3.5 h-3.5" />
+                                            {aiCacheUpdatedAt ? 'Rebuild Cache' : 'Build Cache'}
+                                        </>
+                                    )}
+                                </Button>
                             </div>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleClearCache}
-                                disabled={clearingCache || !activeSurveyId}
-                                className="gap-2 shrink-0 border-slate-300 hover:border-red-300 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                            >
-                                {clearingCache ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                                Clear Cache
-                            </Button>
+
+                            {/* Step progress — shown while rebuilding or after */}
+                            {rebuildStep !== 'idle' && (
+                                <div className="space-y-2 pt-1">
+                                    {REBUILD_STEPS.map((s, i) => {
+                                        const currentIdx = REBUILD_STEPS.findIndex(x => x.key === rebuildStep);
+                                        const isDone = rebuildStep === 'done' || i < currentIdx;
+                                        const isCurrent = s.key === rebuildStep;
+                                        const isPending = !isDone && !isCurrent;
+                                        return (
+                                            <div key={s.key} className="flex items-center gap-2.5">
+                                                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold border-2 transition-colors ${
+                                                    isDone    ? 'bg-emerald-500 border-emerald-500 text-white' :
+                                                    isCurrent ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-600' :
+                                                                'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-400'
+                                                }`}>
+                                                    {isDone ? '✓' : i + 1}
+                                                </div>
+                                                <span className={`text-xs flex-1 ${
+                                                    isDone    ? 'text-emerald-600 dark:text-emerald-400' :
+                                                    isCurrent ? 'text-slate-800 dark:text-slate-200 font-medium' :
+                                                                'text-slate-400 dark:text-slate-600'
+                                                }`}>{s.label}</span>
+                                                {isCurrent && rebuildStep !== 'done' && (
+                                                    <Loader2 className="w-3 h-3 animate-spin text-indigo-500 shrink-0" />
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    {/* Progress bar */}
+                                    {isRebuilding && (
+                                        <Progress
+                                            value={rebuildStep === 'clearing' ? 10 : rebuildStep === 'phase1' ? 40 : 75}
+                                            className="h-1.5 mt-1"
+                                        />
+                                    )}
+                                    {rebuildStep === 'done' && (
+                                        <Progress value={100} className="h-1.5 mt-1" />
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Error message */}
+                            {rebuildStep === 'error' && rebuildError && (
+                                <div className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 rounded-lg px-3 py-2">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {rebuildError}
+                                </div>
+                            )}
+
+                            {/* Build summary */}
+                            {rebuildStep === 'done' && buildSummary && (
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className="bg-white dark:bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-200 dark:border-slate-800 text-center">
+                                        <p className="text-base font-black text-slate-800 dark:text-slate-200 tabular-nums leading-none">
+                                            {buildSummary.cached_units}
+                                            <span className="text-xs font-normal text-slate-400">/{buildSummary.total_org_units}</span>
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-1">units cached</p>
+                                    </div>
+                                    <div className="bg-white dark:bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-200 dark:border-slate-800 text-center">
+                                        <p className="text-base font-black text-emerald-700 dark:text-emerald-300 tabular-nums leading-none">
+                                            {buildSummary.analyzed_units}
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-1">units analyzed</p>
+                                    </div>
+                                    <div className="bg-white dark:bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-200 dark:border-slate-800 text-center">
+                                        <p className="text-base font-black text-indigo-700 dark:text-indigo-300 tabular-nums leading-none">
+                                            {buildSummary.suggestions_count.toLocaleString()}
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-1">suggestions</p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* ── Executive Score Calculation ──────────────── */}
+                {/* ── Score & Metric Configuration ──────────────── */}
                 <Card className="shadow-sm">
                     <CardHeader className="pb-4">
                         <div className="flex items-center gap-2">
                             <div className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
                                 <BarChart2 className="w-4 h-4 text-slate-500" />
                             </div>
-                            <CardTitle className="text-base">Executive Score Calculation</CardTitle>
+                            <CardTitle className="text-base">Score &amp; Metric Configuration</CardTitle>
                         </div>
                         <CardDescription>
-                            Choose which units count toward the overall Satisfaction Index on the Executive Insights page. Uncheck units whose questions use a different scale or shouldn't factor into the institution-wide average.
+                            Control which units factor into the institution-wide Satisfaction Index, and flag units that use a 0–10 NPS scale so they get their own tab and per-faculty card.
                         </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent className="space-y-8">
                         {allUnits.length === 0 ? (
                             <div className="flex items-center justify-center py-6">
                                 <Loader2 className="w-5 h-5 animate-spin text-slate-300" />
                             </div>
                         ) : (
                             <>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {allUnits.map(unit => {
-                                        const excluded = excludedUnitIds.includes(unit.id);
-                                        return (
-                                            <button
-                                                key={unit.id}
-                                                onClick={() => toggleUnitExclusion(unit.id)}
-                                                className={cn(
-                                                    "flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all duration-150",
-                                                    excluded
-                                                        ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 opacity-50"
-                                                        : "border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/20"
-                                                )}
-                                            >
-                                                <div className={cn(
-                                                    "w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors",
-                                                    excluded
-                                                        ? "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
-                                                        : "border-indigo-500 bg-indigo-500"
-                                                )}>
-                                                    {!excluded && (
-                                                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 8">
-                                                            <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                                        </svg>
-                                                    )}
-                                                </div>
-                                                <span className={cn(
-                                                    "text-sm font-medium truncate",
-                                                    excluded ? "text-slate-400 dark:text-slate-600" : "text-slate-700 dark:text-slate-300"
-                                                )}>
-                                                    {unit.name}
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                <div className="flex items-center justify-between pt-2">
-                                    <p className="text-xs text-slate-400">
-                                        {allUnits.length - excludedUnitIds.length} of {allUnits.length} units included
+                                {/* Subsection 1: Satisfaction Index inclusion */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <BarChart2 className="w-3.5 h-3.5 text-indigo-500" />
+                                        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">Satisfaction Index inclusion</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 -mt-1">
+                                        Checked units count toward the overall Satisfaction Index on the Executive Insights page. Uncheck units whose questions use a different scale or shouldn&apos;t factor into the institution-wide average.
                                     </p>
-                                    <Button
-                                        size="sm"
-                                        onClick={saveExclusions}
-                                        disabled={savingExclusions}
-                                        className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
-                                    >
-                                        {savingExclusions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                                        Save
-                                    </Button>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {allUnits.map(unit => {
+                                            const excluded = excludedUnitIds.includes(unit.id);
+                                            return (
+                                                <button
+                                                    key={unit.id}
+                                                    onClick={() => toggleUnitExclusion(unit.id)}
+                                                    className={cn(
+                                                        "flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all duration-150",
+                                                        excluded
+                                                            ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 opacity-50"
+                                                            : "border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/20"
+                                                    )}
+                                                >
+                                                    <div className={cn(
+                                                        "w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors",
+                                                        excluded
+                                                            ? "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
+                                                            : "border-indigo-500 bg-indigo-500"
+                                                    )}>
+                                                        {!excluded && (
+                                                            <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 8">
+                                                                <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                    <span className={cn(
+                                                        "text-sm font-medium truncate",
+                                                        excluded ? "text-slate-400 dark:text-slate-600" : "text-slate-700 dark:text-slate-300"
+                                                    )}>
+                                                        {unit.name}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                        <p className="text-xs text-slate-400">
+                                            {allUnits.length - excludedUnitIds.length} of {allUnits.length} units included
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            onClick={saveExclusions}
+                                            disabled={savingExclusions}
+                                            className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+                                        >
+                                            {savingExclusions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                            Save
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {/* Divider */}
+                                <div className="border-t border-slate-200 dark:border-slate-800" />
+
+                                {/* Subsection 2: NPS Units */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <Target className="w-3.5 h-3.5 text-blue-500" />
+                                        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">NPS units</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 -mt-1">
+                                        Mark units that use a 0–10 NPS (Net Promoter Score) scale. They appear in a dedicated NPS tab on Executive Insights and a per-faculty card on Faculty Insights, and are hidden from cross-unit views (Unit Insights list, sentiment heatmap, faculty rollups) where mixing them with Likert data would be misleading. Their score column must also be set to <strong>NPS (0–10)</strong> on the survey manage page.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {allUnits.map(unit => {
+                                            const isNps = npsUnitIds.includes(unit.id);
+                                            return (
+                                                <button
+                                                    key={unit.id}
+                                                    onClick={() => toggleNpsUnit(unit.id)}
+                                                    className={cn(
+                                                        "flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all duration-150",
+                                                        isNps
+                                                            ? "border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20"
+                                                            : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40"
+                                                    )}
+                                                >
+                                                    <div className={cn(
+                                                        "w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors",
+                                                        isNps
+                                                            ? "border-blue-500 bg-blue-500"
+                                                            : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
+                                                    )}>
+                                                        {isNps && (
+                                                            <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 8">
+                                                                <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                    <span className={cn(
+                                                        "text-sm font-medium truncate",
+                                                        isNps ? "text-blue-700 dark:text-blue-300" : "text-slate-700 dark:text-slate-300"
+                                                    )}>
+                                                        {unit.name}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                        <p className="text-xs text-slate-400">
+                                            {npsUnitIds.length} NPS unit{npsUnitIds.length === 1 ? "" : "s"} configured
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            onClick={saveNpsUnits}
+                                            disabled={savingNpsUnits}
+                                            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                                        >
+                                            {savingNpsUnits ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                            Save
+                                        </Button>
+                                    </div>
                                 </div>
                             </>
                         )}

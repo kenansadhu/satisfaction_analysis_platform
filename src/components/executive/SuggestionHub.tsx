@@ -74,6 +74,8 @@ const PRIORITY_STYLE = {
 
 export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
     const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+    const [cachedAt, setCachedAt] = useState<string | null>(null);
+    const [fromCache, setFromCache] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
@@ -113,9 +115,13 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
         const url = surveyId ? `/api/executive/suggestions?surveyId=${surveyId}` : `/api/executive/suggestions`;
         fetch(url)
             .then(r => r.json())
-            .then(data => {
-                if (data.error) throw new Error(data.error);
-                setSuggestions(Array.isArray(data) ? data : []);
+            .then(json => {
+                if (json.error) throw new Error(json.error);
+                setSuggestions(Array.isArray(json) ? json : (json.data ?? []));
+                if (!Array.isArray(json)) {
+                    setCachedAt(json.cachedAt ?? null);
+                    setFromCache(json.fromCache ?? false);
+                }
             })
             .catch(e => setError(e.message || "Failed to load"))
             .finally(() => setLoading(false));
@@ -289,13 +295,16 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     surveyId,
-                    themes: themes.map(t => ({
-                        key: t.key,
-                        unit: t.unit.name,
-                        category: t.category,
-                        count: t.count,
-                        quotes: t.suggestions.slice(0, 10).map(s => s.text),
-                    })),
+                    themes: [...themes]
+                        .sort((a, b) => weightedScore(b) - weightedScore(a))
+                        .slice(0, 30)
+                        .map(t => ({
+                            key: t.key,
+                            unit: t.unit.name,
+                            category: t.category,
+                            count: t.count,
+                            quotes: t.suggestions.slice(0, 5).map(s => s.text),
+                        })),
                 }),
             });
             const data = await res.json();
@@ -417,6 +426,19 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
 
     return (
         <div className="space-y-5">
+
+            {/* Cache freshness indicator */}
+            {cachedAt ? (
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="w-3 h-3 shrink-0" />
+                    <span>Cached data · Built {new Date(cachedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                </div>
+            ) : !fromCache && suggestions.length > 0 ? (
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    <span>Live data (cache not built) · Consider rebuilding the cache in Settings for faster loads</span>
+                </div>
+            ) : null}
 
             {/* Stats strip */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

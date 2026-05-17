@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
+import { parseSettingArray } from "@/lib/platformSettings";
 
 export const maxDuration = 60;
 
@@ -43,11 +44,13 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Cache miss: compute from raw data ──────────────────────────────────────
-    const [enrollResult, categoriesResult, unitsResult] = await Promise.all([
+    const [enrollResult, categoriesResult, unitsResult, npsSettingResult] = await Promise.all([
         supabase.from("prodi_enrollment").select("faculty, student_count").eq("survey_id", sid),
         supabase.from("analysis_categories").select("id, name, unit_id"),
         supabase.from("organization_units").select("id, name, short_name"),
+        supabase.from("platform_settings").select("value").eq("key", "nps_unit_ids").maybeSingle(),
     ]);
+    const npsUnitIds = new Set<number>(parseSettingArray<number>(npsSettingResult.data?.value));
 
     const enrollMap = new Map<string, number>();
     for (const row of (enrollResult.data || [])) {
@@ -82,24 +85,29 @@ export async function GET(req: NextRequest) {
         respCountMap.set(r.faculty, (respCountMap.get(r.faculty) || 0) + 1);
     }
 
-    // Batch-fetch raw_feedback_inputs
+    // Batch-fetch raw_feedback_inputs (also pull target_unit_id so we can drop NPS-unit segments)
     const CHUNK = 400;
     const MAX_CONCURRENT = 5;
     const allRespIds = allRespondents.map(r => r.id);
-    const inputFacultyMap = new Map<number, string>();
+    const inputFacultyMap = new Map<number, { faculty: string; unitId: number | null }>();
 
     for (let bStart = 0; bStart < allRespIds.length; bStart += CHUNK * MAX_CONCURRENT) {
         const chunks: number[][] = [];
         for (let i = bStart; i < Math.min(bStart + CHUNK * MAX_CONCURRENT, allRespIds.length); i += CHUNK)
             chunks.push(allRespIds.slice(i, i + CHUNK));
         const results = await Promise.all(chunks.map(chunk =>
-            supabase.from("raw_feedback_inputs").select("id, respondent_id")
+            supabase.from("raw_feedback_inputs").select("id, respondent_id, target_unit_id")
                 .in("respondent_id", chunk).eq("is_quantitative", false)
         ));
         for (const res of results) {
             if (!res.data) continue;
-            for (const inp of res.data)
-                inputFacultyMap.set(inp.id, respFacultyMap.get(inp.respondent_id) || "Unknown");
+            for (const inp of res.data) {
+                if (inp.target_unit_id != null && npsUnitIds.has(inp.target_unit_id)) continue;
+                inputFacultyMap.set(inp.id, {
+                    faculty: respFacultyMap.get(inp.respondent_id) || "Unknown",
+                    unitId: inp.target_unit_id ?? null,
+                });
+            }
         }
     }
 
@@ -120,7 +128,9 @@ export async function GET(req: NextRequest) {
         for (const res of results) {
             if (!res.data) continue;
             for (const seg of res.data) {
-                const fac = inputFacultyMap.get(seg.raw_input_id) || "Unknown";
+                const info = inputFacultyMap.get(seg.raw_input_id);
+                if (!info) continue; // segment belongs to an NPS-unit input we excluded above
+                const fac = info.faculty;
 
                 // Sentiment totals
                 if (!sentimentMap.has(fac)) sentimentMap.set(fac, { positive: 0, negative: 0, neutral: 0, total: 0 });

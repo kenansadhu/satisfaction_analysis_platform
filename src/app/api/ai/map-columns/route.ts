@@ -68,11 +68,12 @@ export async function POST(req: Request) {
         }
       }
       
-      Rules for 'rule' & 'customMapping': 
+      Rules for 'rule' & 'customMapping':
       - If samples show Likert-like terms -> rule: "LIKERT"
       - If samples show "Ya/Tidak" -> rule: "BOOLEAN"
-      
-      CRITICAL: For ANY "SCORE" column, you MUST fill "customMapping" with EVERY unique value found in the samples.
+      - If samples are integers spanning 0–10 AND the header suggests recommendation / loyalty / "would recommend" / "Net Promoter" / "kemungkinan merekomendasikan" -> rule: "NPS_0_10" (do NOT fill customMapping for NPS — values are stored as-is)
+
+      CRITICAL: For ANY "SCORE" column EXCEPT NPS_0_10, you MUST fill "customMapping" with EVERY unique value found in the samples.
       
       LOGICAL RELATIVE SCALING (The LLM Reasoning Step):
       Do NOT use hard mappings. Instead, look at the COLLECTIVE set of samples for a column to determine its logical hierarchy:

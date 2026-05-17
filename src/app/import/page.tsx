@@ -22,7 +22,7 @@ type Unit = { id: number; name: string; description?: string };
 type ColumnConfig = {
   unitId: string;
   type: "TEXT" | "SCORE" | "CATEGORY" | "IGNORE";
-  rule?: "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE" | "CUSTOM_MAPPING";
+  rule?: "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE" | "CUSTOM_MAPPING" | "NPS_0_10";
   customMapping?: Record<string, number | null>;
 };
 
@@ -378,6 +378,10 @@ export default function ImportPage() {
                   else if (lower.includes("jarang") || lower.includes("tidak setuju") || lower.includes("kurang") || lower.includes("rarely")) payload.numerical_score = 2;
                   else if (lower.includes("sering") || lower.includes("setuju") || lower.includes("puas") || lower.includes("often") || lower.includes("kadang") || lower.includes("netral") || lower.includes("cukup") || lower.includes("ragu")) payload.numerical_score = 3;
                   else if (lower.includes("selalu") || lower.includes("sangat") || lower.includes("lebih dari") || lower.includes("always")) payload.numerical_score = 4;
+                } else if (config.rule === "NPS_0_10") {
+                  // NPS: 0–10 scale. Store the integer as-is; reject anything out of range.
+                  const parsed = parseFloat(rawValue);
+                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 10) payload.numerical_score = Math.round(parsed);
                 }
               }
             }
@@ -793,6 +797,7 @@ export default function ImportPage() {
                                               <SelectItem value="NUMBER">Raw Numerical</SelectItem>
                                               <SelectItem value="TEXT_SCALE">Auto Text Scale</SelectItem>
                                               <SelectItem value="CUSTOM_MAPPING">Custom Advanced Mapping</SelectItem>
+                                              <SelectItem value="NPS_0_10">NPS (0–10)</SelectItem>
                                             </SelectContent>
                                           </Select>
                                         </>

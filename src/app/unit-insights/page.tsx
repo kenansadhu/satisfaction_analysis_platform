@@ -60,12 +60,18 @@ export default function UnitInsightsPage() {
     async function loadUnits() {
         setLoading(true);
         try {
-            const { data: orgUnits } = await supabase
-                .from('organization_units')
-                .select('id, name, short_name, description')
-                .order('name');
+            // Fetch units + NPS-unit setting in parallel; hide NPS units from this cross-unit list
+            // (they have their own dedicated NPS tab on Executive Insights).
+            const [orgUnitsRes, npsRes] = await Promise.all([
+                supabase.from('organization_units')
+                    .select('id, name, short_name, description')
+                    .order('name'),
+                fetch("/api/settings/nps-units").then(r => r.json()).catch(() => ({ npsUnitIds: [] })),
+            ]);
+            const npsUnitIds = new Set<number>(npsRes?.npsUnitIds || []);
+            const orgUnits = (orgUnitsRes.data || []).filter(u => !npsUnitIds.has(u.id));
 
-            if (!orgUnits) { setUnits([]); return; }
+            if (!orgUnits.length) { setUnits([]); return; }
 
             const scoreMap = new Map<number, { score?: number; total_segments: number; positive: number; negative: number; neutral: number }>();
             if (activeSurveyId && activeSurveyId !== "all") {

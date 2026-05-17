@@ -9,13 +9,14 @@ import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
 import { ActionPriorityMatrix } from "@/components/analytics/ActionPriorityMatrix";
 import CrossUnitMentions from "@/components/analytics/CrossUnitMentions";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, Share2 } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, Share2, Target } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
 import YearComparison from "@/components/executive/YearComparison";
 import SSIReport from "@/components/executive/SSIReport";
 import SuggestionHub from "@/components/executive/SuggestionHub";
+import { NpsTab } from "@/components/executive/NpsTab";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
 import { useActiveSurvey } from "@/context/SurveyContext";
 
@@ -44,6 +45,9 @@ export default function ExecutiveDashboard() {
     const [issuesMax, setIssuesMax] = useState<number>(0);
     const maxRadarDomain = Math.max(praisesMax, issuesMax, 1);
 
+    // NPS totals (institution-wide, shown in the dark hero strip)
+    const [npsTotals, setNpsTotals] = useState<{ nps_score: number | null; total: number } | null>(null);
+
     // Survey loading is now handled by SurveyContext
 
     // 2. Fetch metrics whenever selected survey changes
@@ -60,8 +64,13 @@ export default function ExecutiveDashboard() {
                     : `/api/executive/metrics?surveyId=${selectedSurvey}`;
 
                 const res = await fetch(url);
-                if (!res.ok) throw new Error("API Route failed");
-                const { stats, error } = await res.json();
+                const payload = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const msg = payload?.detail || payload?.error || `HTTP ${res.status}`;
+                    console.error("[/api/executive/metrics] failed:", payload);
+                    throw new Error(msg);
+                }
+                const { stats, error } = payload;
 
                 if (error) throw new Error(error);
 
@@ -98,6 +107,15 @@ export default function ExecutiveDashboard() {
         fetchMetrics();
     }, [selectedSurvey]);
 
+    // Fetch NPS totals for the dark hero strip (separate from the tab's full fetch).
+    useEffect(() => {
+        if (!selectedSurvey || selectedSurvey === "all") { setNpsTotals(null); return; }
+        fetch(`/api/executive/nps?surveyId=${selectedSurvey}`)
+            .then(r => r.json())
+            .then(d => setNpsTotals(d.totals || null))
+            .catch(() => setNpsTotals(null));
+    }, [selectedSurvey]);
+
     return (
         <div className="min-h-full bg-slate-50 dark:bg-slate-950 pb-20 transition-colors">
             <PageHeader
@@ -129,6 +147,9 @@ export default function ExecutiveDashboard() {
                         <TabsTrigger value="suggestions" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <Lightbulb className="w-4 h-4 text-amber-500" /> Suggestions
                         </TabsTrigger>
+                        <TabsTrigger value="nps" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Target className="w-4 h-4 text-blue-500" /> NPS
+                        </TabsTrigger>
                         <TabsTrigger value="depmap" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <TrendingUp className="w-4 h-4 text-indigo-500" /> Dependency Map
                         </TabsTrigger>
@@ -144,7 +165,7 @@ export default function ExecutiveDashboard() {
                         <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-7 shadow-lg">
                             <div className="absolute -top-10 -right-10 w-56 h-56 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
                             <div className="absolute -bottom-8 left-1/3 w-40 h-40 bg-violet-500/15 rounded-full blur-3xl pointer-events-none" />
-                            <div className="relative grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
+                            <div className="relative grid grid-cols-1 lg:grid-cols-6 gap-4 items-stretch">
                                 {/* Big score — spans 2 of 5 cols */}
                                 <div className="lg:col-span-2 flex flex-col justify-center py-2 pr-4 lg:border-r lg:border-white/10">
                                     <p className="text-xs font-semibold text-indigo-300 uppercase tracking-widest mb-4">Overall Sentiment Score</p>
@@ -193,6 +214,32 @@ export default function ExecutiveDashboard() {
                                         {!loading && <span className="text-xl font-normal text-slate-500">/{units.length}</span>}
                                     </div>
                                     <p className="text-xs text-slate-500 mt-2">with feedback data</p>
+                                </div>
+
+                                {/* NPS — only shown when at least one NPS unit is configured AND a survey is selected */}
+                                <div className="bg-white/5 rounded-xl p-5 border border-white/10 flex flex-col justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Target className="w-4 h-4 text-blue-400 shrink-0" />
+                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">NPS</p>
+                                    </div>
+                                    {npsTotals && npsTotals.total > 0 && npsTotals.nps_score !== null ? (
+                                        <>
+                                            <p className={`text-4xl font-black mt-3 tabular-nums ${
+                                                npsTotals.nps_score >= 50 ? "text-emerald-400" :
+                                                npsTotals.nps_score >= 0 ? "text-amber-400" : "text-red-400"
+                                            }`}>
+                                                {npsTotals.nps_score > 0 ? `+${npsTotals.nps_score}` : npsTotals.nps_score}
+                                            </p>
+                                            <p className="text-xs text-slate-500 mt-2">n = {npsTotals.total.toLocaleString()} · open NPS tab</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <p className="text-4xl font-black text-slate-600 mt-3 tabular-nums">—</p>
+                                            <p className="text-xs text-slate-500 mt-2">
+                                                {npsTotals === null ? "select a survey" : "no NPS data"}
+                                            </p>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -261,6 +308,10 @@ export default function ExecutiveDashboard() {
 
                     <TabsContent value="suggestions" className="focus-visible:ring-0">
                         <SuggestionHub surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    </TabsContent>
+
+                    <TabsContent value="nps" className="mt-6 focus-visible:ring-0">
+                        <NpsTab surveyId={selectedSurvey ?? null} />
                     </TabsContent>
 
                     <TabsContent value="depmap" className="focus-visible:ring-0 animate-in fade-in">

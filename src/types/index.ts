@@ -75,7 +75,7 @@ export type Sentiment = "Positive" | "Negative" | "Neutral";
 
 export type ColumnType = "SCORE" | "CATEGORY" | "TEXT" | "IGNORE";
 
-export type ColumnRule = "LIKERT" | "BOOLEAN" | "TEXT_SCALE";
+export type ColumnRule = "LIKERT" | "BOOLEAN" | "TEXT_SCALE" | "NUMBER" | "CUSTOM_MAPPING" | "NPS_0_10";
 
 // --- AI Response Types ---
 

@@ -1,23 +1,59 @@
 import { NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { computeSentimentScore } from "@/lib/utils";
+import { parseSettingArray } from "@/lib/platformSettings";
 
 export async function GET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const surveyId = searchParams.get("surveyId");
 
-        // 1. Fetch all organization units
-        const { data: orgUnits, error: orgError } = await supabase
-            .from('organization_units')
-            .select('id, name');
+        // 1. Fetch all organization units + NPS-unit setting in parallel.
+        //    NPS units are hidden from cross-unit metrics — they appear in the dedicated NPS tab instead.
+        const [unitsRes, npsRes] = await Promise.all([
+            supabase.from('organization_units').select('id, name'),
+            supabase.from('platform_settings').select('value').eq('key', 'nps_unit_ids').maybeSingle(),
+        ]);
 
-        if (orgError || !orgUnits) {
-            console.error("Failed to fetch units:", orgError);
+        if (unitsRes.error || !unitsRes.data) {
+            console.error("Failed to fetch units:", unitsRes.error);
             return NextResponse.json({ error: "Failed to fetch top-level units" }, { status: 500 });
         }
+        const npsUnitIds = new Set<number>(parseSettingArray<number>(npsRes.data?.value));
+        const orgUnits = unitsRes.data.filter(u => !npsUnitIds.has(u.id));
 
-        // 2. Use the working qual RPC to get sentiment counts per unit (with retry for intermittent timeouts)
+        // 1.5 Fast path — read per-unit sentiment from ai_dataset_cache when available.
+        // This is much faster than the RPC and is the path the user just rebuilt.
+        // The cache already excludes NPS units, matching what we want.
+        if (surveyId) {
+            const { data: cacheRow } = await supabase
+                .from('surveys')
+                .select('ai_dataset_cache')
+                .eq('id', parseInt(surveyId))
+                .single();
+            const cache = (cacheRow as any)?.ai_dataset_cache;
+            if (cache?.v === 2 && Array.isArray(cache.units)) {
+                const cachedById = new Map<number, any>(cache.units.map((u: any) => [u.unit_id, u]));
+                const stats = orgUnits.map(unit => {
+                    const cu = cachedById.get(unit.id);
+                    if (cu && (cu.total_segments || 0) > 0) {
+                        return {
+                            id: unit.id,
+                            name: unit.name,
+                            total: cu.total_segments || 0,
+                            positive: cu.positive || 0,
+                            neutral: cu.neutral || 0,
+                            negative: cu.negative || 0,
+                            score: cu.score || 0,
+                        };
+                    }
+                    return { id: unit.id, name: unit.name, total: 0, positive: 0, neutral: 0, negative: 0, score: 0 };
+                });
+                return NextResponse.json({ stats, fromCache: true });
+            }
+        }
+
+        // 2. Cache miss / "all surveys" — fall back to the qual RPC (with retry for intermittent timeouts)
         let qualAgg: any[] | null = null;
         let qualErr: any = null;
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -63,6 +99,10 @@ export async function GET(request: Request) {
 
     } catch (e: any) {
         console.error("Server Error in /api/executive/metrics:", e);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+        return NextResponse.json({
+            error: "Internal Server Error",
+            detail: e?.message || String(e),
+            stack: process.env.NODE_ENV === "production" ? undefined : e?.stack,
+        }, { status: 500 });
     }
 }

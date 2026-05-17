@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { computeSentimentScore } from "@/lib/utils";
+import { addToCounts, computeNpsScore, emptyNpsCounts, NpsCounts } from "@/lib/nps";
+import { parseSettingArray } from "@/lib/platformSettings";
 
 export const maxDuration = 300;
 
@@ -30,11 +32,15 @@ async function runPhase1(surveyId: string) {
         .from('surveys').select('name').eq('id', parseInt(surveyId)).single();
     const surveyName = (surveyRow as any)?.name || `Survey ${surveyId}`;
 
-    // 1. Units
-    const { data: unitsData, error: uErr } = await supabase
-        .from('organization_units').select('id, name, short_name, description');
-    if (uErr) throw uErr;
+    // 1. Units + NPS unit setting
+    const [unitsRes, npsSettingRes] = await Promise.all([
+        supabase.from('organization_units').select('id, name, short_name, description'),
+        supabase.from('platform_settings').select('value').eq('key', 'nps_unit_ids').maybeSingle(),
+    ]);
+    if (unitsRes.error) throw unitsRes.error;
+    const unitsData = unitsRes.data;
     const unitsMap = new Map((unitsData || []).map((u: any) => [u.id, u]));
+    const npsUnitIds = new Set<number>(parseSettingArray<number>(npsSettingRes.data?.value));
 
     // 2. All respondents (paginated)
     const respondentsData: { id: number; faculty: string; study_program: string; location: string }[] = [];
@@ -66,6 +72,7 @@ async function runPhase1(surveyId: string) {
                     .in('respondent_id', chunk)
                     .eq('is_quantitative', true)
                     .not('numerical_score', 'is', null)
+                    .neq('score_rule', 'NPS_0_10')
                     .range(qPage * 1000, (qPage + 1) * 1000 - 1);
                 if (qErr) { console.error("Failed to fetch quant chunk", qErr); break; }
                 if (!qData || qData.length === 0) break;
@@ -89,6 +96,29 @@ async function runPhase1(surveyId: string) {
         if (!unitMap[col]) unitMap[col] = { sum: 0, count: 0 };
         unitMap[col].sum += score;
         unitMap[col].count += 1;
+    }
+
+    // 4b. NPS rows (0–10 scale, bucketed separately and kept out of the Likert dataset above).
+    const npsRows: any[] = [];
+    if (respIds.length > 0) {
+        for (let i = 0; i < respIds.length; i += CHUNK) {
+            const chunk = respIds.slice(i, i + CHUNK);
+            let qPage = 0;
+            while (true) {
+                const { data: qData } = await supabase
+                    .from('raw_feedback_inputs')
+                    .select('target_unit_id, source_column, numerical_score, respondent_id')
+                    .in('respondent_id', chunk)
+                    .eq('is_quantitative', true)
+                    .eq('score_rule', 'NPS_0_10')
+                    .not('numerical_score', 'is', null)
+                    .range(qPage * 1000, (qPage + 1) * 1000 - 1);
+                if (!qData || qData.length === 0) break;
+                npsRows.push(...qData);
+                if (qData.length < 1000) break;
+                qPage++;
+            }
+        }
     }
 
     // 5. Qualitative aggregations via RPC (with retries)
@@ -129,9 +159,10 @@ async function runPhase1(surveyId: string) {
         else if (sent === 'Neutral') uQual.categories[catName].neu += cnt;
     }
 
-    // 6. Per-unit metrics
+    // 6. Per-unit metrics — excludes NPS units (they live in nps_summary below)
     const globalDataset: any[] = [];
     for (const unit of (unitsData || [])) {
+        if (npsUnitIds.has(unit.id)) continue;
         const uQual = qualDataByUnit.get(unit.id) || { total: 0, pos: 0, neg: 0, neu: 0, categories: {} };
         const totalSegments = uQual.total;
         const { pos, neg, neu } = uQual;
@@ -225,6 +256,51 @@ async function runPhase1(surveyId: string) {
     const programs = [...new Set(respondentsData.map(r => r.study_program).filter(Boolean))].sort() as string[];
     const locations = [...new Set(respondentsData.map(r => r.location).filter(Boolean))].sort() as string[];
 
+    // 9b. NPS summary — per unit×column, per (unit×column)×faculty.
+    type NpsKey = string; // `${unitId}::${col}`
+    const npsUnitCounts = new Map<NpsKey, NpsCounts & { unitId: number; column: string }>();
+    const npsFacultyCounts = new Map<string, NpsCounts & { unitId: number; column: string; faculty: string }>();
+
+    for (const row of npsRows) {
+        if (!row.target_unit_id) continue;
+        const col = row.source_column || 'NPS';
+        const unitKey = `${row.target_unit_id}::${col}`;
+        if (!npsUnitCounts.has(unitKey)) {
+            npsUnitCounts.set(unitKey, { ...emptyNpsCounts(), unitId: row.target_unit_id, column: col });
+        }
+        addToCounts(npsUnitCounts.get(unitKey)!, Number(row.numerical_score));
+
+        const meta = respMetaMap.get(row.respondent_id);
+        if (meta?.faculty) {
+            const facKey = `${row.target_unit_id}::${col}::${meta.faculty}`;
+            if (!npsFacultyCounts.has(facKey)) {
+                npsFacultyCounts.set(facKey, {
+                    ...emptyNpsCounts(), unitId: row.target_unit_id, column: col, faculty: meta.faculty,
+                });
+            }
+            addToCounts(npsFacultyCounts.get(facKey)!, Number(row.numerical_score));
+        }
+    }
+
+    const npsSummary = {
+        per_unit: Array.from(npsUnitCounts.values()).map(e => ({
+            unit_id: e.unitId,
+            unit_name: (unitsMap.get(e.unitId) as any)?.name || `Unit ${e.unitId}`,
+            unit_short_name: (unitsMap.get(e.unitId) as any)?.short_name || null,
+            column: e.column,
+            nps_score: computeNpsScore(e),
+            detractors: e.detractor, passives: e.passive, promoters: e.promoter, total: e.total,
+        })),
+        per_faculty: Array.from(npsFacultyCounts.values()).map(e => ({
+            unit_id: e.unitId,
+            unit_name: (unitsMap.get(e.unitId) as any)?.name || `Unit ${e.unitId}`,
+            column: e.column,
+            faculty: e.faculty,
+            nps_score: computeNpsScore(e),
+            detractors: e.detractor, passives: e.passive, promoters: e.promoter, total: e.total,
+        })).sort((a, b) => a.faculty.localeCompare(b.faculty)),
+    };
+
     // 10. Write cache (suggestions will be added by phase 2)
     const enrichedCache = {
         v: 2,
@@ -232,6 +308,7 @@ async function runPhase1(surveyId: string) {
         survey_context: { survey_name: surveyName, respondent_count: respondentsData.length, faculties, programs, locations },
         column_schema: columnSchema,
         faculties_summary: facultiesSummary,
+        nps_summary: npsSummary,
         suggestions: [],
     };
 
@@ -272,14 +349,25 @@ async function runPhase2(surveyId: string) {
     const unitsMap = new Map((unitsData || []).map((u: any) => [u.id, u]));
     const catMap = new Map((categories || []).map((c: any) => [c.id, c.name]));
 
-    // Fetch suggestions
+    // Fetch ALL suggestions via .range() pagination — same pattern as /api/executive/suggestions
+    // so the cached and non-cached paths return identical counts. Previously a hardcoded
+    // p_limit: 500 silently truncated results for any survey with > 500 suggestions.
     let suggestions: any[] = [];
     try {
-        const { data: suggRaw } = await supabase.rpc('get_survey_suggestions', {
-            p_survey_id: parseInt(surveyId),
-            p_limit: 500,
-        });
-        suggestions = ((suggRaw as any[]) || []).map((row: any) => {
+        const PAGE = 1000;
+        const rawRows: any[] = [];
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .rpc('get_survey_suggestions', { p_survey_id: parseInt(surveyId) })
+                .range(from, from + PAGE - 1);
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            rawRows.push(...(data as any[]));
+            if (data.length < PAGE) break;
+            from += PAGE;
+        }
+        suggestions = rawRows.map((row: any) => {
             const unitInfo = unitsMap.get(row.target_unit_id) as any;
             return {
                 id: row.id,

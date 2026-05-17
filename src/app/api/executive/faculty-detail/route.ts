@@ -110,10 +110,10 @@ export async function GET(req: NextRequest) {
 
     // ── 3. Batch-fetch raw_feedback_inputs (chunk by 40 respondents) ────────
     // INPUT_CHUNK=40: 40 respondents × ~20 questions = ~800 rows per query, safely under 1000
-    type InputRow = { id: number; respondent_id: number; target_unit_id: number | null; is_quantitative: boolean; numerical_score: number | null; source_column: string };
+    type InputRow = { id: number; respondent_id: number; target_unit_id: number | null; is_quantitative: boolean; numerical_score: number | null; score_rule: string | null; source_column: string };
     const allInputs = await batchFetch<InputRow>(allRespIds, INPUT_CHUNK, async (chunk) => {
         const { data } = await supabase.from("raw_feedback_inputs")
-            .select("id, respondent_id, target_unit_id, is_quantitative, numerical_score, source_column")
+            .select("id, respondent_id, target_unit_id, is_quantitative, numerical_score, score_rule, source_column")
             .in("respondent_id", chunk);
         return (data || []) as InputRow[];
     });
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
     for (const inp of allInputs) {
         inputUnitMap.set(inp.id, inp.target_unit_id);
         inputStudyProgramMap.set(inp.id, respStudyProgramMap.get(inp.respondent_id) || "Unknown");
-        if (inp.is_quantitative && inp.numerical_score !== null) {
+        if (inp.is_quantitative && inp.numerical_score !== null && inp.score_rule !== "NPS_0_10") {
             const cur = colMaxScore.get(inp.source_column) ?? 0;
             if (inp.numerical_score > cur) colMaxScore.set(inp.source_column, inp.numerical_score);
         }
@@ -136,7 +136,9 @@ export async function GET(req: NextRequest) {
 
     for (const inp of allInputs) {
         if (!inp.is_quantitative || inp.numerical_score === null) continue;
-        if ((colMaxScore.get(inp.source_column) ?? 0) <= 1) continue; // binary column
+        if (inp.score_rule === "NPS_0_10") continue; // NPS is 0–10, not Likert — aggregated separately
+        const colMax = colMaxScore.get(inp.source_column) ?? 0;
+        if (colMax <= 1 || colMax > 5) continue; // binary or non-Likert scale
 
         const studyProg = inputStudyProgramMap.get(inp.id) || "Unknown";
         const unitId = inp.target_unit_id;

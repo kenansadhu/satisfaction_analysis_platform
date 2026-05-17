@@ -12,6 +12,8 @@ import {
     GraduationCap, Users, Target, CheckCircle2, AlertTriangle, XCircle,
     BookOpen, Building2, AlertCircle, ThumbsUp, ThumbsDown
 } from "lucide-react";
+import { NpsCard } from "@/components/nps/NpsCard";
+import { emptyNpsCounts, NpsCounts } from "@/lib/nps";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -124,18 +126,48 @@ export default function FacultyDetailPage() {
     const [data, setData] = useState<DetailData | null>(null);
     const [loading, setLoading] = useState(false);
     const [progSort, setProgSort] = useState<"score" | "respondents">("score");
+    const [npsByColumn, setNpsByColumn] = useState<{ column: string; unitName: string; counts: NpsCounts }[]>([]);
 
     const surveyId = activeSurveyId && activeSurveyId !== "all" ? activeSurveyId : null;
 
     useEffect(() => {
-        if (!surveyId) { setData(null); return; }
+        if (!surveyId) { setData(null); setNpsByColumn([]); return; }
         setLoading(true);
         setData(null);
+        setNpsByColumn([]);
+
         fetch(`/api/executive/faculty-detail?facultyId=${facultyId}&surveyId=${surveyId}`)
             .then(r => r.json())
             .then(json => { if (!json.error) setData(json); })
             .catch(() => {})
             .finally(() => setLoading(false));
+
+        // Fetch NPS — keyed by faculty NAME (not ID), so we resolve the name first.
+        fetch(`/api/executive/nps?surveyId=${surveyId}`)
+            .then(r => r.json())
+            .then((json: { faculties: Array<{ faculty: string; unit_name: string; column: string; detractors: number; passives: number; promoters: number; total: number }> }) => {
+                // We need this faculty's NAME to match. Wait for `data` to load via the other request, but
+                // since requests are independent, fetch the faculty name from the DB directly.
+                import("@/lib/supabase").then(async ({ supabase }) => {
+                    const { data: fac } = await supabase.from("faculties").select("name").eq("id", parseInt(facultyId)).single();
+                    if (!fac) return;
+                    const name = fac.name;
+                    const rows = (json.faculties || []).filter(r => r.faculty === name);
+                    // Group by (unitName, column) — preserves the multi-NPS-column case
+                    const grouped = new Map<string, { column: string; unitName: string; counts: NpsCounts }>();
+                    for (const r of rows) {
+                        const key = `${r.unit_name}::${r.column}`;
+                        if (!grouped.has(key)) grouped.set(key, { column: r.column, unitName: r.unit_name, counts: emptyNpsCounts() });
+                        const g = grouped.get(key)!;
+                        g.counts.detractor += r.detractors;
+                        g.counts.passive += r.passives;
+                        g.counts.promoter += r.promoters;
+                        g.counts.total += r.total;
+                    }
+                    setNpsByColumn(Array.from(grouped.values()));
+                });
+            })
+            .catch(() => {});
     }, [facultyId, surveyId]);
 
     const facultyName = data?.faculty?.name ?? "Faculty";
@@ -248,11 +280,6 @@ export default function FacultyDetailPage() {
                                                 ) : (
                                                     <span className="text-2xl font-bold text-slate-300">—</span>
                                                 )}
-                                                {programQuality.overallSentiment.total > 0 && (
-                                                    <span className={`text-sm font-bold flex items-center gap-1 pb-0.5 ${sentimentColor(pqSentScore)}`}>
-                                                        <SentimentIcon score={pqSentScore} />{pqSentScore}/100
-                                                    </span>
-                                                )}
                                             </div>
                                             {programQuality.overallSentiment.total > 0 && (
                                                 <>
@@ -279,11 +306,6 @@ export default function FacultyDetailPage() {
                                                 ) : (
                                                     <span className="text-2xl font-bold text-slate-300">—</span>
                                                 )}
-                                                {ceSentScore !== null && campusExperience.overallSentiment?.total > 0 && (
-                                                    <span className={`text-sm font-bold flex items-center gap-1 pb-0.5 ${sentimentColor(ceSentScore)}`}>
-                                                        <SentimentIcon score={ceSentScore} />{ceSentScore}/100
-                                                    </span>
-                                                )}
                                             </div>
                                             {campusExperience.overallSentiment?.total > 0 && (
                                                 <>
@@ -298,6 +320,20 @@ export default function FacultyDetailPage() {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* ── NPS (only if any NPS unit has data for this faculty) ── */}
+                            {npsByColumn.length > 0 && (
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                    {npsByColumn.map(n => (
+                                        <NpsCard
+                                            key={`${n.unitName}::${n.column}`}
+                                            title={n.column}
+                                            subtitle={`${n.unitName} • this faculty only`}
+                                            counts={n.counts}
+                                        />
+                                    ))}
+                                </div>
+                            )}
 
                             {/* ══════════════════════════════════════════════
                                 SECTION 1 — PROGRAM QUALITY
