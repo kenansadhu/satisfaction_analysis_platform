@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSI Score Methodology</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #070C18;
+    --navy2: #0D1424;
+    --card: #111827;
+    --card2: #151e2e;
+    --border: rgba(255,255,255,0.07);
+    --teal: #00C9A7;
+    --teal-dim: rgba(0,201,167,0.12);
+    --gold: #E8B84B;
+    --gold-dim: rgba(232,184,75,0.12);
+    --coral: #F06449;
+    --coral-dim: rgba(240,100,73,0.12);
+    --amber: #F59E0B;
+    --green: #10B981;
+    --red: #EF4444;
+    --text: #E8EDF5;
+    --text2: #8A96A8;
+    --text3: #5A6478;
+    --mono: 'JetBrains Mono', monospace;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--navy);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── BACKGROUND GRID ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,201,167,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,201,167,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── GLOW ORBS ── */
+  .orb {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(120px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.18;
+  }
+  .orb-1 { width: 600px; height: 600px; background: var(--teal); top: -200px; left: -200px; }
+  .orb-2 { width: 500px; height: 500px; background: var(--gold); bottom: -150px; right: -150px; }
+  .orb-3 { width: 400px; height: 400px; background: var(--coral); top: 50%; left: 50%; transform: translate(-50%,-50%); opacity: 0.08; }
+
+  /* ── LAYOUT ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 1; }
+
+  section { padding: 100px 0; }
+
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 80px 0 60px;
+    position: relative;
+  }
+
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.25em;
+    color: var(--teal);
+    text-transform: uppercase;
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .hero-eyebrow::before {
+    content: '';
+    display: block;
+    width: 40px;
+    height: 1px;
+    background: var(--teal);
+  }
+
+  .hero h1 {
+    font-family: var(--serif);
+    font-size: clamp(52px, 8vw, 96px);
+    font-weight: 300;
+    line-height: 1.0;
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+  }
+  .hero h1 em {
+    font-style: italic;
+    color: var(--teal);
+  }
+  .hero h1 .accent { color: var(--gold); }
+
+  .hero-sub {
+    font-size: 18px;
+    color: var(--text2);
+    font-weight: 300;
+    max-width: 560px;
+    margin-bottom: 60px;
+    line-height: 1.7;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+  .hero-stat-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .hero-stat-value {
+    font-family: var(--serif);
+    font-size: 36px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .hero-stat-value.teal { color: var(--teal); }
+  .hero-stat-value.gold { color: var(--gold); }
+  .hero-stat-value.coral { color: var(--coral); }
+
+  .scroll-hint {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    animation: bounce 2s infinite;
+  }
+  .scroll-hint svg { opacity: 0.4; }
+  @keyframes bounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(6px); }
+  }
+
+  /* ── SECTION HEADERS ── */
+  .section-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--text3);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-family: var(--serif);
+    font-size: clamp(36px, 5vw, 58px);
+    font-weight: 400;
+    line-height: 1.1;
+    margin-bottom: 16px;
+  }
+  .section-title em { font-style: italic; color: var(--teal); }
+  .section-desc {
+    color: var(--text2);
+    font-size: 16px;
+    font-weight: 300;
+    max-width: 560px;
+    line-height: 1.7;
+  }
+
+  /* ── DIVIDER ── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 0;
+  }
+
+  /* ── PIPELINE ── */
+  .pipeline-section { padding: 100px 0; }
+
+  .pipeline-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 64px;
+    flex-wrap: wrap;
+    gap: 24px;
+  }
+
+  .pipeline-wrap {
+    overflow-x: auto;
+    padding-bottom: 16px;
+  }
+
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 900px;
+  }
+
+  .pipe-node {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .pipe-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 16px;
+    text-align: center;
+    width: 100%;
+    position: relative;
+    transition: border-color 0.3s, background 0.3s;
+    cursor: default;
+  }
+  .pipe-box:hover {
+    border-color: rgba(0,201,167,0.3);
+    background: var(--card2);
+  }
+  .pipe-box:hover .pipe-icon { color: var(--teal); }
+
+  .pipe-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.1em;
+    margin-bottom: 12px;
+  }
+  .pipe-icon {
+    font-size: 24px;
+    margin-bottom: 10px;
+    transition: color 0.3s;
+    line-height: 1;
+  }
+  .pipe-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.3;
+  }
+  .pipe-sub {
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 6px;
+    font-family: var(--mono);
+  }
+
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    flex-shrink: 0;
+    padding-top: 48px;
+  }
+  .pipe-arrow svg {
+    color: var(--text3);
+    flex-shrink: 0;
+  }
+
+  /* animated dots on arrows */
+  .pipe-arrow .dot-track {
+    width: 40px;
+    height: 2px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+    border-radius: 1px;
+  }
+  .pipe-arrow .dot-track::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -10px;
+    width: 10px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--teal);
+    animation: slide 1.8s linear infinite;
+    box-shadow: 0 0 8px var(--teal);
+  }
+  @keyframes slide {
+    from { left: -10px; }
+    to { left: 100%; }
+  }
+
+  /* ── STEPS ── */
+  .steps-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    background: var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .step-card {
+    background: var(--card);
+    padding: 40px;
+    position: relative;
+    transition: background 0.3s;
+  }
+  .step-card:hover { background: var(--card2); }
+
+  .step-num-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+  .step-num-badge.teal { background: var(--teal-dim); color: var(--teal); }
+  .step-num-badge.gold { background: var(--gold-dim); color: var(--gold); }
+  .step-num-badge.coral { background: var(--coral-dim); color: var(--coral); }
+
+  .step-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    line-height: 1.2;
+  }
+  .step-body {
+    font-size: 14px;
+    color: var(--text2);
+    line-height: 1.7;
+    font-weight: 300;
+  }
+
+  .step-formula {
+    margin-top: 16px;
+    background: var(--navy2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--teal);
+    line-height: 1.6;
+  }
+  .step-formula .comment { color: var(--text3); }
+
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-family: var(--mono);
+    margin-top: 10px;
+    margin-right: 6px;
+  }
+  .filter-pill.excluded { background: rgba(240,100,73,0.12); color: var(--coral); border: 1px solid rgba(240,100,73,0.25); }
+  .filter-pill.included { background: rgba(0,201,167,0.1); color: var(--teal); border: 1px solid rgba(0,201,167,0.25); }
+
+  .step-card.wide { grid-column: 1 / -1; }
+
+  /* ── WORKED EXAMPLE ── */
+  .example-section { padding: 100px 0; }
+
+  .example-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .example-header {
+    padding: 32px 40px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    background: linear-gradient(135deg, rgba(0,201,167,0.04), transparent);
+  }
+  .example-title {
+    font-family: var(--serif);
+    font-size: 26px;
+    font-weight: 600;
+  }
+  .example-unit-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gold);
+    background: var(--gold-dim);
+    border: 1px solid rgba(232,184,75,0.2);
+    padding: 6px 14px;
+    border-radius: 20px;
+    letter-spacing: 0.05em;
+  }
+
+  .example-body { padding: 40px; }
+
+  .example-step-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .example-step-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Data table */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+  .data-table th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text3);
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }
+  .data-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text2);
+    vertical-align: middle;
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table td.score {
+    font-family: var(--mono);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .data-table td.count {
+    font-family: var(--mono);
+    color: var(--text3);
+    font-size: 13px;
+  }
+  .campus-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--mono);
+  }
+  .campus-tag.main { background: rgba(0,201,167,0.1); color: var(--teal); }
+  .campus-tag.city { background: rgba(232,184,75,0.1); color: var(--gold); }
+  .campus-tag.excl { background: rgba(240,100,73,0.1); color: var(--coral); text-decoration: line-through; opacity: 0.7; }
+
+  .excluded-row td { opacity: 0.4; }
+  .excluded-row td:first-child::before {
+    content: '✕ ';
+    color: var(--coral);
+    font-weight: bold;
+  }
+
+  /* Calc blocks */
+  .calc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .calc-block {
+    background: var(--navy2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .calc-block-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .calc-block-label .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.teal { background: var(--teal); }
+  .dot.gold { background: var(--gold); }
+
+  .calc-line {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text2);
+    line-height: 2;
+  }
+  .calc-line .hi { color: var(--text); }
+  .calc-line .op { color: var(--text3); }
+  .calc-result {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--teal);
+    font-weight: 500;
+  }
+
+  .final-score-row {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    background: linear-gradient(135deg, rgba(0,201,167,0.06), rgba(0,201,167,0.02));
+    border: 1px solid rgba(0,201,167,0.2);
+    border-radius: 16px;
+    padding: 32px 40px;
+    flex-wrap: wrap;
+  }
+
+  .final-score-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .final-score-num {
+    font-family: var(--serif);
+    font-size: 80px;
+    font-weight: 700;
+    color: var(--teal);
+    line-height: 1;
+    letter-spacing: -2px;
+    text-shadow: 0 0 40px rgba(0,201,167,0.4);
+  }
+  .final-score-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+  .final-score-detail {
+    flex: 1;
+    min-width: 260px;
+  }
+  .final-score-title {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .final-score-body {
+    font-size: 14px;
+    color: var(--text2);
+    line-height: 1.7;
+    font-weight: 300;
+  }
+  .final-score-formula {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text3);
+    line-height: 1.8;
+  }
+  .final-score-formula .v { color: var(--teal); }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-top: 14px;
+  }
+  .status-badge.green { background: rgba(16,185,129,0.12); color: var(--green); border: 1px solid rgba(16,185,129,0.25); }
+  .status-badge::before { content: '●'; font-size: 8px; }
+
+  /* ── SCORE SCALE ── */
+  .scale-section { padding: 100px 0; }
+
+  .scale-bar-wrap {
+    margin-top: 48px;
+    position: relative;
+  }
+
+  .scale-bar {
+    height: 20px;
+    border-radius: 10px;
+    background: linear-gradient(90deg,
+      var(--red) 0%,
+      var(--red) 26%,
+      var(--amber) 26%,
+      var(--amber) 34%,
+      var(--green) 34%,
+      var(--green) 100%
+    );
+    position: relative;
+    box-shadow: 0 0 30px rgba(16,185,129,0.2);
+  }
+
+  .scale-markers {
+    display: flex;
+    position: relative;
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .scale-m {
+    position: absolute;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .scale-m .tick {
+    width: 1px;
+    height: 8px;
+    background: var(--text3);
+  }
+  .scale-m .val { color: var(--text3); }
+
+  .scale-labels {
+    display: flex;
+    margin-top: 32px;
+    gap: 2px;
+  }
+  .scale-seg {
+    flex: 1;
+    padding: 20px 24px;
+    border-radius: 10px;
+    position: relative;
+  }
+  .scale-seg.red { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); }
+  .scale-seg.amber { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); }
+  .scale-seg.green { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); }
+
+  .seg-range {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .seg-range.red { color: var(--red); }
+  .seg-range.amber { color: var(--amber); }
+  .seg-range.green { color: var(--green); }
+
+  .seg-label {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .seg-label.red { color: var(--red); }
+  .seg-label.amber { color: var(--amber); }
+  .seg-label.green { color: var(--green); }
+
+  .seg-desc {
+    font-size: 13px;
+    color: var(--text3);
+    line-height: 1.5;
+  }
+
+  .seg-width-note {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── CACHING ── */
+  .cache-section { padding: 100px 0; }
+
+  .cache-flow {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    margin-top: 48px;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  .cache-node {
+    flex: 1;
+    min-width: 200px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 24px;
+    position: relative;
+  }
+  .cache-node-icon {
+    font-size: 28px;
+    margin-bottom: 14px;
+    line-height: 1;
+  }
+  .cache-node-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .cache-node-body {
+    font-size: 13px;
+    color: var(--text3);
+    line-height: 1.6;
+  }
+
+  .cache-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+  .cache-arrow svg { color: var(--text3); }
+
+  .cache-status {
+    margin-top: 48px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    background: var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .cache-status-item {
+    background: var(--card);
+    padding: 24px 28px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .cache-status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+  .cache-status-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .cache-status-dot.gold { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+  .cache-status-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .cache-status-body { font-size: 13px; color: var(--text3); line-height: 1.5; }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 0;
+    position: relative;
+    z-index: 1;
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .footer-brand {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--text2);
+  }
+  .footer-brand span { color: var(--teal); }
+  .footer-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.1em;
+  }
+
+  /* ── ANIMATIONS ── */
+  .fade-up {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .fade-up.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* stagger children */
+  .stagger > * { transition-delay: calc(var(--i, 0) * 0.1s); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 768px) {
+    .steps-grid { grid-template-columns: 1fr; }
+    .step-card.wide { grid-column: 1; }
+    .calc-grid { grid-template-columns: 1fr; }
+    .cache-status { grid-template-columns: 1fr; }
+    .scale-labels { flex-direction: column; }
+    .final-score-row { flex-direction: column; align-items: flex-start; }
+    .hero-stats { gap: 28px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<!-- ══════════════════════════════════════════
+     HERO
+══════════════════════════════════════════ -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-eyebrow">Student Voice Platform — Internal Methodology</div>
+    <h1>
+      How <em>Satisfaction</em><br>
+      Scores Are<br>
+      <span class="accent">Calculated</span>
+    </h1>
+    <p class="hero-sub">
+      A complete walkthrough of the Student Satisfaction Index (SSI) methodology —
+      from raw Likert responses to institution-wide scores, with full transparency on
+      weighting, filtering, and caching.
+    </p>
+    <div class="hero-stats">
+      <div>
+        <div class="hero-stat-label">Scale</div>
+        <div class="hero-stat-value teal">1 – 4</div>
+      </div>
+      <div>
+        <div class="hero-stat-label">Pipeline Steps</div>
+        <div class="hero-stat-value gold">6</div>
+      </div>
+      <div>
+        <div class="hero-stat-label">Score Type</div>
+        <div class="hero-stat-value coral">Likert</div>
+      </div>
+    </div>
+  </div>
+  <div class="scroll-hint">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M8 3v10M3 9l5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Scroll to explore
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ══════════════════════════════════════════
+     PIPELINE OVERVIEW
+══════════════════════════════════════════ -->
+<section class="pipeline-section">
+  <div class="container">
+    <div class="pipeline-title-row">
+      <div>
+        <div class="section-tag">Overview</div>
+        <div class="section-title">The <em>Pipeline</em></div>
+      </div>
+      <p class="section-desc" style="margin:0">Six stages transform thousands of raw student responses into a single, reliable satisfaction index.</p>
+    </div>
+
+    <div class="pipeline-wrap fade-up">
+      <div class="pipeline">
+
+        <div class="pipe-node">
+          <div class="pipe-box">
+            <div class="pipe-num">01</div>
+            <div class="pipe-icon">📋</div>
+            <div class="pipe-label">Raw<br>Responses</div>
+            <div class="pipe-sub">Likert 1–4</div>
+          </div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="dot-track"></div>
+        </div>
+
+        <div class="pipe-node">
+          <div class="pipe-box">
+            <div class="pipe-num">02</div>
+            <div class="pipe-icon">🔍</div>
+            <div class="pipe-label">Filter<br>Columns</div>
+            <div class="pipe-sub">Drop binary & NPS</div>
+          </div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="dot-track"></div>
+        </div>
+
+        <div class="pipe-node">
+          <div class="pipe-box">
+            <div class="pipe-num">03</div>
+            <div class="pipe-icon">📊</div>
+            <div class="pipe-label">Per-Question<br>Average</div>
+            <div class="pipe-sub">Unit × Campus × Q</div>
+          </div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="dot-track"></div>
+        </div>
+
+        <div class="pipe-node">
+          <div class="pipe-box">
+            <div class="pipe-num">04</div>
+            <div class="pipe-icon">⚖️</div>
+            <div class="pipe-label">Campus<br>Aggregate</div>
+            <div class="pipe-sub">Weighted avg</div>
+          </div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="dot-track"></div>
+        </div>
+
+        <div class="pipe-node">
+          <div class="pipe-box">
+            <div class="pipe-num">05</div>
+            <div class="pipe-icon">🏛️</div>
+            <div class="pipe-label">Unit<br>Score</div>
+            <div class="pipe-sub">Cross-campus avg</div>
+          </div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="dot-track"></div>
+        </div>
+
+        <div class="pipe-node">
+          <div class="pipe-box" style="border-color:rgba(0,201,167,0.3);">
+            <div class="pipe-num">06</div>
+            <div class="pipe-icon">🎯</div>
+            <div class="pipe-label" style="color:var(--teal);">Global<br>SSI</div>
+            <div class="pipe-sub">Institution score</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ══════════════════════════════════════════
+     STEP DETAILS
+══════════════════════════════════════════ -->
+<section>
+  <div class="container">
+    <div class="section-tag">Step by Step</div>
+    <div class="section-title">The <em>Methodology</em></div>
+    <p class="section-desc" style="margin-bottom:48px;">Each stage is designed to produce a fair, weighted score that treats every individual student response equally.</p>
+
+    <div class="steps-grid">
+
+      <!-- Step 1 -->
+      <div class="step-card fade-up">
+        <div class="step-num-badge teal">01</div>
+        <div class="step-title">Raw Survey Responses</div>
+        <div class="step-body">
+          Students complete surveys on a <strong style="color:var(--text)">1–4 Likert scale</strong> across multiple organizational units — Academic Affairs, Library, Student Services, and more. Each response is recorded with:
+        </div>
+        <div class="step-formula">
+          respondent_id<br>
+          campus / location<br>
+          target_unit_id<br>
+          source_column <span class="comment">(question)</span><br>
+          numerical_score <span class="comment">(1, 2, 3, or 4)</span>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step-card fade-up">
+        <div class="step-num-badge coral">02</div>
+        <div class="step-title">Filtering — Likert Only</div>
+        <div class="step-body">
+          Before any calculation, two question types are excluded. Only pure Likert 1–4 questions contribute to the satisfaction index.
+        </div>
+        <div style="margin-top:14px;">
+          <span class="filter-pill excluded">✕ Binary (yes/no) — max score ≤ 1</span>
+          <span class="filter-pill excluded">✕ NPS 0–10 — score_rule = NPS_0_10</span>
+          <br>
+          <span class="filter-pill included">✓ Likert 1–4 — 1 &lt; max score ≤ 5</span>
+        </div>
+        <div class="step-body" style="margin-top:14px;">
+          The guard uses the <em>maximum observed score</em> per question column as a proxy for scale type — binary columns top out at 1, NPS at 10.
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step-card fade-up">
+        <div class="step-num-badge teal">03</div>
+        <div class="step-title">Per-Question Average</div>
+        <div class="step-body">
+          For every combination of <strong style="color:var(--text)">(unit × campus × question)</strong>, the arithmetic mean of all individual responses is computed.
+        </div>
+        <div class="step-formula">
+          col_avg = <span style="color:var(--text)">Σ scores</span> / <span style="color:var(--text)">n responses</span><br>
+          col_count = <span style="color:var(--text)">n</span> <span class="comment">(used in weighting)</span>
+        </div>
+        <div class="step-body" style="margin-top:12px;">
+          This produces one average and one count per question per campus per unit.
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="step-card fade-up">
+        <div class="step-num-badge gold">04</div>
+        <div class="step-title">Campus-Level Aggregate</div>
+        <div class="step-body">
+          All question averages for a unit at one campus are combined using a <strong style="color:var(--text)">response-weighted average</strong> — not a simple mean of averages. This ensures high-response questions don't artificially dominate.
+        </div>
+        <div class="step-formula">
+          campus_avg =<br>
+          &nbsp;&nbsp;<span style="color:var(--text)">Σ (col_avg × col_count)</span><br>
+          &nbsp;&nbsp;─────────────────────<br>
+          &nbsp;&nbsp;<span style="color:var(--text)">Σ col_count</span>
+        </div>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="step-card fade-up">
+        <div class="step-num-badge teal">05</div>
+        <div class="step-title">Unit Satisfaction Index</div>
+        <div class="step-body">
+          Campus-level averages are combined across all campuses for a given unit, again weighted by the number of responses per campus. A campus with 1,000 respondents carries more weight than one with 50.
+        </div>
+        <div class="step-formula">
+          unit_score =<br>
+          &nbsp;&nbsp;<span style="color:var(--text)">Σ (campus_avg × campus_count)</span><br>
+          &nbsp;&nbsp;──────────────────────────<br>
+          &nbsp;&nbsp;<span style="color:var(--text)">Σ campus_count</span>
+        </div>
+      </div>
+
+      <!-- Step 6 -->
+      <div class="step-card fade-up">
+        <div class="step-num-badge gold">06</div>
+        <div class="step-title">Global Satisfaction Index</div>
+        <div class="step-body">
+          The institution-wide SSI aggregates all unit-level sums into a single score. Excluded units (opted out of cross-unit reporting) are removed before this calculation.
+        </div>
+        <div class="step-formula">
+          global_SSI =<br>
+          &nbsp;&nbsp;<span style="color:var(--text)">Σ unit_sum (all eligible units)</span><br>
+          &nbsp;&nbsp;─────────────────────────<br>
+          &nbsp;&nbsp;<span style="color:var(--text)">Σ unit_count (all eligible units)</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="divider" style="margin-top:100px;"></div>
+
+<!-- ══════════════════════════════════════════
+     WORKED EXAMPLE
+══════════════════════════════════════════ -->
+<section class="example-section">
+  <div class="container">
+    <div class="section-tag">Worked Example</div>
+    <div class="section-title">From <em>Responses</em><br>to Score</div>
+    <p class="section-desc" style="margin-bottom:48px;">A concrete calculation using one unit across two campuses. All numbers are illustrative.</p>
+
+    <div class="example-card fade-up">
+      <div class="example-header">
+        <div class="example-title">Academic Affairs</div>
+        <div class="example-unit-badge">unit_id: 4 · 2 campuses · 3 questions</div>
+      </div>
+      <div class="example-body">
+
+        <!-- Raw data -->
+        <div class="example-step-label">Step 1 — Raw data (after filtering)</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Question</th>
+              <th>Campus</th>
+              <th>Type</th>
+              <th>Avg Score</th>
+              <th>Responses (n)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Course Relevance</td>
+              <td><span class="campus-tag main">Main</span></td>
+              <td><span class="filter-pill included" style="margin:0;font-size:10px;">Likert 1–4</span></td>
+              <td class="score">3.60</td>
+              <td class="count">150</td>
+            </tr>
+            <tr>
+              <td>Teaching Quality</td>
+              <td><span class="campus-tag main">Main</span></td>
+              <td><span class="filter-pill included" style="margin:0;font-size:10px;">Likert 1–4</span></td>
+              <td class="score">3.20</td>
+              <td class="count">148</td>
+            </tr>
+            <tr>
+              <td>Academic Support</td>
+              <td><span class="campus-tag main">Main</span></td>
+              <td><span class="filter-pill included" style="margin:0;font-size:10px;">Likert 1–4</span></td>
+              <td class="score">3.80</td>
+              <td class="count">149</td>
+            </tr>
+            <tr>
+              <td>Course Relevance</td>
+              <td><span class="campus-tag city">City</span></td>
+              <td><span class="filter-pill included" style="margin:0;font-size:10px;">Likert 1–4</span></td>
+              <td class="score">3.10</td>
+              <td class="count">85</td>
+            </tr>
+            <tr>
+              <td>Teaching Quality</td>
+              <td><span class="campus-tag city">City</span></td>
+              <td><span class="filter-pill included" style="margin:0;font-size:10px;">Likert 1–4</span></td>
+              <td class="score">2.90</td>
+              <td class="count">83</td>
+            </tr>
+            <tr>
+              <td>Academic Support</td>
+              <td><span class="campus-tag city">City</span></td>
+              <td><span class="filter-pill included" style="margin:0;font-size:10px;">Likert 1–4</span></td>
+              <td class="score">3.40</td>
+              <td class="count">84</td>
+            </tr>
+            <tr class="excluded-row">
+              <td>Would Recommend</td>
+              <td><span class="campus-tag excl">Both</span></td>
+              <td><span class="filter-pill excluded" style="margin:0;font-size:10px;">Binary (0/1)</span></td>
+              <td class="score" style="text-decoration:line-through;opacity:.4;">0.82</td>
+              <td class="count" style="opacity:.4;">699</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Campus aggregates -->
+        <div class="example-step-label">Steps 3–4 — Weighted campus averages</div>
+        <div class="calc-grid">
+          <div class="calc-block">
+            <div class="calc-block-label"><span class="dot teal"></span> Main Campus</div>
+            <div class="calc-line">
+              numerator = <span class="hi">(3.60 × 150)</span> <span class="op">+</span> <span class="hi">(3.20 × 148)</span> <span class="op">+</span> <span class="hi">(3.80 × 149)</span><br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <span class="hi">540.0</span> <span class="op">+</span> <span class="hi">473.6</span> <span class="op">+</span> <span class="hi">566.2</span><br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <span class="hi">1,579.8</span><br>
+              denominator = <span class="hi">150 + 148 + 149</span> = <span class="hi">447</span>
+            </div>
+            <div class="calc-result">campus_avg = 1,579.8 / 447 = <strong>3.534</strong></div>
+          </div>
+          <div class="calc-block">
+            <div class="calc-block-label"><span class="dot gold"></span> City Campus</div>
+            <div class="calc-line">
+              numerator = <span class="hi">(3.10 × 85)</span> <span class="op">+</span> <span class="hi">(2.90 × 83)</span> <span class="op">+</span> <span class="hi">(3.40 × 84)</span><br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <span class="hi">263.5</span> <span class="op">+</span> <span class="hi">240.7</span> <span class="op">+</span> <span class="hi">285.6</span><br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <span class="hi">789.8</span><br>
+              denominator = <span class="hi">85 + 83 + 84</span> = <span class="hi">252</span>
+            </div>
+            <div class="calc-result">campus_avg = 789.8 / 252 = <strong>3.134</strong></div>
+          </div>
+        </div>
+
+        <!-- Unit score -->
+        <div class="example-step-label">Step 5 — Unit Satisfaction Index</div>
+        <div class="final-score-row">
+          <div class="final-score-display">
+            <div class="final-score-num">3.39</div>
+            <div class="final-score-label">Unit SSI Score</div>
+          </div>
+          <div class="final-score-detail">
+            <div class="final-score-title">Academic Affairs — Unit Score</div>
+            <div class="final-score-body">
+              Both campus averages are combined with response-count weighting. Main Campus (n=447) outweighs City Campus (n=252), pulling the unit score toward Main's higher average.
+            </div>
+            <div class="final-score-formula">
+              unit_score = (<span class="v">3.534</span> × 447) + (<span class="v">3.134</span> × 252)<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/ (447 + 252)<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 1,579.7 + 789.8 / 699<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 2,369.5 / 699 = <span class="v">3.39</span>
+            </div>
+            <div class="status-badge green">Good — above 3.20 threshold</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ══════════════════════════════════════════
+     SCORE SCALE
+══════════════════════════════════════════ -->
+<section class="scale-section">
+  <div class="container">
+    <div class="section-tag">Interpretation</div>
+    <div class="section-title">Score <em>Thresholds</em></div>
+    <p class="section-desc" style="margin-bottom:0;">Every score in the report is color-coded automatically based on fixed thresholds on the 1–4 Likert scale.</p>
+
+    <div class="scale-bar-wrap fade-up">
+      <!-- Bar -->
+      <div style="position:relative;">
+        <div class="scale-bar"></div>
+        <!-- Tick marks -->
+        <div style="position:relative; height:32px; margin-top:4px;">
+          <div class="scale-m" style="left:0%"><div class="tick"></div><div class="val">1.00</div></div>
+          <div class="scale-m" style="left:25%"><div class="tick"></div><div class="val" style="color:var(--red)">1.75</div></div>
+          <div class="scale-m" style="left:66.7%"><div class="tick" style="background:var(--amber)"></div><div class="val" style="color:var(--amber)">3.00</div></div>
+          <div class="scale-m" style="left:73.3%"><div class="tick" style="background:var(--green)"></div><div class="val" style="color:var(--green)">3.20</div></div>
+          <div class="scale-m" style="left:100%"><div class="tick"></div><div class="val">4.00</div></div>
+        </div>
+      </div>
+
+      <!-- Segment cards -->
+      <div class="scale-labels" style="margin-top:24px; gap:12px;">
+        <div class="scale-seg red">
+          <div class="seg-range red">&lt; 3.00</div>
+          <div class="seg-label red">⚠ Critical</div>
+          <div class="seg-desc">Significant student dissatisfaction. Requires immediate review and action plan.</div>
+          <div class="seg-width-note">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/><path d="M6 4v2.5M6 8h.01" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            Spans 2.00 points of the scale
+          </div>
+        </div>
+        <div class="scale-seg amber">
+          <div class="seg-range amber">3.00 – 3.19</div>
+          <div class="seg-label amber">◐ Needs Attention</div>
+          <div class="seg-desc">Acceptable but below target. Improvement opportunities should be prioritized.</div>
+          <div class="seg-width-note">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/><path d="M6 4v2.5M6 8h.01" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            Spans 0.20 points of the scale
+          </div>
+        </div>
+        <div class="scale-seg green">
+          <div class="seg-range green">≥ 3.20</div>
+          <div class="seg-label green">✓ Good</div>
+          <div class="seg-desc">Meets the institution's satisfaction benchmark. Continue monitoring for consistency.</div>
+          <div class="seg-width-note">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/><path d="M6 4v2.5M6 8h.01" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            Spans 0.80 points of the scale
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ══════════════════════════════════════════
+     CACHING
+══════════════════════════════════════════ -->
+<section class="cache-section">
+  <div class="container">
+    <div class="section-tag">Performance</div>
+    <div class="section-title">Score <em>Caching</em></div>
+    <p class="section-desc" style="margin-bottom:0">
+      Aggregating thousands of responses on every page load would be slow. Computed scores are cached after the first calculation and served instantly on subsequent visits.
+    </p>
+
+    <div class="cache-flow fade-up" style="margin-top:48px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+
+      <div class="cache-node" style="flex:1; min-width:180px;">
+        <div class="cache-node-icon">📥</div>
+        <div class="cache-node-title">Report Requested</div>
+        <div class="cache-node-body">User opens the Report tab for a given survey.</div>
+      </div>
+
+      <div style="color:var(--text3); font-size:20px; padding:0 4px;">→</div>
+
+      <div class="cache-node" style="flex:1; min-width:180px; border-color:rgba(0,201,167,0.2);">
+        <div class="cache-node-icon">⚡</div>
+        <div class="cache-node-title">Cache Check</div>
+        <div class="cache-node-body">System reads <code style="font-family:var(--mono);font-size:12px;color:var(--teal)">survey_quant_cache</code>. If rows exist — serve immediately.</div>
+      </div>
+
+      <div style="color:var(--text3); font-size:20px; padding:0 4px;">→</div>
+
+      <div class="cache-node" style="flex:1; min-width:180px;">
+        <div class="cache-node-icon">🔄</div>
+        <div class="cache-node-title">Cache Miss</div>
+        <div class="cache-node-body">Full aggregation runs via SQL RPC. Results written to cache for next visit.</div>
+      </div>
+
+      <div style="color:var(--text3); font-size:20px; padding:0 4px;">→</div>
+
+      <div class="cache-node" style="flex:1; min-width:180px; border-color:rgba(232,184,75,0.2);">
+        <div class="cache-node-icon">📤</div>
+        <div class="cache-node-title">Scores Returned</div>
+        <div class="cache-node-body">Per-(unit, campus) averages delivered to the report dashboard.</div>
+      </div>
+
+    </div>
+
+    <div class="cache-status fade-up" style="margin-top:24px;">
+      <div class="cache-status-item">
+        <div class="cache-status-dot green"></div>
+        <div>
+          <div class="cache-status-title">Cache Hit</div>
+          <div class="cache-status-body">~40–200 rows read instantly. No re-aggregation. Typical response: &lt;100ms.</div>
+        </div>
+      </div>
+      <div class="cache-status-item">
+        <div class="cache-status-dot gold"></div>
+        <div>
+          <div class="cache-status-title">Cache Cleared &amp; Rebuilt</div>
+          <div class="cache-status-body">Triggered manually from Settings after a data re-import. The next report load re-runs the full aggregation and re-populates the cache.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     FOOTER
+══════════════════════════════════════════ -->
+<div class="divider"></div>
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">Student <span>Voice</span> Platform</div>
+      <div class="footer-meta">SSI Methodology · Internal Document · 2026</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Intersection Observer for fade-up animations
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.fade-up').forEach((el, i) => {
+    el.style.transitionDelay = (i * 0.05) + 's';
+    observer.observe(el);
+  });
+
+  // Animate the final score number counting up
+  function animateNumber(el, target, decimals, duration) {
+    let start = null;
+    const step = (ts) => {
+      if (!start) start = ts;
+      const progress = Math.min((ts - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      el.textContent = (target * eased).toFixed(decimals);
+      if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  const scoreEl = document.querySelector('.final-score-num');
+  if (scoreEl) {
+    const scoreObserver = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        animateNumber(scoreEl, 3.39, 2, 1200);
+        scoreObserver.unobserve(scoreEl);
+      }
+    }, { threshold: 0.5 });
+    scoreObserver.observe(scoreEl);
+  }
+
+  // Stagger pipeline nodes
+  document.querySelectorAll('.pipe-node').forEach((el, i) => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(20px)';
+    el.style.transition = `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+        obs.unobserve(el);
+      }
+    }, { threshold: 0.2 });
+    obs.observe(el);
+  });
+
+  // Stagger step cards
+  document.querySelectorAll('.step-card').forEach((el, i) => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(24px)';
+    el.style.transition = `opacity 0.6s ease ${(i % 2) * 0.15}s, transform 0.6s ease ${(i % 2) * 0.15}s`;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+        obs.unobserve(el);
+      }
+    }, { threshold: 0.1 });
+    obs.observe(el);
+  });
+</script>
+</body>
+</html>

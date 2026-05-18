@@ -119,13 +119,14 @@ export async function GET(req: NextRequest) {
     const unitOverall = new Map<number, { sum: number; count: number }>();
     const campusScoreAccum = new Map<string, { avg: number; count: number }>();
 
-    // Try cache first
-    const { data: cachedScores } = await supabase
-        .from('survey_quant_cache')
-        .select('unit_id, campus, avg_score, score_count')
-        .eq('survey_id', parseInt(surveyId));
+    // Try cache first (paginated — cache grows with units × campuses)
+    const cachedScores = await fetchAll(() =>
+        supabase.from('survey_quant_cache')
+            .select('unit_id, campus, avg_score, score_count')
+            .eq('survey_id', parseInt(surveyId))
+    );
 
-    if (cachedScores && cachedScores.length > 0) {
+    if (cachedScores.length > 0) {
         // Cache hit — populate maps from cache (~40-60 rows, instant)
         for (const row of cachedScores) {
             const unitId = row.unit_id;
@@ -143,30 +144,60 @@ export async function GET(req: NextRequest) {
             overall.count += count;
         }
     } else {
-        // Cache miss — try RPC first (fast), fall back to paginated raw query
-        const { data: rpcRows, error: rpcErr } = await supabase.rpc(
-            'get_quant_summary_by_unit_campus',
-            { p_survey_id: parseInt(surveyId) }
-        );
+        // Cache miss — try RPC first (fast), fall back to paginated raw query.
+        // The RPC groups by (unit, campus, source_column) so it returns one row per column,
+        // not one row per unit+campus. We must accumulate across columns before storing.
+        // Paginate to handle surveys with many units × campuses × columns (> 1000 rows).
+        const PAGE_RPC = 1000;
+        let rpcRows: any[] = [];
+        let rpcErr: any = null;
+        for (let from = 0; ; from += PAGE_RPC) {
+            const { data, error } = await supabase.rpc(
+                'get_quant_summary_by_unit_campus',
+                { p_survey_id: parseInt(surveyId) }
+            ).range(from, from + PAGE_RPC - 1);
+            if (error) { rpcErr = error; break; }
+            if (!data || data.length === 0) break;
+            rpcRows = rpcRows.concat(data);
+            if (data.length < PAGE_RPC) break;
+        }
 
-        if (!rpcErr && rpcRows && rpcRows.length > 0) {
-            // RPC succeeded — populate maps (excludes binary columns and non-Likert scales like NPS)
+        if (!rpcErr && rpcRows.length > 0) {
+            // Accumulate per (unit, campus) across all columns, then store final averages.
+            // Directly setting unitScores per row would overwrite earlier columns —
+            // accumulate into a staging map first (mirrors the fallback's rawAccum logic).
+            const rpcAccum = new Map<number, Map<string, { sum: number; count: number }>>();
+
             for (const row of rpcRows) {
                 const maxScore = parseFloat(row.max_score);
-                // Skip binary (≤1) and anything beyond Likert range (>5) — protects against NPS (0–10) leaking in
-                // when the RPC hasn't been updated to filter score_rule='NPS_0_10'.
+                // Skip binary (≤1) and anything beyond Likert range (>5) — protects against
+                // NPS (0–10) leaking in when the RPC hasn't been updated to filter score_rule='NPS_0_10'.
                 if (maxScore <= 1 || maxScore > 5) continue;
                 const unitId = row.unit_id;
                 const campus = row.campus || 'Unknown';
                 const avg = parseFloat(row.avg_score);
                 const count = parseInt(row.cnt);
+
+                if (!rpcAccum.has(unitId)) rpcAccum.set(unitId, new Map());
+                const campMap = rpcAccum.get(unitId)!;
+                if (!campMap.has(campus)) campMap.set(campus, { sum: 0, count: 0 });
+                const entry = campMap.get(campus)!;
+                entry.sum += avg * count;
+                entry.count += count;
+            }
+
+            for (const [unitId, campMap] of rpcAccum) {
                 if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
-                unitScores.get(unitId)!.set(campus, { avg, count });
-                campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
                 if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
-                const overall = unitOverall.get(unitId)!;
-                overall.sum += avg * count;
-                overall.count += count;
+                for (const [campus, entry] of campMap) {
+                    if (entry.count === 0) continue;
+                    const avg = entry.sum / entry.count;
+                    unitScores.get(unitId)!.set(campus, { avg, count: entry.count });
+                    campusScoreAccum.set(`${unitId}__${campus}`, { avg, count: entry.count });
+                    const overall = unitOverall.get(unitId)!;
+                    overall.sum += avg * entry.count;
+                    overall.count += entry.count;
+                }
             }
         } else {
             // RPC unavailable or returned nothing — fall back to chunked queries by respondent_id.
@@ -273,12 +304,42 @@ export async function GET(req: NextRequest) {
     }
 
     // 5b. Qualitative summary: COUNT grouped by unit × category × sentiment (~200 rows).
-    // Primary path: the qual RPC. Fallback: `ai_dataset_cache.units` (already populated by the
-    // "Rebuild Cache" flow), so the report still renders qual data even when the RPC times out.
-    const { data: qualAgg, error: qualErr } = await supabase.rpc('get_qual_summary_by_unit', {
-        p_survey_id: parseInt(surveyId),
-    });
-    if (qualErr) console.error('[qual RPC] error:', qualErr.message);
+    // Check misc cache first — avoids the statement timeout on free-tier Supabase.
+    // Cache is shared with unit-qual-summary route (same key), so whichever warms first benefits both.
+    // Fallback chain: misc cache → RPC → ai_dataset_cache (populated by Rebuild Cache flow).
+    let qualAgg: any[] | null = null;
+    const qualCacheKey = "qual_summary";
+    const { data: qualCached, error: qualCacheErr } = await supabase
+        .from("survey_misc_cache")
+        .select("data")
+        .eq("survey_id", parseInt(surveyId))
+        .eq("cache_key", qualCacheKey)
+        .maybeSingle();
+
+    if (!qualCacheErr && qualCached?.data) {
+        console.log(`[qual] Cache hit: survey ${surveyId}`);
+        qualAgg = (qualCached.data as any).rows || [];
+    } else {
+        const { data, error: qualErr } = await supabase.rpc('get_qual_summary_by_unit', {
+            p_survey_id: parseInt(surveyId),
+        });
+        if (qualErr) {
+            console.error('[qual RPC] error:', qualErr.message);
+        } else {
+            qualAgg = data;
+            if (data?.length > 0) {
+                supabase.from("survey_misc_cache")
+                    .upsert(
+                        { survey_id: parseInt(surveyId), cache_key: qualCacheKey, data: { rows: data }, updated_at: new Date().toISOString() },
+                        { onConflict: "survey_id,cache_key" }
+                    )
+                    .then(({ error: writeErr }) => {
+                        if (writeErr) console.error("[qual-cache] write error:", writeErr.message);
+                        else console.log(`[qual-cache] cached survey ${surveyId}`);
+                    });
+            }
+        }
+    }
 
     // 6. Categories lookup
     const { data: categories } = await supabase

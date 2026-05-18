@@ -6,7 +6,7 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
     try {
-        const { surveyId, stats, themes } = await req.json();
+        const { surveyId, stats, themes, category_matrix } = await req.json();
 
         if (!Array.isArray(themes) || themes.length === 0) {
             return NextResponse.json({ error: "themes required" }, { status: 400 });
@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
 You are given:
 1. Top suggestion themes (grouped by unit × category, with real student quotes and sentiment counts)
 2. Survey-level statistics
+3. A full category_matrix showing every category used by every unit (for cross-category semantic analysis)
 
 Produce a structured JSON report in EXACTLY this format:
 
@@ -39,6 +40,15 @@ Produce a structured JSON report in EXACTLY this format:
       "evidence": "Exact verbatim quote from the provided data"
     }
   ],
+  "cross_category_patterns": [
+    {
+      "unified_theme": "5-7 word name for the shared underlying concern",
+      "detail": "1-2 sentences: what students across these units are actually saying, and why this warrants institution-level attention",
+      "sources": [
+        { "unit": "Unit Name", "category": "Exact category name as given in data", "count": 45 }
+      ]
+    }
+  ],
   "recommended_actions": [
     {
       "action": "Specific, actionable step leadership can take",
@@ -52,6 +62,7 @@ Produce a structured JSON report in EXACTLY this format:
 Rules:
 - top_issues: exactly 3 items — pick the themes with the highest urgency and volume
 - bright_spots: exactly 2 items — find genuinely constructive or positive signals, even in critical data
+- cross_category_patterns: 2-4 items — use the category_matrix to find cases where DIFFERENT units use DIFFERENT category names but students are raising the SAME underlying concern (e.g. "Physical Space Issues" in one unit and "Room Conditions" in another are semantically equivalent). Skip categories that are mandatory/standard across all units (like "Staff Service & Attitude" or "Service & Response Speed"). Exclude "Others" and "Uncategorized". Only include genuine semantic matches, not just similar-sounding names.
 - recommended_actions: exactly 3 items — one Immediate, one Short-term, one Long-term
 - evidence must be exact verbatim quotes from the provided quotes in the data — never invent quotes
 - Be specific: name actual units, categories, and numbers from the data
@@ -59,7 +70,7 @@ Rules:
 
 Return ONLY valid JSON. No markdown, no explanation.
 
-${wrapUserData({ stats, themes })}`;
+${wrapUserData({ stats, themes, category_matrix })}`;
 
         let parsed: any;
         let retries = 0;

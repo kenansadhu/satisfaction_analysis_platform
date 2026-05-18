@@ -18,14 +18,24 @@ export async function GET(req: NextRequest) {
         ? categoryNamesParam.split(",").map(s => s.trim()).filter(Boolean)
         : ["Staff Service & Attitude", "Service & Response Speed"];
 
-    const [rpcResult, categoriesResult, unitsResult] = await Promise.all([
-        supabase.rpc("get_qual_summary_by_unit", { p_survey_id: parseInt(surveyId) }),
+    // Check qual_summary cache first — avoids the RPC statement timeout on free-tier Supabase.
+    // Categories and units are fast table lookups; fetch them in parallel with the cache check.
+    const [qualCachedRes, categoriesResult, unitsResult] = await Promise.all([
+        supabase.from("survey_misc_cache").select("data")
+            .eq("survey_id", parseInt(surveyId)).eq("cache_key", "qual_summary").maybeSingle(),
         supabase.from("analysis_categories").select("id, name, unit_id"),
         supabase.from("organization_units").select("id, name, short_name").order("name"),
     ]);
 
-    if (rpcResult.error) {
-        return NextResponse.json({ error: rpcResult.error.message }, { status: 500 });
+    let qualRows: any[] = [];
+    if (!qualCachedRes.error && qualCachedRes.data?.data) {
+        qualRows = (qualCachedRes.data.data as any).rows || [];
+    } else {
+        const rpcResult = await supabase.rpc("get_qual_summary_by_unit", { p_survey_id: parseInt(surveyId) });
+        if (rpcResult.error) {
+            return NextResponse.json({ error: rpcResult.error.message }, { status: 500 });
+        }
+        qualRows = rpcResult.data || [];
     }
 
     const catNameMap = new Map((categoriesResult.data || []).map(c => [c.id, c.name]));
@@ -37,7 +47,7 @@ export async function GET(req: NextRequest) {
     const accumulator = new Map<string, Map<number, Counts>>();
     for (const name of targetNames) accumulator.set(name, new Map());
 
-    for (const row of (rpcResult.data || [])) {
+    for (const row of qualRows) {
         const catName = catNameMap.get(row.category_id);
         if (!catName || !targetNames.includes(catName)) continue;
         const unitId = row.target_unit_id;

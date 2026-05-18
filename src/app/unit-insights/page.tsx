@@ -62,44 +62,40 @@ export default function UnitInsightsPage() {
         try {
             // Fetch units + NPS-unit setting in parallel; hide NPS units from this cross-unit list
             // (they have their own dedicated NPS tab on Executive Insights).
-            const [orgUnitsRes, npsRes] = await Promise.all([
-                supabase.from('organization_units')
-                    .select('id, name, short_name, description')
-                    .order('name'),
+            const [orgUnitsRes, npsRes, qualRes] = await Promise.all([
+                supabase.from('organization_units').select('id, name, short_name, description').order('name'),
                 fetch("/api/settings/nps-units").then(r => r.json()).catch(() => ({ npsUnitIds: [] })),
+                activeSurveyId && activeSurveyId !== "all"
+                    ? fetch(`/api/analytics/unit-qual-summary?surveyId=${activeSurveyId}`).then(r => r.json()).catch(() => ({ rows: [] }))
+                    : Promise.resolve({ rows: [] }),
             ]);
             const npsUnitIds = new Set<number>(npsRes?.npsUnitIds || []);
-            const orgUnits = (orgUnitsRes.data || []).filter(u => !npsUnitIds.has(u.id));
+            const orgUnits = (orgUnitsRes.data || []).filter((u: any) => !npsUnitIds.has(u.id));
 
             if (!orgUnits.length) { setUnits([]); return; }
 
             const scoreMap = new Map<number, { score?: number; total_segments: number; positive: number; negative: number; neutral: number }>();
-            if (activeSurveyId && activeSurveyId !== "all") {
-                const { data: qualAgg } = await supabase.rpc('get_qual_summary_by_unit', {
-                    p_survey_id: parseInt(activeSurveyId),
-                });
-                const unitAgg = new Map<number, { pos: number; neg: number; neu: number; total: number }>();
-                for (const row of (qualAgg || [])) {
-                    const uId = row.target_unit_id;
-                    if (!uId) continue;
-                    if (!unitAgg.has(uId)) unitAgg.set(uId, { pos: 0, neg: 0, neu: 0, total: 0 });
-                    const u = unitAgg.get(uId)!;
-                    const cnt = parseInt(row.cnt) || 0;
-                    u.total += cnt;
-                    if (row.sentiment === 'Positive') u.pos += cnt;
-                    else if (row.sentiment === 'Negative') u.neg += cnt;
-                    else if (row.sentiment === 'Neutral') u.neu += cnt;
-                }
-                for (const [unitId, agg] of unitAgg) {
-                    if (agg.total > 0) {
-                        scoreMap.set(unitId, {
-                            score: computeSentimentScore(agg.pos, agg.neu, agg.neg),
-                            total_segments: agg.total,
-                            positive: agg.pos,
-                            negative: agg.neg,
-                            neutral: agg.neu,
-                        });
-                    }
+            const unitAgg = new Map<number, { pos: number; neg: number; neu: number; total: number }>();
+            for (const row of (qualRes?.rows || [])) {
+                const uId = row.target_unit_id;
+                if (!uId) continue;
+                if (!unitAgg.has(uId)) unitAgg.set(uId, { pos: 0, neg: 0, neu: 0, total: 0 });
+                const u = unitAgg.get(uId)!;
+                const cnt = parseInt(row.cnt) || 0;
+                u.total += cnt;
+                if (row.sentiment === 'Positive') u.pos += cnt;
+                else if (row.sentiment === 'Negative') u.neg += cnt;
+                else if (row.sentiment === 'Neutral') u.neu += cnt;
+            }
+            for (const [unitId, agg] of unitAgg) {
+                if (agg.total > 0) {
+                    scoreMap.set(unitId, {
+                        score: computeSentimentScore(agg.pos, agg.neu, agg.neg),
+                        total_segments: agg.total,
+                        positive: agg.pos,
+                        negative: agg.neg,
+                        neutral: agg.neu,
+                    });
                 }
             }
 

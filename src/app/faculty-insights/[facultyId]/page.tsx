@@ -27,6 +27,14 @@ interface CategoryCount {
     positive: number; negative: number; neutral: number; total: number;
 }
 
+interface NpsAgg {
+    nps_score: number;
+    promoters: number;
+    passives: number;
+    detractors: number;
+    total: number;
+}
+
 interface StudyProgramRow {
     study_program: string;
     respondents: number;
@@ -36,6 +44,7 @@ interface StudyProgramRow {
     sentiment: Sentiment;
     top_positive_categories: CategoryCount[];
     top_negative_categories: CategoryCount[];
+    nps: NpsAgg | null;
 }
 
 interface CampusUnitRow {
@@ -87,6 +96,12 @@ function sentimentColor(s: number): string {
     return "text-red-500 dark:text-red-400";
 }
 
+function npsColor(score: number): string {
+    if (score >= 50) return "text-emerald-600 dark:text-emerald-400";
+    if (score >= 0) return "text-amber-600 dark:text-amber-400";
+    return "text-red-600 dark:text-red-400";
+}
+
 function SentimentBar({ sentiment, height = "h-1.5" }: { sentiment: Sentiment; height?: string }) {
     if (sentiment.total === 0) return (
         <div className={`${height} rounded-full bg-slate-100 dark:bg-slate-800`} />
@@ -94,7 +109,7 @@ function SentimentBar({ sentiment, height = "h-1.5" }: { sentiment: Sentiment; h
     return (
         <div className={`flex ${height} rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800`}>
             {sentiment.positive > 0 && <div style={{ width: `${sentiment.positive_pct}%` }} className="bg-emerald-500" />}
-            {sentiment.neutral > 0 && <div style={{ width: `${100 - sentiment.positive_pct - sentiment.negative_pct}%` }} className="bg-amber-400" />}
+            {sentiment.neutral > 0 && <div style={{ width: `${100 - sentiment.positive_pct - sentiment.negative_pct}%` }} className="bg-slate-300 dark:bg-slate-600" />}
             {sentiment.negative > 0 && <div style={{ width: `${sentiment.negative_pct}%` }} className="bg-red-400" />}
         </div>
     );
@@ -378,22 +393,28 @@ export default function FacultyDetailPage() {
                                             <AlertCircle className="w-5 h-5 shrink-0" />
                                             <p className="text-sm">No "Study Program" unit data found for this survey. Make sure the unit is named exactly "Study Program" and analysis has run.</p>
                                         </div>
-                                    ) : (
+                                    ) : (() => {
+                                        const hasNps = sortedPrograms.some(sp => sp.nps != null);
+                                        const gridCols = hasNps
+                                            ? "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_7.5rem_5rem_5rem]"
+                                            : "grid-cols-[minmax(0,1fr)_4.5rem_7.5rem_5rem_5rem]";
+                                        return (
                                         <div className="divide-y divide-slate-100 dark:divide-slate-800">
                                             {/* Column headers */}
-                                            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-slate-50/60 dark:bg-slate-900/40">
+                                            <div className={`grid ${gridCols} gap-3 px-5 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-slate-50/60 dark:bg-slate-900/40`}>
                                                 <span>Study Program</span>
-                                                <span className="w-20 text-center">Score</span>
-                                                <span className="w-24 text-center">Sentiment</span>
-                                                <span className="w-20 text-center">Respondents</span>
-                                                <span className="w-20 text-right">Response Rate</span>
+                                                <span className="text-center">Score</span>
+                                                {hasNps && <span className="text-center">NPS</span>}
+                                                <span className="text-center">Sentiment</span>
+                                                <span className="text-center">Respondents</span>
+                                                <span className="text-right">Rate</span>
                                             </div>
 
                                             {sortedPrograms.map((sp, i) => {
                                                 const hasCats = (sp.top_positive_categories?.length > 0) || (sp.top_negative_categories?.length > 0);
                                                 return (
-                                                    <div key={sp.study_program} className="border-b border-slate-100 dark:border-slate-800 last:border-b-0">
-                                                        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
+                                                    <div key={sp.study_program}>
+                                                        <div className={`grid ${gridCols} gap-3 items-center px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors`}>
                                                             {/* Name + rank */}
                                                             <div className="flex items-center gap-3 min-w-0">
                                                                 <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-5 shrink-0 tabular-nums">{i + 1}</span>
@@ -401,7 +422,7 @@ export default function FacultyDetailPage() {
                                                             </div>
 
                                                             {/* Avg score */}
-                                                            <div className="w-20 flex justify-center">
+                                                            <div className="flex justify-center">
                                                                 {sp.avg_score !== null ? (
                                                                     <span className={`text-base font-black tabular-nums ${scoreColor(sp.avg_score)}`}>
                                                                         {sp.avg_score}
@@ -411,8 +432,24 @@ export default function FacultyDetailPage() {
                                                                 )}
                                                             </div>
 
-                                                            {/* Sentiment */}
-                                                            <div className="w-24 space-y-1">
+                                                            {/* NPS */}
+                                                            {hasNps && (
+                                                                <div className="flex flex-col items-center gap-0.5">
+                                                                    {sp.nps != null ? (
+                                                                        <>
+                                                                            <span className={`text-base font-black tabular-nums leading-none ${npsColor(sp.nps.nps_score)}`}>
+                                                                                {sp.nps.nps_score > 0 ? "+" : ""}{sp.nps.nps_score}
+                                                                            </span>
+                                                                            <span className="text-[9px] text-slate-400 tabular-nums">{sp.nps.total} resp.</span>
+                                                                        </>
+                                                                    ) : (
+                                                                        <span className="text-xs text-slate-300">—</span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Comment Sentiment */}
+                                                            <div className="space-y-1">
                                                                 {sp.sentiment.total > 0 ? (
                                                                     <>
                                                                         <SentimentBar sentiment={sp.sentiment} />
@@ -427,12 +464,12 @@ export default function FacultyDetailPage() {
                                                             </div>
 
                                                             {/* Respondents */}
-                                                            <div className="w-20 text-center">
+                                                            <div className="text-center">
                                                                 <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 tabular-nums">{sp.respondents.toLocaleString()}</span>
                                                             </div>
 
                                                             {/* Response rate */}
-                                                            <div className="w-20 text-right">
+                                                            <div className="text-right">
                                                                 {sp.response_rate !== null ? (
                                                                     <span className={`text-sm font-bold tabular-nums ${sp.response_rate >= 80 ? "text-emerald-600" : sp.response_rate >= 50 ? "text-amber-600" : "text-red-500"}`}>
                                                                         {sp.response_rate}%
@@ -443,26 +480,37 @@ export default function FacultyDetailPage() {
                                                             </div>
                                                         </div>
 
-                                                        {/* Category chips */}
+                                                        {/* Category chips — strengths and concerns on separate rows */}
                                                         {hasCats && (
-                                                            <div className="flex flex-wrap gap-1.5 px-14 pb-3 -mt-1">
-                                                                {sp.top_positive_categories?.map(cat => (
-                                                                    <span key={`pos-${cat.category_name}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                                                                        <ThumbsUp className="w-2.5 h-2.5" /> {cat.category_name}
-                                                                    </span>
-                                                                ))}
-                                                                {sp.top_negative_categories?.map(cat => (
-                                                                    <span key={`neg-${cat.category_name}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
-                                                                        <ThumbsDown className="w-2.5 h-2.5" /> {cat.category_name}
-                                                                    </span>
-                                                                ))}
+                                                            <div className="px-5 pb-3 space-y-1.5">
+                                                                {sp.top_positive_categories?.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1.5 items-center pl-8">
+                                                                        <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mr-1">Strengths</span>
+                                                                        {sp.top_positive_categories.map(cat => (
+                                                                            <span key={`pos-${cat.category_name}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                                                                                <ThumbsUp className="w-2.5 h-2.5" /> {cat.category_name}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                                {sp.top_negative_categories?.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1.5 items-center pl-8">
+                                                                        <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mr-1">Concerns</span>
+                                                                        {sp.top_negative_categories.map(cat => (
+                                                                            <span key={`neg-${cat.category_name}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
+                                                                                <ThumbsDown className="w-2.5 h-2.5" /> {cat.category_name}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
                                                 );
                                             })}
                                         </div>
-                                    )}
+                                        )
+                                    })()}
                                 </CardContent>
                             </Card>
 
@@ -490,15 +538,15 @@ export default function FacultyDetailPage() {
                                     ) : (
                                         <div className="divide-y divide-slate-100 dark:divide-slate-800">
                                             {/* Column headers */}
-                                            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-slate-50/60 dark:bg-slate-900/40">
+                                            <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_9rem_5rem] gap-3 px-5 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider bg-slate-50/60 dark:bg-slate-900/40">
                                                 <span>Service Unit</span>
-                                                <span className="w-20 text-center">Score</span>
-                                                <span className="w-32 text-center">Sentiment</span>
-                                                <span className="w-20 text-right">Responses</span>
+                                                <span className="text-center">Score</span>
+                                                <span className="text-center">Sentiment</span>
+                                                <span className="text-right">Responses</span>
                                             </div>
 
                                             {campusExperience.units.map((unit, i) => (
-                                                <div key={unit.unit_id} className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
+                                                <div key={unit.unit_id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_9rem_5rem] gap-3 items-center px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
                                                     {/* Name */}
                                                     <div className="flex items-center gap-3 min-w-0">
                                                         <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-5 shrink-0 tabular-nums">{i + 1}</span>
@@ -511,7 +559,7 @@ export default function FacultyDetailPage() {
                                                     </div>
 
                                                     {/* Score */}
-                                                    <div className="w-20 flex justify-center">
+                                                    <div className="flex justify-center">
                                                         {unit.avg_score !== null ? (
                                                             <span className={`text-base font-black tabular-nums ${scoreColor(unit.avg_score)}`}>
                                                                 {unit.avg_score}
@@ -522,13 +570,13 @@ export default function FacultyDetailPage() {
                                                     </div>
 
                                                     {/* Sentiment */}
-                                                    <div className="w-32 space-y-1">
+                                                    <div className="space-y-1">
                                                         {unit.sentiment.total > 0 ? (
                                                             <>
                                                                 <SentimentBar sentiment={unit.sentiment} />
                                                                 <div className="flex justify-between text-[9px] font-semibold">
                                                                     <span className="text-emerald-600">{unit.sentiment.positive_pct}%</span>
-                                                                    <span className="text-amber-500">{Math.round(100 - unit.sentiment.positive_pct - unit.sentiment.negative_pct)}% neu</span>
+                                                                    <span className="text-slate-400">{Math.round(100 - unit.sentiment.positive_pct - unit.sentiment.negative_pct)}% neu</span>
                                                                     <span className="text-red-500">{unit.sentiment.negative_pct}%</span>
                                                                 </div>
                                                             </>
@@ -538,7 +586,7 @@ export default function FacultyDetailPage() {
                                                     </div>
 
                                                     {/* Response count */}
-                                                    <div className="w-20 text-right">
+                                                    <div className="text-right">
                                                         <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 tabular-nums">
                                                             {unit.score_count > 0 ? unit.score_count.toLocaleString() : unit.sentiment.total.toLocaleString()}
                                                         </span>

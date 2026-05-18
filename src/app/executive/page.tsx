@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/layout/PageShell";
-import { SentimentHeatmap, LeaderBoard } from "@/components/analytics/SentimentHeatmap";
+import { SentimentHeatmap } from "@/components/analytics/SentimentHeatmap";
 import { IssuesRadar } from "@/components/analytics/IssuesRadar";
 import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
@@ -161,7 +161,7 @@ export default function ExecutiveDashboard() {
 
                     <TabsContent value="insights" className="space-y-6 mt-0 focus-visible:ring-0">
 
-                        {/* 1. DARK HERO STRIP */}
+                        {/* 1. OVERVIEW — dark hero strip */}
                         <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-7 shadow-lg">
                             <div className="absolute -top-10 -right-10 w-56 h-56 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
                             <div className="absolute -bottom-8 left-1/3 w-40 h-40 bg-violet-500/15 rounded-full blur-3xl pointer-events-none" />
@@ -216,7 +216,7 @@ export default function ExecutiveDashboard() {
                                     <p className="text-xs text-slate-500 mt-2">with feedback data</p>
                                 </div>
 
-                                {/* NPS — only shown when at least one NPS unit is configured AND a survey is selected */}
+                                {/* NPS */}
                                 <div className="bg-white/5 rounded-xl p-5 border border-white/10 flex flex-col justify-between">
                                     <div className="flex items-center gap-2">
                                         <Target className="w-4 h-4 text-blue-400 shrink-0" />
@@ -244,62 +244,62 @@ export default function ExecutiveDashboard() {
                             </div>
                         </div>
 
-                        {/* 2. STRATEGIC SIGNALS — violet tinted band */}
-                        <div className="bg-violet-50/60 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/40 rounded-2xl p-5 space-y-5">
-                            <div className="flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-violet-500" />
-                                <h2 className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-widest">Strategic Signals</h2>
-                                <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Top praised and flagged categories across units</span>
+                        {/* 2. CATEGORY INTELLIGENCE — what topics are driving praise or problems */}
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5">
+                            <div>
+                                <div className="flex items-center gap-2 mb-0.5">
+                                    <Sparkles className="w-4 h-4 text-violet-500" />
+                                    <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Category Intelligence</h2>
+                                </div>
+                                <p className="text-xs text-slate-400 ml-6">Which topics are driving praise or problems across the institution</p>
                             </div>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <PraisesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setPraisesMax} />
                                 <IssuesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setIssuesMax} />
                             </div>
+                            {selectedSurvey && selectedSurvey !== "all" && (
+                                <>
+                                    <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
+                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Shared categories ranked by satisfaction across all units</p>
+                                        <CategoryInsightPanels surveyId={selectedSurvey} hideHeader />
+                                    </div>
+                                </>
+                            )}
                         </div>
 
-                        {/* 3. CROSS-UNIT BENCHMARKS — sky tinted band */}
-                        {selectedSurvey && selectedSurvey !== "all" && (
-                            <div className="bg-sky-50/60 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/40 rounded-2xl p-5 space-y-5">
-                                <div className="flex items-center gap-2">
-                                    <BarChart2 className="w-4 h-4 text-sky-500" />
-                                    <h2 className="text-xs font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-widest">Cross-Unit Benchmarks</h2>
-                                    <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Categories tracked across all units — ranked by positive sentiment</span>
+                        {/* 3. UNIT PERFORMANCE — action priorities + full sentiment breakdown */}
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5">
+                            <div>
+                                <div className="flex items-center gap-2 mb-0.5">
+                                    <Activity className="w-4 h-4 text-slate-500" />
+                                    <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Unit Performance</h2>
                                 </div>
-                                <CategoryInsightPanels surveyId={selectedSurvey} hideHeader />
+                                <p className="text-xs text-slate-400 ml-6">Where to focus — action priorities and full sentiment breakdown by unit</p>
                             </div>
-                        )}
+                            <ActionPriorityMatrix units={units} />
+                            <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
+                                {loading ? (
+                                    <div className="h-96 w-full bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+                                ) : (
+                                    <SentimentHeatmap units={units} surveyId={selectedSurvey ?? undefined} />
+                                )}
+                            </div>
+                        </div>
 
-                        {/* 4. ACTION PRIORITY MATRIX */}
-                        <ActionPriorityMatrix units={units} />
-
-                        {/* 5. CROSS-UNIT TRAFFIC — orange tinted band */}
+                        {/* 4. CROSS-UNIT REFERENCES — which units do students mention in other units' feedback */}
                         {selectedSurvey && selectedSurvey !== "all" && (
-                            <div className="bg-orange-50/60 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/40 rounded-2xl p-5 space-y-4">
-                                <div className="flex items-center gap-2">
-                                    <Share2 className="w-4 h-4 text-orange-500" />
-                                    <h2 className="text-xs font-semibold text-orange-700 dark:text-orange-300 uppercase tracking-widest">Cross-Unit Traffic</h2>
-                                    <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Units most referenced across other units&apos; feedback</span>
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                        <Share2 className="w-4 h-4 text-slate-500" />
+                                        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Cross-Unit References</h2>
+                                    </div>
+                                    <p className="text-xs text-slate-400 ml-6">Which units are students mentioning when giving feedback to other units</p>
                                 </div>
                                 <CrossUnitMentions surveyId={selectedSurvey} hideHeader />
                             </div>
                         )}
 
-                        {/* 6. UNIT PERFORMANCE — bento: leaderboards side by side, heatmap full-width below */}
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-2">
-                                <Activity className="w-4 h-4 text-slate-400" />
-                                <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Unit Performance</h2>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <LeaderBoard title="🏆 Top Performing Units" units={units} type="top" loading={loading} />
-                                <LeaderBoard title="⚠️ Units Needing Attention" units={units} type="bottom" loading={loading} />
-                            </div>
-                            {loading ? (
-                                <div className="h-96 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-xl animate-pulse backdrop-blur-sm border border-white/20" />
-                            ) : (
-                                <SentimentHeatmap units={units} surveyId={selectedSurvey ?? undefined} />
-                            )}
-                        </div>
                     </TabsContent>
 
                     <TabsContent value="comparison" className="mt-6 focus-visible:ring-0">

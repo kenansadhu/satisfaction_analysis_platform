@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
+import { parseSettingArray } from "@/lib/platformSettings";
 
 export const maxDuration = 120;
 
@@ -47,13 +48,28 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "facultyId and surveyId required" }, { status: 400 });
     }
 
+    // ── 0. Cache check ──────────────────────────────────────────────────────
+    const cacheKey = `faculty_detail_${facultyId}`;
+    const { data: cached, error: cacheErr } = await supabase
+        .from("survey_misc_cache")
+        .select("data")
+        .eq("survey_id", surveyId)
+        .eq("cache_key", cacheKey)
+        .maybeSingle();
+    if (!cacheErr && cached?.data) {
+        console.log(`[faculty-detail] Cache hit: survey ${surveyId} faculty ${facultyId}`);
+        return NextResponse.json(cached.data);
+    }
+
     // ── 1. Parallel lookups ─────────────────────────────────────────────────
-    const [facultyResult, unitsResult, enrollResult, categoriesResult] = await Promise.all([
+    const [facultyResult, unitsResult, enrollResult, categoriesResult, npsSettingRes] = await Promise.all([
         supabase.from("faculties").select("id, name, short_name, description").eq("id", facultyId).single(),
         supabase.from("organization_units").select("id, name, short_name"),
         supabase.from("prodi_enrollment").select("study_program, student_count").eq("survey_id", surveyId),
         supabase.from("analysis_categories").select("id, name, unit_id"),
+        supabase.from("platform_settings").select("value").eq("key", "nps_unit_ids").maybeSingle(),
     ]);
+    const npsUnitIds: number[] = parseSettingArray<number>(npsSettingRes.data?.value);
 
     if (!facultyResult.data) {
         return NextResponse.json({ error: "Faculty not found" }, { status: 404 });
@@ -106,6 +122,34 @@ export async function GET(req: NextRequest) {
             programQuality: { unit: studyProgramUnit, overallScore: null, overallSentiment: sentimentStats(emptySentiment()), studyPrograms: [] },
             campusExperience: { units: [] },
         });
+    }
+
+    // ── 2.5. Dedicated NPS fetch — scoped to NPS units only ─────────────────
+    // NPS units have ≤2 inputs per respondent so 400-respondent chunks stay well under 1000 rows.
+    const NPS_CHUNK = 400;
+    const progNpsMap = new Map<string, { promoters: number; passives: number; detractors: number; total: number }>();
+    if (npsUnitIds.length > 0) {
+        for (let i = 0; i < allRespIds.length; i += NPS_CHUNK) {
+            const chunk = allRespIds.slice(i, i + NPS_CHUNK);
+            const { data: npsInputs } = await supabase
+                .from("raw_feedback_inputs")
+                .select("respondent_id, numerical_score")
+                .in("respondent_id", chunk)
+                .in("target_unit_id", npsUnitIds)
+                .eq("score_rule", "NPS_0_10")
+                .not("numerical_score", "is", null);
+            for (const inp of (npsInputs || [])) {
+                const studyProg = respStudyProgramMap.get(inp.respondent_id) || "Unknown";
+                if (studyProg === "Unknown") continue;
+                if (!progNpsMap.has(studyProg)) progNpsMap.set(studyProg, { promoters: 0, passives: 0, detractors: 0, total: 0 });
+                const n = progNpsMap.get(studyProg)!;
+                n.total++;
+                const score = Number(inp.numerical_score);
+                if (score >= 9) n.promoters++;
+                else if (score >= 7) n.passives++;
+                else n.detractors++;
+            }
+        }
     }
 
     // ── 3. Batch-fetch raw_feedback_inputs (chunk by 40 respondents) ────────
@@ -230,6 +274,7 @@ export async function GET(req: NextRequest) {
             const scoreAcc = progScoreAccum.get(sp);
             const raw = progSentimentMap.get(sp) || emptySentiment();
             const topCategories = resolveTopCategories(progCatMap.get(sp) || new Map());
+            const npsAgg = progNpsMap.get(sp);
             return {
                 study_program: sp,
                 respondents: respondentCount,
@@ -239,6 +284,13 @@ export async function GET(req: NextRequest) {
                 sentiment: sentimentStats(raw),
                 top_positive_categories: topCategories.top_positive,
                 top_negative_categories: topCategories.top_negative,
+                nps: npsAgg && npsAgg.total > 0 ? {
+                    nps_score: parseFloat(((npsAgg.promoters - npsAgg.detractors) / npsAgg.total * 100).toFixed(1)),
+                    promoters: npsAgg.promoters,
+                    passives: npsAgg.passives,
+                    detractors: npsAgg.detractors,
+                    total: npsAgg.total,
+                } : null,
             };
         })
         .sort((a, b) => (b.avg_score ?? -1) - (a.avg_score ?? -1));
@@ -292,7 +344,7 @@ export async function GET(req: NextRequest) {
         return sentimentStats(agg);
     })();
 
-    return NextResponse.json({
+    const responsePayload = {
         faculty,
         totalRespondents,
         totalEnrolled,
@@ -308,5 +360,18 @@ export async function GET(req: NextRequest) {
             overallSentiment: overallCampusSentiment,
             units: campusUnits,
         },
-    });
+    };
+
+    // Write to cache (fire-and-forget)
+    supabase.from("survey_misc_cache")
+        .upsert(
+            { survey_id: surveyId, cache_key: cacheKey, data: responsePayload, updated_at: new Date().toISOString() },
+            { onConflict: "survey_id,cache_key" }
+        )
+        .then(({ error: writeErr }) => {
+            if (writeErr) console.error("[faculty-detail-cache] write error:", writeErr.message);
+            else console.log(`[faculty-detail-cache] cached survey ${surveyId} faculty ${facultyId}`);
+        });
+
+    return NextResponse.json(responsePayload);
 }

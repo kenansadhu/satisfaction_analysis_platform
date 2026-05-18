@@ -20,6 +20,17 @@ export async function GET(req: NextRequest) {
     if (!surveyId) return NextResponse.json({ error: "surveyId required" }, { status: 400 });
     const sid = parseInt(surveyId);
 
+    // 0. Cache check — survey_nps_cache stores the full response JSON
+    const { data: npsCache, error: npsCacheErr } = await supabase
+        .from("survey_nps_cache")
+        .select("data")
+        .eq("survey_id", sid)
+        .maybeSingle();
+    if (!npsCacheErr && npsCache?.data) {
+        console.log(`[nps] Cache hit for survey ${sid}`);
+        return NextResponse.json(npsCache.data);
+    }
+
     // 1. NPS-unit setting + organization units
     const [npsSettingRes, unitsRes] = await Promise.all([
         supabase.from("platform_settings").select("value").eq("key", "nps_unit_ids").maybeSingle(),
@@ -416,7 +427,7 @@ export async function GET(req: NextRequest) {
         })
         .sort((a, b) => a.faculty.localeCompare(b.faculty) || a.unit_id - b.unit_id);
 
-    return NextResponse.json({
+    const responsePayload = {
         units: unitsResult,
         faculties: facultiesResult,
         totals: {
@@ -427,5 +438,15 @@ export async function GET(req: NextRequest) {
             promoters: totals.promoter,
         },
         qualitative: Array.from(qualByUnit.values()),
-    });
+    };
+
+    // Write to cache (fire-and-forget — don't block the response)
+    supabase.from("survey_nps_cache")
+        .upsert({ survey_id: sid, data: responsePayload, updated_at: new Date().toISOString() }, { onConflict: "survey_id" })
+        .then(({ error }) => {
+            if (error) console.error("[nps-cache] write error:", error.message);
+            else console.log(`[nps-cache] cached survey ${sid}`);
+        });
+
+    return NextResponse.json(responsePayload);
 }

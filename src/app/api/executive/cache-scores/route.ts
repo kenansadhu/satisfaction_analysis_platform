@@ -15,6 +15,8 @@ export async function POST(req: NextRequest) {
         supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),
         supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid),
         supabase.from('survey_faculty_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_nps_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_misc_cache').delete().eq('survey_id', sid),
         supabase.from('surveys').update({ ai_dataset_cache: null, ai_dataset_updated_at: null }).eq('id', sid),
         supabase.from('survey_ai_reports').delete().eq('survey_id', sid),
     ]);
@@ -29,16 +31,18 @@ export async function DELETE(req: NextRequest) {
     }
 
     const sid = parseInt(surveyId);
-    const [q, c, f, fc, a, r] = await Promise.all([
+    const [q, c, f, fc, nps, misc, a, r] = await Promise.all([
         supabase.from('survey_quant_cache').delete().eq('survey_id', sid),
         supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),
         supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid),
         supabase.from('survey_faculty_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_nps_cache').delete().eq('survey_id', sid),
+        supabase.from('survey_misc_cache').delete().eq('survey_id', sid),
         supabase.from('surveys').update({ ai_dataset_cache: null, ai_dataset_updated_at: null }).eq('id', sid),
         supabase.from('survey_ai_reports').delete().eq('survey_id', sid),
     ]);
 
-    const err = q.error || c.error || f.error || fc.error || a.error || r.error;
+    const err = q.error || c.error || f.error || fc.error || nps.error || misc.error || a.error || r.error;
     if (err) return NextResponse.json({ error: err.message }, { status: 500 });
 
     return NextResponse.json({ message: `Cache cleared for survey ${surveyId}` });

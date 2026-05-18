@@ -28,11 +28,12 @@ export default function SettingsPage() {
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Rebuild cache state
-    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'done' | 'error';
+    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_faculty_detail' | 'done' | 'error';
     const [rebuildStep, setRebuildStep] = useState<RebuildStep>('idle');
     const [rebuildElapsed, setRebuildElapsed] = useState(0);
     const [rebuildError, setRebuildError] = useState<string | null>(null);
     const [buildSummary, setBuildSummary] = useState<{ analyzed_units: number; total_org_units: number; cached_units: number; suggestions_count: number } | null>(null);
+    const [warmFacultyProgress, setWarmFacultyProgress] = useState<{ current: number; total: number } | null>(null);
     const [aiCacheUpdatedAt, setAiCacheUpdatedAt] = useState<string | null>(null);
     const rebuildTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -66,11 +67,26 @@ export default function SettingsPage() {
     }, [activeSurveyId]);
 
     const REBUILD_STEPS: { key: RebuildStep; label: string }[] = [
-        { key: 'clearing', label: 'Clearing existing caches' },
-        { key: 'phase1',   label: 'Building analysis dataset' },
-        { key: 'phase2',   label: 'Indexing suggestions' },
-        { key: 'done',     label: 'Complete' },
+        { key: 'clearing',            label: 'Clearing existing caches' },
+        { key: 'phase1',              label: 'Building analysis dataset' },
+        { key: 'phase2',              label: 'Indexing suggestions' },
+        { key: 'warm_report',         label: 'Warming report & scores cache' },
+        { key: 'warm_nps',            label: 'Warming NPS cache' },
+        { key: 'warm_radar',          label: 'Warming radar charts cache' },
+        { key: 'warm_qual',           label: 'Warming qualitative summary' },
+        { key: 'warm_faculty_list',      label: 'Warming faculty list cache' },
+        { key: 'warm_cross_mentions',    label: 'Warming cross-unit mentions cache' },
+        { key: 'warm_dependency_graph',  label: 'Warming dependency graph cache' },
+        { key: 'warm_faculty_detail',    label: 'Warming faculty detail caches' },
+        { key: 'done',                   label: 'Complete' },
     ];
+
+    const STEP_PROGRESS: Partial<Record<RebuildStep, number>> = {
+        clearing: 5, phase1: 20, phase2: 37,
+        warm_report: 48, warm_nps: 57, warm_radar: 63,
+        warm_qual: 69, warm_faculty_list: 74,
+        warm_cross_mentions: 79, warm_dependency_graph: 83, warm_faculty_detail: 91,
+    };
 
     const formatElapsed = (secs: number) => {
         const m = Math.floor(secs / 60);
@@ -84,9 +100,10 @@ export default function SettingsPage() {
         setRebuildElapsed(0);
         setRebuildError(null);
         setBuildSummary(null);
+        setWarmFacultyProgress(null);
         rebuildTimerRef.current = setInterval(() => setRebuildElapsed(e => e + 1), 1000);
         try {
-            // Step 1: clear all caches (quant, cross-mentions, faculty, ai_dataset, ai_reports)
+            // Step 1: clear all caches
             const clearRes = await fetch(`/api/executive/cache-scores?surveyId=${activeSurveyId}`, { method: 'POST' });
             if (!clearRes.ok) throw new Error('Failed to clear caches');
 
@@ -119,8 +136,48 @@ export default function SettingsPage() {
             setBuildSummary(summary);
             try { localStorage.setItem(`ai_build_summary_${activeSurveyId}`, JSON.stringify(summary)); } catch {}
             setAiCacheUpdatedAt(new Date().toISOString());
+
+            // Steps 4–9: pre-warm all insight caches so every page loads instantly.
+            // Errors here are non-fatal — the page will just compute on first access instead.
+            setRebuildStep('warm_report');
+            await fetch(`/api/executive/report?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_nps');
+            await fetch(`/api/executive/nps?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_radar');
+            await Promise.all([
+                fetch(`/api/analytics/radar-aggregation?surveyId=${activeSurveyId}&sentiment=Positive`).catch(() => {}),
+                fetch(`/api/analytics/radar-aggregation?surveyId=${activeSurveyId}&sentiment=Negative`).catch(() => {}),
+            ]);
+
+            setRebuildStep('warm_qual');
+            await fetch(`/api/analytics/unit-qual-summary?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_faculty_list');
+            await fetch(`/api/executive/faculty-list?surveyId=${activeSurveyId}`).catch(() => {});
+
+            // Cross-mentions must warm before dependency-graph — the graph reads from its cache.
+            setRebuildStep('warm_cross_mentions');
+            await fetch(`/api/executive/cross-unit-mentions?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_dependency_graph');
+            await fetch(`/api/analytics/dependency-graph?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_faculty_detail');
+            const { supabase: sb } = await import("@/lib/supabase");
+            const { data: faculties } = await sb.from('faculties').select('id');
+            if (faculties?.length) {
+                setWarmFacultyProgress({ current: 0, total: faculties.length });
+                for (let i = 0; i < faculties.length; i++) {
+                    await fetch(`/api/executive/faculty-detail?surveyId=${activeSurveyId}&facultyId=${faculties[i].id}`).catch(() => {});
+                    setWarmFacultyProgress({ current: i + 1, total: faculties.length });
+                }
+                setWarmFacultyProgress(null);
+            }
+
             setRebuildStep('done');
-            toast.success(`Cache rebuilt! ${summary.analyzed_units}/${summary.total_org_units} units · ${summary.suggestions_count.toLocaleString()} suggestions indexed.`);
+            toast.success(`Cache rebuilt & warmed! ${summary.analyzed_units}/${summary.total_org_units} units · ${summary.suggestions_count.toLocaleString()} suggestions indexed.`);
         } catch (e: any) {
             setRebuildError(e.message || 'Rebuild failed');
             setRebuildStep('error');
@@ -130,7 +187,7 @@ export default function SettingsPage() {
         }
     };
 
-    const isRebuilding = rebuildStep === 'clearing' || rebuildStep === 'phase1' || rebuildStep === 'phase2';
+    const isRebuilding = rebuildStep !== 'idle' && rebuildStep !== 'done' && rebuildStep !== 'error';
 
     useEffect(() => {
         fetch("/api/settings/excluded-score-units")
@@ -334,7 +391,7 @@ export default function SettingsPage() {
                             <CardTitle className="text-base">Data Cache</CardTitle>
                         </div>
                         <CardDescription>
-                            Rebuild all caches after importing new survey data. Clears existing caches, then recomputes the full analysis dataset and suggestions index. Run this once after each import — takes a few minutes.
+                            Rebuild all caches after importing new survey data. Clears existing caches, recomputes the full analysis dataset and suggestions, then pre-warms every report and insight page. Run once after each import — takes 5–15 minutes locally, but all pages load instantly afterwards for every user.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -384,7 +441,6 @@ export default function SettingsPage() {
                                         const currentIdx = REBUILD_STEPS.findIndex(x => x.key === rebuildStep);
                                         const isDone = rebuildStep === 'done' || i < currentIdx;
                                         const isCurrent = s.key === rebuildStep;
-                                        const isPending = !isDone && !isCurrent;
                                         return (
                                             <div key={s.key} className="flex items-center gap-2.5">
                                                 <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold border-2 transition-colors ${
@@ -399,6 +455,11 @@ export default function SettingsPage() {
                                                     isCurrent ? 'text-slate-800 dark:text-slate-200 font-medium' :
                                                                 'text-slate-400 dark:text-slate-600'
                                                 }`}>{s.label}</span>
+                                                {isCurrent && s.key === 'warm_faculty_detail' && warmFacultyProgress && warmFacultyProgress.total > 0 && (
+                                                    <span className="text-[10px] text-slate-400 shrink-0 tabular-nums">
+                                                        {warmFacultyProgress.current}/{warmFacultyProgress.total}
+                                                    </span>
+                                                )}
                                                 {isCurrent && rebuildStep !== 'done' && (
                                                     <Loader2 className="w-3 h-3 animate-spin text-indigo-500 shrink-0" />
                                                 )}
@@ -408,7 +469,7 @@ export default function SettingsPage() {
                                     {/* Progress bar */}
                                     {isRebuilding && (
                                         <Progress
-                                            value={rebuildStep === 'clearing' ? 10 : rebuildStep === 'phase1' ? 40 : 75}
+                                            value={STEP_PROGRESS[rebuildStep] ?? 5}
                                             className="h-1.5 mt-1"
                                         />
                                     )}

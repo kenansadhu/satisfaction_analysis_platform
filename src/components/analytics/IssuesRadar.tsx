@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyId: string, maxDomain?: number, onMaxCalculated?: (max: number) => void }) {
@@ -15,80 +14,33 @@ export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyId
         const fetchRadarData = async () => {
             setLoading(true);
             try {
-                const { data: aggregatedIssues, error } = await supabase.rpc('get_sentiment_aggregation', {
-                    p_survey_id: surveyId === "all" ? null : parseInt(surveyId),
-                    p_sentiment: 'Negative'
-                });
+                const res = await fetch(`/api/analytics/radar-aggregation?surveyId=${surveyId}&sentiment=Negative`);
+                const json = await res.json();
 
-                if (error) {
-                    console.error("Failed to fetch radar aggregation:", error.message || error);
+                if (!res.ok) {
+                    console.error("Failed to fetch radar aggregation:", json.error);
                     setData([]);
                     return;
                 }
 
-                if (!aggregatedIssues || aggregatedIssues.length === 0) {
-                    setData([]);
-                    return;
-                }
+                const rows: any[] = json.rows || [];
+                if (rows.length === 0) { setData([]); return; }
 
-                // Format into the structure the existing downstream map expects
-                const defectCounts: Record<string, number> = {};
-                const uniqueCids = new Set<number>();
-                const uniqueUids = new Set<number>();
-
-                aggregatedIssues.forEach((row: any) => {
-                    const cid = row.category_id;
-                    const uid = row.unit_id;
-                    const count = row.segment_count;
-
-                    if (cid && uid) {
-                        const key = `${cid}_${uid}`;
-                        defectCounts[key] = count;
-                        uniqueCids.add(cid);
-                        uniqueUids.add(uid);
-                    }
-                });
-
-                if (Object.keys(defectCounts).length === 0) {
-                    setData([]);
-                    return;
-                }
-
-                // Fetch Category Names and Unit Names in parallel
-                const [catRes, unitRes] = await Promise.all([
-                    supabase.from('analysis_categories').select('id, name').in('id', Array.from(uniqueCids)),
-                    supabase.from('organization_units').select('id, name, short_name').in('id', Array.from(uniqueUids))
-                ]);
-
-                const catMap = new Map(catRes.data?.map(c => [c.id, c.name]));
-                const unitMap = new Map(unitRes.data?.map(u => [u.id, u]));
-
-                // Format for Recharts
-                const radarData = Object.entries(defectCounts).map(([key, count]) => {
-                    const [cid, uid] = key.split('_').map(Number);
-                    const catName = catMap.get(cid) || "Other";
-                    const unitObj = unitMap.get(uid);
-
-                    const unitName = unitObj?.name || "Unknown Unit";
-                    const unitShortName = unitObj?.short_name || unitName;
-
-                    return {
-                        subject: `${unitShortName} - ${catName}`,
-                        fullSubject: `${unitName} - ${catName}`,
-                        value: count as number,
-                        fullMark: Math.max(...Object.values(defectCounts)) + 5
-                    };
-                });
+                const maxCount = Math.max(...rows.map((r: any) => r.segment_count));
+                const radarData = rows.map((r: any) => ({
+                    subject: `${r.unit_short_name} - ${r.category_name}`,
+                    fullSubject: `${r.unit_name} - ${r.category_name}`,
+                    value: r.segment_count,
+                    fullMark: maxCount + 5,
+                }));
 
                 const topIssues = radarData.sort((a, b) => b.value - a.value).slice(0, 6);
 
                 if (onMaxCalculated) {
-                    const localMax = Math.max(...radarData.map(d => d.value), 0);
-                    onMaxCalculated(localMax);
+                    onMaxCalculated(Math.max(...radarData.map(d => d.value), 0));
                 }
 
                 setData(topIssues);
-
             } catch (err) {
                 console.error("Failed to fetch radar data", err);
             } finally {

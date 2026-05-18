@@ -21,7 +21,13 @@
       "PowerShell($procs = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue; if \\($procs\\) { $procs | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }; Write-Host \"Port 3000 cleared\")",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\" -Directory)",
       "Bash(Select-Object Name)",
-      "mcp__claude_ai_Supabase__execute_sql"
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Bash(dir /s \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\")",
+      "Bash(dir \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\")",
+      "Bash(dir \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\\\\executive\")",
+      "Bash(dir /b \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\\\\api\")",
+      "Bash(ls -la src/)",
+      "Bash(ls -la app/)"
     ],
     "additionalDirectories": [
       "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",
