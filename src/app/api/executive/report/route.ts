@@ -313,7 +313,15 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        // Store to cache (fire-and-forget, don't block response)
+        // Store to cache (fire-and-forget, don't block response).
+        //
+        // PRECISION: store the full float64 value, NOT a pre-rounded toFixed(3).
+        // The display layer rounds once to 2 decimals at output time. If we pre-round
+        // here, values near a tie-break (e.g., true value 3.27499...) get rounded UP
+        // to 3.275 here, then UP again to 3.28 at display — while the Google Sheet
+        // rounds the true value directly to 3.27. That double-rounding was the cause
+        // of the +0.01 diffs on Library Surabaya, RO Jakarta, Prodi Medan, ITD Jakarta.
+        // Postgres `numeric` preserves the full JS float64 precision (~15-17 digits).
         const cacheRows: any[] = [];
         for (const [unitId, campusMap] of unitScores) {
             for (const [campus, entry] of campusMap) {
@@ -321,7 +329,7 @@ export async function GET(req: NextRequest) {
                     survey_id: parseInt(surveyId),
                     unit_id: unitId,
                     campus,
-                    avg_score: parseFloat(entry.avg.toFixed(3)),
+                    avg_score: entry.avg,
                     score_count: entry.count,
                 });
             }
@@ -519,28 +527,46 @@ export async function GET(req: NextRequest) {
         };
     }).filter(u => !excludedUnitIds.includes(u.unit_id) && (u.satisfaction_index !== null || (u.qualitative && u.qualitative.total > 0)));
 
-    // Global satisfaction index — excludes opted-out units
-    let globalSum = 0, globalCount = 0;
+    // Global + per-campus SSI — MACRO across units, consistent with the per-unit
+    // calculation. Each unit gets equal weight regardless of respondent count,
+    // matching the same Google-Sheet workflow that drives the per-unit numbers.
+    //
+    // Previous behavior was respondent-weighted micro (sum of resp_macro × resp_count
+    // / total respondents across units), which gave units with more participation
+    // disproportionate influence on the overall score.
+    //
+    //   Campus SSI = arithmetic mean of unit-campus avgs at that campus (skip n/a)
+    //   Global SSI = arithmetic mean of unit cross-campus avgs
+
+    // Per-campus: collect each unit's avg at that campus, then average.
+    const campusUnitAvgs = new Map<string, number[]>();
+    for (const [unitId, campusMap] of unitScores) {
+        if (excludedUnitIds.includes(unitId)) continue;
+        for (const [campus, entry] of campusMap) {
+            if (entry.count === 0) continue;
+            if (!campusUnitAvgs.has(campus)) campusUnitAvgs.set(campus, []);
+            campusUnitAvgs.get(campus)!.push(entry.avg);
+        }
+    }
+    const campusSatisfaction = Array.from(campusUnitAvgs.entries()).map(([campus, avgs]) => ({
+        campus,
+        satisfaction_index: avgs.length > 0
+            ? parseFloat((avgs.reduce((s, v) => s + v, 0) / avgs.length).toFixed(2))
+            : null,
+    }));
+
+    // Global: macro across units. Each unit's cross-campus avg (unitOverall.sum/count
+    // = respondent-weighted mean of per-campus resp-macros = the unit's overall SSI)
+    // contributes equally.
+    const unitOverallAvgs: number[] = [];
     for (const [unitId, entry] of unitOverall.entries()) {
         if (excludedUnitIds.includes(unitId)) continue;
-        globalSum += entry.sum;
-        globalCount += entry.count;
+        if (entry.count === 0) continue;
+        unitOverallAvgs.push(entry.sum / entry.count);
     }
-
-    // Per-campus satisfaction index — excludes opted-out units
-    const campusSatMap = new Map<string, { sum: number; count: number }>();
-    for (const [key, acc] of campusScoreAccum) {
-        const [unitIdStr, campus] = key.split('__');
-        if (excludedUnitIds.includes(parseInt(unitIdStr))) continue;
-        if (!campusSatMap.has(campus)) campusSatMap.set(campus, { sum: 0, count: 0 });
-        const entry = campusSatMap.get(campus)!;
-        entry.sum += acc.avg * acc.count;
-        entry.count += acc.count;
-    }
-    const campusSatisfaction = Array.from(campusSatMap.entries()).map(([campus, entry]) => ({
-        campus,
-        satisfaction_index: parseFloat((entry.sum / entry.count).toFixed(2)),
-    }));
+    const globalSatisfactionIndex = unitOverallAvgs.length > 0
+        ? parseFloat((unitOverallAvgs.reduce((s, v) => s + v, 0) / unitOverallAvgs.length).toFixed(2))
+        : null;
 
     return NextResponse.json({
         survey,
@@ -549,7 +575,7 @@ export async function GET(req: NextRequest) {
         responseRate: totalEnrolled > 0 ? parseFloat((respList.length / totalEnrolled * 100).toFixed(1)) : null,
         campusParticipation,
         prodiParticipation: prodiParticipationEnriched.slice(0, 150),
-        globalSatisfactionIndex: globalCount > 0 ? parseFloat((globalSum / globalCount).toFixed(2)) : null,
+        globalSatisfactionIndex,
         campusSatisfaction,
         campuses: allCampuses,
         units: unitReports,

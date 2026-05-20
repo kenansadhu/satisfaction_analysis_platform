@@ -65,6 +65,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     // Quantitative
     const [quantGroups, setQuantGroups] = useState<QuestionGroup[]>([]);
     const [globalAvgScore, setGlobalAvgScore] = useState<string>("N/A");
+    // Per-column subgroup assignment loaded from survey_column_cache. Drives the
+    // subgroup-aware per-respondent macro that computes the unit's headline SSI.
+    const [subgroupByColumn, setSubgroupByColumn] = useState<Map<string, string | null>>(new Map());
 
     // Filter Options & Active State
     const [filterOptions, setFilterOptions] = useState<{ locations: string[], faculties: string[], programs: string[] }>({ locations: [], faculties: [], programs: [] });
@@ -100,7 +103,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
             setIsFiltering(false);
         }, 30);
         return () => clearTimeout(timer);
-    }, [activeFilters, baseRawInputs, baseScores, baseCatScores]);
+    }, [activeFilters, baseRawInputs, baseScores, baseCatScores, subgroupByColumn]);
 
     useEffect(() => {
         if (!unitId || !surveyId || isCurrentlyAnalyzing) { setIncomingMentions(null); return; }
@@ -153,6 +156,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
             const respIds = Array.from(respMap.keys());
 
             const CHUNK = 200;
+            // Paginate within each respondent chunk to dodge Supabase's silent
+            // 1000-row response cap. For a unit with ~10 questions × 200 respondents
+            // that's ~2000 rows per query, which would otherwise be truncated and
+            // give an undercounted globalAvgScore.
+            const PAGE = 1000;
             const fetchByRespondentChunks = async (
                 select: string,
                 filterFn: (q: any) => any
@@ -164,21 +172,32 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                     const chunks: number[][] = [];
                     for (let i = 0; i < respIds.length; i += CHUNK) chunks.push(respIds.slice(i, i + CHUNK));
 
-                    for (let b = 0; b < chunks.length; b += MAX_CONCURRENT) {
-                        const batch = chunks.slice(b, b + MAX_CONCURRENT);
-                        const results = await Promise.all(batch.map(async (chunk) => {
+                    const fetchChunkAllPages = async (chunk: number[]): Promise<any[]> => {
+                        const out: any[] = [];
+                        let from = 0;
+                        while (true) {
                             let q = supabase.from('raw_feedback_inputs')
                                 .select(select)
                                 .eq('target_unit_id', unitId)
-                                .in('respondent_id', chunk);
+                                .in('respondent_id', chunk)
+                                .range(from, from + PAGE - 1);
                             const { data, error } = await filterFn(q);
                             if (error) {
                                 console.error(`🔴 Supabase chunk error:`, error);
                                 toast.error(`Data fetch warning: ${error.message}`);
-                                return [];
+                                break;
                             }
-                            return data || [];
-                        }));
+                            const rows = data || [];
+                            out.push(...rows);
+                            if (rows.length < PAGE) break;
+                            from += PAGE;
+                        }
+                        return out;
+                    };
+
+                    for (let b = 0; b < chunks.length; b += MAX_CONCURRENT) {
+                        const batch = chunks.slice(b, b + MAX_CONCURRENT);
+                        const results = await Promise.all(batch.map(fetchChunkAllPages));
                         for (const result of results) allData.push(...result);
                     }
                 } else {
@@ -212,7 +231,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                     (q) => q.eq('is_quantitative', true).not('numerical_score', 'is', null)
                 ),
                 surveyId
-                    ? supabase.from('survey_column_cache').select('source_column, column_type').eq('survey_id', parseInt(surveyId))
+                    ? supabase.from('survey_column_cache').select('source_column, column_type, subgroup_name').eq('survey_id', parseInt(surveyId))
                     : Promise.resolve({ data: [] }),
             ]);
 
@@ -224,6 +243,13 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                     .filter((r: any) => r.column_type)
                     .map((r: any) => [r.source_column, r.column_type as string])
             );
+            // Subgroup map drives the per-respondent macro roll-up below.
+            // null = column is its own implicit single-column bucket.
+            const subgroupMap = new Map<string, string | null>(
+                ((colTypeCacheRes as any).data || [])
+                    .map((r: any) => [r.source_column, r.subgroup_name ?? null])
+            );
+            setSubgroupByColumn(subgroupMap);
             const colsWithSegments = new Set<string>();
             qData.forEach((r: any) => {
                 if (r.feedback_segments && r.feedback_segments.length > 0) colsWithSegments.add(r.source_column);
@@ -398,8 +424,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                 grouped[key].totalResponses++;
             });
 
-            let totalSum = 0;
-            let totalCount = 0;
+            // Compute per-question max so we can identify SSI-included (Likert,
+            // 1 < max ≤ 5) columns. Also colour the chart bars by score band.
+            const includedCols = new Set<string>();
             Object.values(grouped).forEach(g => {
                 let gSum = 0;
                 const maxVal = Math.max(...g.chartData.map(d => parseFloat(d.name)));
@@ -418,10 +445,49 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                 });
                 g.average = g.totalResponses > 0 ? (gSum / g.totalResponses).toFixed(2) : "0.00";
                 g.chartData.sort((a, b) => parseFloat(a.name) - parseFloat(b.name));
-                if (maxVal > 1) { totalSum += gSum; totalCount += g.totalResponses; }
+                if (maxVal > 1 && maxVal <= 5) includedCols.add(g.question);
             });
-            if (totalCount > 0) setGlobalAvgScore((totalSum / totalCount).toFixed(2));
-            else setGlobalAvgScore("N/A");
+
+            // Headline SSI = per-respondent macro with subgroup-aware bucketing
+            // (same methodology as the Executive Report tab):
+            //   per respondent → bucket their answers by subgroup_name (unassigned
+            //     cols are single-column buckets keyed by source_column)
+            //   bucket avg = mean of their answers in that bucket
+            //   respondent's unit score = mean of bucket avgs
+            //   unit SSI = mean of per-respondent unit scores
+            const respBuckets = new Map<number, Map<string, { sum: number; n: number }>>();
+            scores?.forEach(row => {
+                if (!includedCols.has(row.source_column)) return;
+                // subgroupByColumn is component state set during initial data fetch
+                // (this filter callback reruns whenever filters change but the
+                // subgroup mapping is per-survey, not per-filter).
+                const sub = subgroupByColumn.get(row.source_column) ?? null;
+                const bucket = sub ?? `__col__::${row.source_column}`;
+                if (!respBuckets.has(row.respondent_id)) respBuckets.set(row.respondent_id, new Map());
+                const buckets = respBuckets.get(row.respondent_id)!;
+                if (!buckets.has(bucket)) buckets.set(bucket, { sum: 0, n: 0 });
+                const b = buckets.get(bucket)!;
+                b.sum += row.numerical_score;
+                b.n++;
+            });
+            const respScores: number[] = [];
+            for (const [, buckets] of respBuckets) {
+                let sumOfBucketAvgs = 0;
+                let bucketCount = 0;
+                for (const [, b] of buckets) {
+                    if (b.n === 0) continue;
+                    sumOfBucketAvgs += b.sum / b.n;
+                    bucketCount++;
+                }
+                if (bucketCount === 0) continue;
+                respScores.push(sumOfBucketAvgs / bucketCount);
+            }
+            if (respScores.length > 0) {
+                const m = respScores.reduce((s, v) => s + v, 0) / respScores.length;
+                setGlobalAvgScore(m.toFixed(2));
+            } else {
+                setGlobalAvgScore("N/A");
+            }
 
             const catGrouped: Record<string, QuestionGroup> = {};
             catScores?.forEach(row => {

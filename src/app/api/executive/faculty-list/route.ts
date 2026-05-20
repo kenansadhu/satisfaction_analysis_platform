@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
+import {
+    fetchScoreRowsForRespondents,
+    loadSubgroupMap,
+    computeRespondentUnitScores,
+    mean,
+} from "@/lib/ssi";
 
 export const maxDuration = 300;
 
@@ -91,66 +97,37 @@ export async function GET(req: NextRequest) {
     }
     const respIds = [...respFacultyMap.keys()];
 
-    // 5. Fetch raw_feedback_inputs scores chunked by respondent_id (avoids the slow `!inner`
-    //    join + pagination pattern that times out on large surveys). Parallel waves for throughput.
-    type ColAccum = { sum: number; count: number; max: number };
-    const facPQAccum = new Map<string, Map<string, ColAccum>>();
-    const facCEAccum = new Map<string, Map<string, ColAccum>>();
+    // 5. Fetch raw rows (with proper 1000-row-page pagination) and the per-column
+    //    subgroup map. Then compute per-(respondent, unit) macro scores so we can
+    //    aggregate PQ and CE the same way the Executive Report does.
+    const [allRows, subgroupByColumn] = await Promise.all([
+        fetchScoreRowsForRespondents(supabase, respIds),
+        loadSubgroupMap(supabase, sid),
+    ]);
+    const respUnitScores = computeRespondentUnitScores(allRows, subgroupByColumn);
 
-    const RESP_CHUNK = 50;
-    const PARALLEL = 5;
-
-    for (let bStart = 0; bStart < respIds.length; bStart += RESP_CHUNK * PARALLEL) {
-        const wave: Promise<{ data: any[] | null; error: any }>[] = [];
-        for (let i = bStart; i < Math.min(bStart + RESP_CHUNK * PARALLEL, respIds.length); i += RESP_CHUNK) {
-            const chunk = respIds.slice(i, i + RESP_CHUNK);
-            wave.push((async () => {
-                const r = await supabase
-                    .from("raw_feedback_inputs")
-                    .select("target_unit_id, source_column, numerical_score, score_rule, respondent_id")
-                    .in("respondent_id", chunk)
-                    .eq("is_quantitative", true)
-                    .not("numerical_score", "is", null)
-                    .not("target_unit_id", "is", null)
-                    .neq("score_rule", "NPS_0_10");
-                return { data: r.data, error: r.error };
-            })());
-        }
-        const results = await Promise.all(wave);
-        for (const res of results) {
-            if (res.error) {
-                console.error("[faculty-list] score chunk error:", res.error.message);
-                continue;
-            }
-            for (const row of (res.data || [])) {
-                const faculty = respFacultyMap.get(row.respondent_id) || "Unknown";
-                const col = row.source_column as string;
-                const score = parseFloat(row.numerical_score);
-                const unitId = row.target_unit_id as number;
-                const isPQ = studyProgramUnitId !== null && unitId === studyProgramUnitId;
-                const accMap = isPQ ? facPQAccum : facCEAccum;
-
-                if (!accMap.has(faculty)) accMap.set(faculty, new Map());
-                const colMap = accMap.get(faculty)!;
-                if (!colMap.has(col)) colMap.set(col, { sum: 0, count: 0, max: 0 });
-                const entry = colMap.get(col)!;
-                entry.sum += score;
-                entry.count++;
-                if (score > entry.max) entry.max = score;
-            }
+    // 6. Per faculty, split per-respondent scores into Program Quality (the
+    //    Study Program unit) and Campus Experience (every other unit). Each
+    //    respondent's CE score = mean of their per-unit scores across non-SP
+    //    units — equal weight per unit, matching the Executive Report's macro
+    //    aggregation for the global SSI.
+    //
+    //    Faculty PQ = mean of resp_pq_scores for respondents in this faculty.
+    //    Faculty CE = mean of resp_ce_scores for respondents in this faculty.
+    const respPqScore = new Map<number, number>(); // respondent_id → PQ score
+    const respCeScores = new Map<number, number[]>(); // respondent_id → list of per-unit scores
+    for (const r of respUnitScores) {
+        if (studyProgramUnitId !== null && r.unit_id === studyProgramUnitId) {
+            respPqScore.set(r.respondent_id, r.score);
+        } else {
+            if (!respCeScores.has(r.respondent_id)) respCeScores.set(r.respondent_id, []);
+            respCeScores.get(r.respondent_id)!.push(r.score);
         }
     }
-
-    // 6. Aggregate scores per faculty — only Likert columns (1 < max ≤ 5)
-    // Excludes binary (≤1) and non-Likert scales like NPS (>5) as a safety net.
-    function aggregateScore(colMap: Map<string, ColAccum>) {
-        let sum = 0, count = 0;
-        for (const [, entry] of colMap) {
-            if (entry.max <= 1 || entry.max > 5) continue;
-            sum += entry.sum;
-            count += entry.count;
-        }
-        return count > 0 ? { avg: parseFloat((sum / count).toFixed(2)), count } : { avg: null as null, count: 0 };
+    const respCeScore = new Map<number, number>();
+    for (const [respId, scores] of respCeScores) {
+        const m = mean(scores);
+        if (m !== null) respCeScore.set(respId, m);
     }
 
     // 7. Build result and write cache (fire-and-forget)
@@ -161,18 +138,32 @@ export async function GET(req: NextRequest) {
     for (const fac of allFaculties) {
         const respondents = respCountMap.get(fac) || 0;
         const enrolled = facEnrollMap.get(fac) || 0;
-        const pq = aggregateScore(facPQAccum.get(fac) || new Map());
-        const ce = aggregateScore(facCEAccum.get(fac) || new Map());
 
-        faculties.push(buildEntry(fac, respondents, enrolled, pq.avg, ce.avg, sentMap.get(fac) ?? null));
+        // Collect per-respondent PQ + CE scores for respondents in this faculty
+        const pqScores: number[] = [];
+        const ceScores: number[] = [];
+        for (const [respId, facName] of respFacultyMap) {
+            if (facName !== fac) continue;
+            const pq = respPqScore.get(respId);
+            if (pq !== undefined) pqScores.push(pq);
+            const ce = respCeScore.get(respId);
+            if (ce !== undefined) ceScores.push(ce);
+        }
+        const pqAvg = mean(pqScores);
+        const ceAvg = mean(ceScores);
+        const pqDisplay = pqAvg !== null ? parseFloat(pqAvg.toFixed(2)) : null;
+        const ceDisplay = ceAvg !== null ? parseFloat(ceAvg.toFixed(2)) : null;
+
+        faculties.push(buildEntry(fac, respondents, enrolled, pqDisplay, ceDisplay, sentMap.get(fac) ?? null));
         cacheRows.push({
             survey_id: sid,
             faculty: fac,
             respondents,
-            pq_avg_score: pq.avg,
-            pq_score_count: pq.count,
-            ce_avg_score: ce.avg,
-            ce_score_count: ce.count,
+            // Store full precision so the display layer can round once.
+            pq_avg_score: pqAvg,
+            pq_score_count: pqScores.length,
+            ce_avg_score: ceAvg,
+            ce_score_count: ceScores.length,
         });
     }
 

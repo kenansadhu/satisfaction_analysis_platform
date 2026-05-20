@@ -107,6 +107,20 @@ export default function SettingsPage() {
             const clearRes = await fetch(`/api/executive/cache-scores?surveyId=${activeSurveyId}`, { method: 'POST' });
             if (!clearRes.ok) throw new Error('Failed to clear caches');
 
+            // Robust parser: if a route returned an HTML/text error page (e.g. Next.js's
+            // default "An error occurred while processing your request"), surface the
+            // first chunk of the body as the error instead of crashing on JSON.parse.
+            const parsePhase = async (res: Response, label: string) => {
+                const txt = await res.text();
+                let parsed: any = null;
+                try { parsed = txt ? JSON.parse(txt) : null; } catch { /* not JSON */ }
+                if (!res.ok) {
+                    const msg = parsed?.error || (txt ? txt.slice(0, 200) : `${label} failed (${res.status})`);
+                    throw new Error(`${label}: ${msg}`);
+                }
+                return parsed ?? {};
+            };
+
             // Step 2: heavy compute — analysis metrics
             setRebuildStep('phase1');
             const res1 = await fetch('/api/ai/cache-global-dataset', {
@@ -114,8 +128,7 @@ export default function SettingsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ surveyId: activeSurveyId, phase: 1 }),
             });
-            const data1 = await res1.json();
-            if (!res1.ok) throw new Error(data1.error || 'Phase 1 failed');
+            const data1 = await parsePhase(res1, 'Phase 1');
 
             // Step 3: suggestions merge
             setRebuildStep('phase2');
@@ -124,8 +137,7 @@ export default function SettingsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ surveyId: activeSurveyId, phase: 2 }),
             });
-            const data2 = await res2.json();
-            if (!res2.ok) throw new Error(data2.error || 'Phase 2 failed');
+            const data2 = await parsePhase(res2, 'Phase 2');
 
             const summary = {
                 total_org_units: data1.total_org_units ?? 0,

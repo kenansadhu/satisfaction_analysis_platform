@@ -290,7 +290,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                 campusStatsOut[campus] = {
                     n: acc.n,
                     sum: acc.sum,
-                    avg: avg !== null ? parseFloat(avg.toFixed(4)) : null,
+                    avg: avg !== null ? parseFloat(avg.toFixed(10)) : null,
                     distribution: acc.distribution,
                     na: acc.na,
                 };
@@ -329,7 +329,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                 total: {
                     n: entry.total.n,
                     sum: entry.total.sum,
-                    avg: totalAvg !== null ? parseFloat(totalAvg.toFixed(4)) : null,
+                    avg: totalAvg !== null ? parseFloat(totalAvg.toFixed(10)) : null,
                     distribution: entry.total.distribution,
                     na: entry.total.na,
                 },
@@ -373,11 +373,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                 cacheOverallN += cached.count;
             }
             perCampusOut[campus] = {
-                micro_avg: micro && micro.n > 0 ? parseFloat((micro.sum / micro.n).toFixed(4)) : null,
-                macro_avg: macro && macro.cols > 0 ? parseFloat((macro.sumOfAvgs / macro.cols).toFixed(4)) : null,
-                resp_macro_avg: respMc && respMc.respCount > 0 ? parseFloat((respMc.sumOfRespAvgs / respMc.respCount).toFixed(4)) : null,
+                micro_avg: micro && micro.n > 0 ? parseFloat((micro.sum / micro.n).toFixed(10)) : null,
+                macro_avg: macro && macro.cols > 0 ? parseFloat((macro.sumOfAvgs / macro.cols).toFixed(10)) : null,
+                resp_macro_avg: respMc && respMc.respCount > 0 ? parseFloat((respMc.sumOfRespAvgs / respMc.respCount).toFixed(10)) : null,
                 resp_macro_n: respMc?.respCount ?? 0,
-                cache_avg: cached ? parseFloat(cached.avg.toFixed(4)) : null,
+                cache_avg: cached ? parseFloat(cached.avg.toFixed(10)) : null,
                 cache_n: cached?.count ?? null,
                 n: micro?.n || 0,
                 columns_used: macro?.cols || 0,
@@ -396,7 +396,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                     macro_avg: null,
                     resp_macro_avg: null,
                     resp_macro_n: 0,
-                    cache_avg: parseFloat(cached.avg.toFixed(4)),
+                    cache_avg: parseFloat(cached.avg.toFixed(10)),
                     cache_n: cached.count,
                     n: 0,
                     columns_used: 0,
@@ -412,11 +412,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
             summary: {
                 per_campus: perCampusOut,
                 overall: {
-                    micro_avg: overallMicroN > 0 ? parseFloat((overallMicroSum / overallMicroN).toFixed(4)) : null,
-                    macro_avg: overallMacroCols > 0 ? parseFloat((overallMacroSumOfAvgs / overallMacroCols).toFixed(4)) : null,
-                    resp_macro_avg: overallRespMacroCount > 0 ? parseFloat((overallRespMacroSum / overallRespMacroCount).toFixed(4)) : null,
+                    micro_avg: overallMicroN > 0 ? parseFloat((overallMicroSum / overallMicroN).toFixed(10)) : null,
+                    macro_avg: overallMacroCols > 0 ? parseFloat((overallMacroSumOfAvgs / overallMacroCols).toFixed(10)) : null,
+                    resp_macro_avg: overallRespMacroCount > 0 ? parseFloat((overallRespMacroSum / overallRespMacroCount).toFixed(10)) : null,
                     resp_macro_n: overallRespMacroCount,
-                    cache_avg: cacheOverallN > 0 ? parseFloat((cacheOverallSum / cacheOverallN).toFixed(4)) : null,
+                    cache_avg: cacheOverallN > 0 ? parseFloat((cacheOverallSum / cacheOverallN).toFixed(10)) : null,
                     cache_n: cacheOverallN,
                     n: overallMicroN,
                     columns_used: overallMacroCols,

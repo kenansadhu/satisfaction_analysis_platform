@@ -3,6 +3,7 @@ import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { computeSentimentScore } from "@/lib/utils";
 import { addToCounts, computeNpsScore, emptyNpsCounts, NpsCounts } from "@/lib/nps";
 import { parseSettingArray } from "@/lib/platformSettings";
+import { loadSubgroupMap, computeRespondentUnitScores, mean, type RawScoreRow } from "@/lib/ssi";
 
 export const maxDuration = 300;
 
@@ -17,20 +18,28 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Survey ID required" }, { status: 400 });
         }
 
-        if (phase === 2) return runPhase2(surveyId);
-        return runPhase1(surveyId);
+        // IMPORTANT: `await` the phase functions. Returning the Promise directly
+        // ends the try-block before any internal rejections can surface, so the
+        // framework's default error handler runs and returns the plain-text
+        // "An error occurred while processing your request" — which then crashes
+        // res.json() on the client with "Unexpected token 'A'".
+        if (phase === 2) return await runPhase2(surveyId);
+        return await runPhase1(surveyId);
     } catch (e: any) {
-        return NextResponse.json({ error: e.message }, { status: 500 });
+        console.error("[cache-global-dataset] failed:", e);
+        return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
     }
 }
 
 // ── Phase 1: fetch all data, compute metrics, write cache (suggestions = []) ──
 
 async function runPhase1(surveyId: string) {
-    // 0. Survey name
+    // 0. Survey name (column is `title`, not `name` — older code had this wrong;
+    // the .single() returned null + an error which was silently swallowed,
+    // making every cached dataset say "Survey <id>" instead of the real title.)
     const { data: surveyRow } = await supabase
-        .from('surveys').select('name').eq('id', parseInt(surveyId)).single();
-    const surveyName = (surveyRow as any)?.name || `Survey ${surveyId}`;
+        .from('surveys').select('title').eq('id', parseInt(surveyId)).single();
+    const surveyName = (surveyRow as any)?.title || `Survey ${surveyId}`;
 
     // 1. Units + NPS unit setting
     const [unitsRes, npsSettingRes] = await Promise.all([
@@ -230,26 +239,35 @@ async function runPhase1(surveyId: string) {
         };
     }).sort((a, b) => a.unit_id - b.unit_id || a.question.localeCompare(b.question));
 
-    // 8. Faculty summary
+    // 8. Faculty summary — per-respondent macro per (faculty, unit), matching
+    //    what Faculty Insights and the Executive Report display. AI prompts read
+    //    this field, so keeping it on the same methodology avoids the AI quoting
+    //    numbers that drift from the UI.
     const respMetaMap = new Map(respondentsData.map(r => [r.id, r]));
-    const facUnitAgg = new Map<string, { sum: number; count: number; unitId: number; faculty: string }>();
-    for (const row of quantRows) {
-        const meta = respMetaMap.get(row.respondent_id);
-        if (!meta?.faculty || !row.target_unit_id) continue;
-        const k = `${meta.faculty}::${row.target_unit_id}`;
-        if (!facUnitAgg.has(k)) facUnitAgg.set(k, { sum: 0, count: 0, unitId: row.target_unit_id, faculty: meta.faculty });
-        const e = facUnitAgg.get(k)!;
-        e.sum += Number(row.numerical_score);
-        e.count++;
+    const subgroupByColumn = await loadSubgroupMap(supabase, parseInt(surveyId));
+    const respUnitScores = computeRespondentUnitScores(
+        quantRows as RawScoreRow[],
+        subgroupByColumn,
+    );
+    const facUnitScores = new Map<string, { unitId: number; faculty: string; scores: number[] }>();
+    for (const r of respUnitScores) {
+        const meta = respMetaMap.get(r.respondent_id);
+        if (!meta?.faculty) continue;
+        const k = `${meta.faculty}::${r.unit_id}`;
+        if (!facUnitScores.has(k)) facUnitScores.set(k, { unitId: r.unit_id, faculty: meta.faculty, scores: [] });
+        facUnitScores.get(k)!.scores.push(r.score);
     }
-    const facultiesSummary = Array.from(facUnitAgg.values()).map(v => ({
-        faculty: v.faculty,
-        unit_id: v.unitId,
-        unit_name: (unitsMap.get(v.unitId) as any)?.name || `Unit ${v.unitId}`,
-        unit_short_name: (unitsMap.get(v.unitId) as any)?.short_name || null,
-        avg_score: parseFloat((v.sum / v.count).toFixed(2)),
-        count: v.count,
-    })).sort((a, b) => a.faculty.localeCompare(b.faculty) || a.unit_id - b.unit_id);
+    const facultiesSummary = Array.from(facUnitScores.values()).map(v => {
+        const m = mean(v.scores);
+        return {
+            faculty: v.faculty,
+            unit_id: v.unitId,
+            unit_name: (unitsMap.get(v.unitId) as any)?.name || `Unit ${v.unitId}`,
+            unit_short_name: (unitsMap.get(v.unitId) as any)?.short_name || null,
+            avg_score: m !== null ? parseFloat(m.toFixed(2)) : null,
+            count: v.scores.length,
+        };
+    }).sort((a, b) => a.faculty.localeCompare(b.faculty) || a.unit_id - b.unit_id);
 
     // 9. Survey context
     const faculties = [...new Set(respondentsData.map(r => r.faculty).filter(Boolean))].sort() as string[];

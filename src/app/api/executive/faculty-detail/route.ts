@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 import { parseSettingArray } from "@/lib/platformSettings";
+import {
+    fetchScoreRowsForRespondents,
+    loadSubgroupMap,
+    computeRespondentUnitScores,
+    mean,
+} from "@/lib/ssi";
 
 export const maxDuration = 120;
 
@@ -153,7 +159,10 @@ export async function GET(req: NextRequest) {
     }
 
     // ── 3. Batch-fetch raw_feedback_inputs (chunk by 40 respondents) ────────
-    // INPUT_CHUNK=40: 40 respondents × ~20 questions = ~800 rows per query, safely under 1000
+    // We still need id+sentiment data via the inputs table so we can map segments
+    // → unit/study_program below. Score computation now uses computeRespondentUnitScores
+    // (per-respondent macro with subgroup-aware bucketing) — see lib/ssi.ts.
+    // INPUT_CHUNK=40 and SEG_CHUNK=400 still apply; we paginate the score fetch separately.
     type InputRow = { id: number; respondent_id: number; target_unit_id: number | null; is_quantitative: boolean; numerical_score: number | null; score_rule: string | null; source_column: string };
     const allInputs = await batchFetch<InputRow>(allRespIds, INPUT_CHUNK, async (chunk) => {
         const { data } = await supabase.from("raw_feedback_inputs")
@@ -162,41 +171,41 @@ export async function GET(req: NextRequest) {
         return (data || []) as InputRow[];
     });
 
-    // Track max score per column to filter binary (0/1) questions
-    const colMaxScore = new Map<string, number>();
+    // Map input → unit + study_program for the segments-walk below.
     const inputUnitMap = new Map<number, number | null>();
     const inputStudyProgramMap = new Map<number, string>();
-    const progScoreAccum = new Map<string, { sum: number; count: number }>();
-    const unitScoreAccum = new Map<number, { sum: number; count: number }>();
-
     for (const inp of allInputs) {
         inputUnitMap.set(inp.id, inp.target_unit_id);
         inputStudyProgramMap.set(inp.id, respStudyProgramMap.get(inp.respondent_id) || "Unknown");
-        if (inp.is_quantitative && inp.numerical_score !== null && inp.score_rule !== "NPS_0_10") {
-            const cur = colMaxScore.get(inp.source_column) ?? 0;
-            if (inp.numerical_score > cur) colMaxScore.set(inp.source_column, inp.numerical_score);
+    }
+
+    // ── 3b. Compute per-(respondent, unit) macro scores using the shared helper ─
+    //   - Per respondent, group scores by subgroup_name (unassigned cols are their own
+    //     buckets), avg per bucket, then avg across buckets → respondent's unit score.
+    //   - The helper handles SSI-included filtering (max > 1, ≤ 5) and the 1000-row
+    //     pagination cap that bit the old implementation.
+    const subgroupByColumn = await loadSubgroupMap(supabase, surveyId);
+    const scoreRows = await fetchScoreRowsForRespondents(supabase, allRespIds);
+    const respUnitScores = computeRespondentUnitScores(scoreRows, subgroupByColumn);
+
+    // Per study_program: collect Study Program unit scores for respondents in that program.
+    const progRespScores = new Map<string, number[]>();
+    // Per service unit: collect per-respondent scores for respondents in this faculty.
+    const unitRespScores = new Map<number, number[]>();
+
+    for (const r of respUnitScores) {
+        const studyProg = respStudyProgramMap.get(r.respondent_id) || "Unknown";
+        if (studyProgramUnitId !== null && r.unit_id === studyProgramUnitId) {
+            if (!progRespScores.has(studyProg)) progRespScores.set(studyProg, []);
+            progRespScores.get(studyProg)!.push(r.score);
+        } else if (serviceUnitMap.has(r.unit_id)) {
+            if (!unitRespScores.has(r.unit_id)) unitRespScores.set(r.unit_id, []);
+            unitRespScores.get(r.unit_id)!.push(r.score);
         }
     }
 
-    for (const inp of allInputs) {
-        if (!inp.is_quantitative || inp.numerical_score === null) continue;
-        if (inp.score_rule === "NPS_0_10") continue; // NPS is 0–10, not Likert — aggregated separately
-        const colMax = colMaxScore.get(inp.source_column) ?? 0;
-        if (colMax <= 1 || colMax > 5) continue; // binary or non-Likert scale
-
-        const studyProg = inputStudyProgramMap.get(inp.id) || "Unknown";
-        const unitId = inp.target_unit_id;
-
-        if (unitId === studyProgramUnitId && studyProgramUnitId !== null) {
-            if (!progScoreAccum.has(studyProg)) progScoreAccum.set(studyProg, { sum: 0, count: 0 });
-            const a = progScoreAccum.get(studyProg)!;
-            a.sum += inp.numerical_score; a.count++;
-        } else if (unitId !== null && serviceUnitMap.has(unitId)) {
-            if (!unitScoreAccum.has(unitId)) unitScoreAccum.set(unitId, { sum: 0, count: 0 });
-            const a = unitScoreAccum.get(unitId)!;
-            a.sum += inp.numerical_score; a.count++;
-        }
-    }
+    // Convenience: mean of an array, undefined-safe for the legacy callsites below.
+    const meanOf = (arr: number[] | undefined) => arr && arr.length > 0 ? mean(arr) : null;
 
     // ── 4. Batch-fetch feedback_segments (chunk by 400 input IDs) ───────────
     // SEG_CHUNK=400: each input has ~1-2 segments → ~400-800 rows per query, safely under 1000
@@ -271,7 +280,7 @@ export async function GET(req: NextRequest) {
         .map(sp => {
             const respondentCount = studyProgramRespCount.get(sp) || 0;
             const enrolled = enrollMap.get(sp) ?? null;
-            const scoreAcc = progScoreAccum.get(sp);
+            const spScore = meanOf(progRespScores.get(sp));
             const raw = progSentimentMap.get(sp) || emptySentiment();
             const topCategories = resolveTopCategories(progCatMap.get(sp) || new Map());
             const npsAgg = progNpsMap.get(sp);
@@ -280,7 +289,7 @@ export async function GET(req: NextRequest) {
                 respondents: respondentCount,
                 enrolled,
                 response_rate: enrolled ? parseFloat((respondentCount / enrolled * 100).toFixed(1)) : null,
-                avg_score: scoreAcc ? parseFloat((scoreAcc.sum / scoreAcc.count).toFixed(2)) : null,
+                avg_score: spScore !== null ? parseFloat(spScore.toFixed(2)) : null,
                 sentiment: sentimentStats(raw),
                 top_positive_categories: topCategories.top_positive,
                 top_negative_categories: topCategories.top_negative,
@@ -297,14 +306,15 @@ export async function GET(req: NextRequest) {
 
     const campusUnits = [...serviceUnitMap.values()]
         .map(unit => {
-            const scoreAcc = unitScoreAccum.get(unit.id);
+            const respScores = unitRespScores.get(unit.id);
+            const unitScore = meanOf(respScores);
             const raw = unitSentimentMap.get(unit.id) || emptySentiment();
             return {
                 unit_id: unit.id,
                 unit_name: unit.name,
                 short_name: unit.short_name,
-                avg_score: scoreAcc ? parseFloat((scoreAcc.sum / scoreAcc.count).toFixed(2)) : null,
-                score_count: scoreAcc?.count || 0,
+                avg_score: unitScore !== null ? parseFloat(unitScore.toFixed(2)) : null,
+                score_count: respScores?.length || 0,
                 sentiment: sentimentStats(raw),
             };
         })
@@ -314,10 +324,14 @@ export async function GET(req: NextRequest) {
     const totalRespondents = respondents.length;
     const totalEnrolled = knownStudyPrograms.reduce((s, sp) => s + (enrollMap.get(sp) || 0), 0);
 
+    // Overall program quality for the faculty = mean of per-respondent Study Program
+    // scores across every respondent in the faculty (each respondent contributes once).
+    // Equivalent to the faculty-list cache's pq_avg_score.
     const overallProgScore = (() => {
-        let sum = 0, count = 0;
-        for (const acc of progScoreAccum.values()) { sum += acc.sum; count += acc.count; }
-        return count > 0 ? parseFloat((sum / count).toFixed(2)) : null;
+        const all: number[] = [];
+        for (const arr of progRespScores.values()) all.push(...arr);
+        const m = mean(all);
+        return m !== null ? parseFloat(m.toFixed(2)) : null;
     })();
 
     const overallProgSentiment = (() => {
@@ -329,10 +343,25 @@ export async function GET(req: NextRequest) {
         return sentimentStats(agg);
     })();
 
+    // Overall campus experience for the faculty = per-respondent macro across
+    // service units (each respondent's CE score = mean of their per-unit scores
+    // across non-Study-Program units; faculty CE = mean of those). Matches the
+    // faculty-list cache's ce_avg_score so both pages agree.
     const overallCampusScore = (() => {
-        let sum = 0, count = 0;
-        for (const acc of unitScoreAccum.values()) { sum += acc.sum; count += acc.count; }
-        return count > 0 ? parseFloat((sum / count).toFixed(2)) : null;
+        const respCe = new Map<number, number[]>();
+        for (const r of respUnitScores) {
+            if (studyProgramUnitId !== null && r.unit_id === studyProgramUnitId) continue;
+            if (!serviceUnitMap.has(r.unit_id)) continue;
+            if (!respCe.has(r.respondent_id)) respCe.set(r.respondent_id, []);
+            respCe.get(r.respondent_id)!.push(r.score);
+        }
+        const perRespCe: number[] = [];
+        for (const [, scores] of respCe) {
+            const m = mean(scores);
+            if (m !== null) perRespCe.push(m);
+        }
+        const m = mean(perRespCe);
+        return m !== null ? parseFloat(m.toFixed(2)) : null;
     })();
 
     const overallCampusSentiment = (() => {

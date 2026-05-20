@@ -38,15 +38,22 @@ export async function GET(req: Request) {
 }
 
 async function fetchSingleSurveyData(surveyId: number) {
-    const [infoRes, metrics, rpcRes, rates, campus] = await Promise.all([
+    // Read SSI from survey_quant_cache (now stores per-respondent macro per
+    // unit × campus, matching the Executive Report tab). The legacy
+    // get_report_aggregates RPC produced a micro-average that no longer matches
+    // the Sheet workflow. If the cache hasn't been built yet for a survey,
+    // uphIndex will be null until the user rebuilds via Settings.
+    const [infoRes, metrics, quantCache, rates, campus] = await Promise.all([
         supabase.from('surveys').select('id, title, year').eq('id', surveyId).single(),
         fetchSurveyMetrics(surveyId),
-        supabase.rpc('get_report_aggregates', { p_survey_id: surveyId }),
+        supabase.from('survey_quant_cache')
+            .select('unit_id, campus, avg_score, score_count')
+            .eq('survey_id', surveyId),
         fetchResponseRates(surveyId),
         fetchCampusParticipation(surveyId),
     ]);
 
-    const quant = buildSatisfactionIndex(rpcRes.data);
+    const quant = buildSatisfactionIndex(quantCache.data || []);
 
     return {
         info: infoRes.data,
@@ -58,26 +65,37 @@ async function fetchSingleSurveyData(surveyId: number) {
     };
 }
 
-function buildSatisfactionIndex(rpcResult: any) {
-    const rows: any[] = rpcResult?.unit_campus_scores || [];
+/**
+ * Build per-unit + global SSI from survey_quant_cache rows.
+ * Each row's avg_score is the per-respondent macro for (unit, campus), and
+ * score_count is the number of respondents who contributed.
+ *
+ *   Unit overall = respondent-weighted mean across campuses (= global per-respondent
+ *                  macro for that unit, by construction).
+ *   Global SSI   = arithmetic mean of unit overalls (equal weight per unit).
+ */
+function buildSatisfactionIndex(
+    rows: Array<{ unit_id: number; campus: string; avg_score: number | string; score_count: number }>,
+) {
     const unitMap: Record<number, { sum: number; count: number }> = {};
-    let globalSum = 0, globalCount = 0;
-
     for (const row of rows) {
-        const uid = row.target_unit_id;
-        const avg = parseFloat(row.avg_score);
-        const count = parseInt(row.score_count);
+        const uid = row.unit_id;
+        const avg = parseFloat(String(row.avg_score));
+        const count = Number(row.score_count);
+        if (!isFinite(avg) || count <= 0) continue;
         if (!unitMap[uid]) unitMap[uid] = { sum: 0, count: 0 };
         unitMap[uid].sum += avg * count;
         unitMap[uid].count += count;
-        globalSum += avg * count;
-        globalCount += count;
     }
-
-    return {
-        overall: globalCount > 0 ? parseFloat((globalSum / globalCount).toFixed(2)) : null,
-        units: unitMap,
-    };
+    const unitAvgs: number[] = [];
+    for (const u of Object.values(unitMap)) {
+        if (u.count === 0) continue;
+        unitAvgs.push(u.sum / u.count);
+    }
+    const overall = unitAvgs.length > 0
+        ? parseFloat((unitAvgs.reduce((s, v) => s + v, 0) / unitAvgs.length).toFixed(2))
+        : null;
+    return { overall, units: unitMap };
 }
 
 async function fetchSurveyMetrics(surveyId: number) {
