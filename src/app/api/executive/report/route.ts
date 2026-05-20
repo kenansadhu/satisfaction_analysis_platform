@@ -144,140 +144,172 @@ export async function GET(req: NextRequest) {
             overall.count += count;
         }
     } else {
-        // Cache miss — try RPC first (fast), fall back to paginated raw query.
-        // The RPC groups by (unit, campus, source_column) so it returns one row per column,
-        // not one row per unit+campus. We must accumulate across columns before storing.
-        // Paginate to handle surveys with many units × campuses × columns (> 1000 rows).
-        const PAGE_RPC = 1000;
-        let rpcRows: any[] = [];
-        let rpcErr: any = null;
-        for (let from = 0; ; from += PAGE_RPC) {
-            const { data, error } = await supabase.rpc(
-                'get_quant_summary_by_unit_campus',
-                { p_survey_id: parseInt(surveyId) }
-            ).range(from, from + PAGE_RPC - 1);
-            if (error) { rpcErr = error; break; }
-            if (!data || data.length === 0) break;
-            rpcRows = rpcRows.concat(data);
-            if (data.length < PAGE_RPC) break;
+        // Cache miss — recompute from raw_feedback_inputs and store per-respondent
+        // macro averages with optional subgroup roll-up. This matches the Google
+        // Sheet workflow: compute each respondent's average per subgroup, then
+        // average their subgroup-averages, then average across respondents.
+        //
+        // Subgroup behavior:
+        //   - Columns without a subgroup_name are treated as their own single-column
+        //     subgroup (keyed by source_column). For units that haven't defined any
+        //     subgroups, this is mathematically identical to flat per-respondent
+        //     macro — every individual column contributes equally to a respondent's
+        //     unit score. This preserves prior behavior.
+        //   - Columns assigned to a named subgroup roll up: a respondent's
+        //     subgroup score = avg of their answers to that subgroup's columns,
+        //     and the named subgroup counts as ONE bucket no matter how many
+        //     columns it contains.
+        //
+        // Example — IT Department with score_subgroups=["Mobile App"], 4 mobile
+        // columns assigned to "Mobile App" and 1 wifi column left unassigned:
+        //   Per respondent: their_score = avg(avg(mobile_cols_they_answered), wifi_answer)
+        //   Unit×campus SSI = avg of those per-respondent scores
+        //
+        // Stored shape (cache schema unchanged):
+        //   avg_score   = per-respondent macro for (unit, campus)
+        //   score_count = number of respondents who contributed ≥1 SSI-included answer
+
+        // Load per-column subgroup assignments from survey_column_cache. NULL means
+        // "treat as individual column" (the column becomes its own subgroup keyed by
+        // source_column). The Manage UI and import flow write to this same table.
+        const { data: colCacheRows } = await supabase
+            .from('survey_column_cache')
+            .select('source_column, subgroup_name')
+            .eq('survey_id', parseInt(surveyId));
+        const subgroupByColumn = new Map<string, string | null>(
+            (colCacheRows || []).map((r: any) => [r.source_column, r.subgroup_name ?? null])
+        );
+
+        // unitId → sourceColumn → max numerical_score (to identify SSI-included cols)
+        const colMaxByUnit = new Map<number, Map<string, number>>();
+        // unitId → campus → respondentId → { sum, n } over SSI-included cols
+        // (we keep this raw and finalise after determining included cols below)
+        type RowLite = { target_unit_id: number; source_column: string; numerical_score: number; respondent_id: number };
+        const rows: RowLite[] = [];
+
+        // CRITICAL: Supabase caps each response at 1000 rows. With 16+ units and
+        // 5–10+ score columns each, 50 respondents per chunk easily exceeds 1000
+        // rows and gets silently truncated. Paginate each chunk until exhausted.
+        const RESP_CHUNK = 50;
+        const PARALLEL = 5;
+        const RAW_PAGE = 1000;
+
+        const fetchChunkAllPages = async (chunk: number[]): Promise<{ data: any[]; error: any }> => {
+            const out: any[] = [];
+            let from = 0;
+            while (true) {
+                const r = await supabase
+                    .from('raw_feedback_inputs')
+                    .select('target_unit_id, source_column, numerical_score, respondent_id')
+                    .in('respondent_id', chunk)
+                    .eq('is_quantitative', true)
+                    .not('numerical_score', 'is', null)
+                    .not('target_unit_id', 'is', null)
+                    .neq('score_rule', 'NPS_0_10')
+                    .range(from, from + RAW_PAGE - 1);
+                if (r.error) return { data: out, error: r.error };
+                const page = r.data || [];
+                out.push(...page);
+                if (page.length < RAW_PAGE) break;
+                from += RAW_PAGE;
+            }
+            return { data: out, error: null };
+        };
+
+        for (let bStart = 0; bStart < respIds.length; bStart += RESP_CHUNK * PARALLEL) {
+            const wave: Promise<{ data: any[]; error: any }>[] = [];
+            for (let i = bStart; i < Math.min(bStart + RESP_CHUNK * PARALLEL, respIds.length); i += RESP_CHUNK) {
+                const chunk = respIds.slice(i, i + RESP_CHUNK);
+                wave.push(fetchChunkAllPages(chunk));
+            }
+            const results = await Promise.all(wave);
+
+            for (const res of results) {
+                if (res.error) {
+                    console.error('[quant rebuild] chunk error:', res.error.message);
+                    continue;
+                }
+                for (const row of (res.data || [])) {
+                    const unitId = row.target_unit_id as number;
+                    const col = row.source_column as string;
+                    const score = parseFloat(row.numerical_score);
+                    if (isNaN(score)) continue;
+
+                    // Track per-column max so we can drop binary (≤1) and out-of-range (>5)
+                    // columns from the SSI calculation. NPS (0–10) is already filtered at SQL.
+                    if (!colMaxByUnit.has(unitId)) colMaxByUnit.set(unitId, new Map());
+                    const colMap = colMaxByUnit.get(unitId)!;
+                    if (!colMap.has(col) || score > colMap.get(col)!) colMap.set(col, score);
+
+                    rows.push({ target_unit_id: unitId, source_column: col, numerical_score: score, respondent_id: row.respondent_id });
+                }
+            }
         }
 
-        if (!rpcErr && rpcRows.length > 0) {
-            // Accumulate per (unit, campus) across all columns, then store final averages.
-            // Directly setting unitScores per row would overwrite earlier columns —
-            // accumulate into a staging map first (mirrors the fallback's rawAccum logic).
-            const rpcAccum = new Map<number, Map<string, { sum: number; count: number }>>();
-
-            for (const row of rpcRows) {
-                const maxScore = parseFloat(row.max_score);
-                // Skip binary (≤1) and anything beyond Likert range (>5) — protects against
-                // NPS (0–10) leaking in when the RPC hasn't been updated to filter score_rule='NPS_0_10'.
-                if (maxScore <= 1 || maxScore > 5) continue;
-                const unitId = row.unit_id;
-                const campus = row.campus || 'Unknown';
-                const avg = parseFloat(row.avg_score);
-                const count = parseInt(row.cnt);
-
-                if (!rpcAccum.has(unitId)) rpcAccum.set(unitId, new Map());
-                const campMap = rpcAccum.get(unitId)!;
-                if (!campMap.has(campus)) campMap.set(campus, { sum: 0, count: 0 });
-                const entry = campMap.get(campus)!;
-                entry.sum += avg * count;
-                entry.count += count;
+        // Determine SSI-included columns per unit (Likert 1 < max ≤ 5)
+        const includedColsByUnit = new Map<number, Set<string>>();
+        for (const [unitId, colMap] of colMaxByUnit) {
+            const set = new Set<string>();
+            for (const [col, max] of colMap) {
+                if (max > 1 && max <= 5) set.add(col);
             }
+            includedColsByUnit.set(unitId, set);
+        }
 
-            for (const [unitId, campMap] of rpcAccum) {
-                if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
-                if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
-                for (const [campus, entry] of campMap) {
-                    if (entry.count === 0) continue;
-                    const avg = entry.sum / entry.count;
-                    unitScores.get(unitId)!.set(campus, { avg, count: entry.count });
-                    campusScoreAccum.set(`${unitId}__${campus}`, { avg, count: entry.count });
-                    const overall = unitOverall.get(unitId)!;
-                    overall.sum += avg * entry.count;
-                    overall.count += entry.count;
-                }
-            }
-        } else {
-            // RPC unavailable or returned nothing — fall back to chunked queries by respondent_id.
-            // The previous fallback used a PostgREST `!inner` join with pagination, which forced
-            // Postgres to materialize the full join before slicing — fine for small surveys, but
-            // hits the statement timeout at 10k+ respondents. Chunking by respondent_id keeps each
-            // round-trip small (fits in a single 1000-row page) and uses the respondents/inputs indexes directly.
-            if (rpcErr) console.error('[quant RPC] error (falling back to chunked respondent queries):', rpcErr.message);
+        // Build per-(unit, campus, respondent, subgroupBucket) accumulators from
+        // included cols only. The bucket key is the column's subgroup_name when set,
+        // otherwise the source_column itself — so unassigned columns each form a
+        // single-column bucket (preserving flat per-respondent macro semantics).
+        const respAccum = new Map<number, Map<string, Map<number, Map<string, { sum: number; n: number }>>>>();
+        for (const row of rows) {
+            const included = includedColsByUnit.get(row.target_unit_id);
+            if (!included || !included.has(row.source_column)) continue;
+            const campus = respLocationMap.get(row.respondent_id) || 'Unknown';
+            const subgroup = subgroupByColumn.get(row.source_column) ?? null;
+            const bucket = subgroup ?? `__col__::${row.source_column}`;
 
-            // unitId → campus → sourceColumn → { sum, count, max }
-            type ColAccum = { sum: number; count: number; max: number };
-            const rawAccum = new Map<number, Map<string, Map<string, ColAccum>>>();
+            if (!respAccum.has(row.target_unit_id)) respAccum.set(row.target_unit_id, new Map());
+            const campusMap = respAccum.get(row.target_unit_id)!;
+            if (!campusMap.has(campus)) campusMap.set(campus, new Map());
+            const respMap = campusMap.get(campus)!;
+            if (!respMap.has(row.respondent_id)) respMap.set(row.respondent_id, new Map());
+            const bucketMap = respMap.get(row.respondent_id)!;
+            if (!bucketMap.has(bucket)) bucketMap.set(bucket, { sum: 0, n: 0 });
+            const e = bucketMap.get(bucket)!;
+            e.sum += row.numerical_score;
+            e.n++;
+        }
 
-            // Chunk size of 50 respondents × ~20 score columns = ~1000 rows per query,
-            // which fits inside Supabase's default response cap. 5 chunks fetched in parallel
-            // for throughput without overwhelming the connection pool.
-            const RESP_CHUNK = 50;
-            const PARALLEL = 5;
-
-            for (let bStart = 0; bStart < respIds.length; bStart += RESP_CHUNK * PARALLEL) {
-                const wave: Promise<{ data: any[] | null; error: any }>[] = [];
-                for (let i = bStart; i < Math.min(bStart + RESP_CHUNK * PARALLEL, respIds.length); i += RESP_CHUNK) {
-                    const chunk = respIds.slice(i, i + RESP_CHUNK);
-                    wave.push((async () => {
-                        const r = await supabase
-                            .from('raw_feedback_inputs')
-                            .select('target_unit_id, source_column, numerical_score, score_rule, respondent_id')
-                            .in('respondent_id', chunk)
-                            .eq('is_quantitative', true)
-                            .not('numerical_score', 'is', null)
-                            .not('target_unit_id', 'is', null)
-                            .neq('score_rule', 'NPS_0_10');
-                        return { data: r.data, error: r.error };
-                    })());
-                }
-                const results = await Promise.all(wave);
-
-                for (const res of results) {
-                    if (res.error) {
-                        console.error('[quant fallback] chunk error:', res.error.message);
-                        continue;
+        // Aggregate per (unit, campus):
+        //   per respondent: avg(bucket_avgs) — each bucket weighted equally
+        //   per (unit, campus): avg of those per-respondent values
+        for (const [unitId, campusMap] of respAccum) {
+            if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
+            if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
+            for (const [campus, respMap] of campusMap) {
+                let sumOfRespAvgs = 0;
+                let respCount = 0;
+                for (const [, bucketMap] of respMap) {
+                    let sumOfBucketAvgs = 0;
+                    let bucketCount = 0;
+                    for (const [, b] of bucketMap) {
+                        if (b.n === 0) continue;
+                        sumOfBucketAvgs += b.sum / b.n;
+                        bucketCount++;
                     }
-                    for (const row of (res.data || [])) {
-                        const unitId = row.target_unit_id as number;
-                        const campus = respLocationMap.get(row.respondent_id) || 'Unknown';
-                        const col = row.source_column as string;
-                        const score = parseFloat(row.numerical_score);
-
-                        if (!rawAccum.has(unitId)) rawAccum.set(unitId, new Map());
-                        const uMap = rawAccum.get(unitId)!;
-                        if (!uMap.has(campus)) uMap.set(campus, new Map());
-                        const cMap = uMap.get(campus)!;
-                        if (!cMap.has(col)) cMap.set(col, { sum: 0, count: 0, max: 0 });
-                        const entry = cMap.get(col)!;
-                        entry.sum += score;
-                        entry.count++;
-                        if (score > entry.max) entry.max = score;
-                    }
+                    if (bucketCount === 0) continue;
+                    sumOfRespAvgs += sumOfBucketAvgs / bucketCount;
+                    respCount++;
                 }
-            }
-
-            // Aggregate per unit+campus — only Likert columns (1 < max ≤ 5; excludes binary and NPS-like scales)
-            for (const [unitId, campusMap] of rawAccum) {
-                for (const [campus, colMap] of campusMap) {
-                    let sum = 0, count = 0;
-                    for (const [, colEntry] of colMap) {
-                        if (colEntry.max <= 1 || colEntry.max > 5) continue;
-                        sum += colEntry.sum;
-                        count += colEntry.count;
-                    }
-                    if (count === 0) continue;
-                    const avg = sum / count;
-                    if (!unitScores.has(unitId)) unitScores.set(unitId, new Map());
-                    unitScores.get(unitId)!.set(campus, { avg, count });
-                    campusScoreAccum.set(`${unitId}__${campus}`, { avg, count });
-                    if (!unitOverall.has(unitId)) unitOverall.set(unitId, { sum: 0, count: 0 });
-                    const overall = unitOverall.get(unitId)!;
-                    overall.sum += avg * count;
-                    overall.count += count;
-                }
+                if (respCount === 0) continue;
+                const avg = sumOfRespAvgs / respCount;
+                unitScores.get(unitId)!.set(campus, { avg, count: respCount });
+                campusScoreAccum.set(`${unitId}__${campus}`, { avg, count: respCount });
+                // Unit overall (across campuses): respondent-weighted average of
+                // per-campus resp-macros = global per-respondent macro for this unit.
+                const overall = unitOverall.get(unitId)!;
+                overall.sum += avg * respCount;
+                overall.count += respCount;
             }
         }
 

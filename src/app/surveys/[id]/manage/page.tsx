@@ -19,9 +19,11 @@ import { OrganizationUnit } from "@/types";
 import {
     Save, Loader2, AlertTriangle, GraduationCap,
     FileText, Calendar, Info, Users, Columns3, Plus, Trash2,
-    Eye, Search, ChevronDown, ChevronRight, CheckCircle2, MapPin
+    Eye, Search, ChevronDown, ChevronRight, CheckCircle2, MapPin,
+    Calculator
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ScoreAudit } from "@/components/analysis/ScoreAudit";
 
 // --- Types ---
 type DataType = "TEXT" | "SCORE" | "CATEGORY" | "IGNORE";
@@ -72,10 +74,14 @@ interface ColumnMapping {
     is_quantitative: boolean;
     requires_analysis: boolean;
     has_segments: number;
+    // Subgroup membership (null = column is its own implicit single-column subgroup,
+    // i.e. behaves like today's flat per-respondent macro).
+    subgroup_name?: string | null;
     // Editable fields (tracked for dirty detection)
     newUnitId?: number;
     newType?: DataType;
     newRule?: ScoreRule;
+    newSubgroupName?: string | null;
     ruleChanged?: boolean;
     customMapping?: Record<string, number | null>;
     // The resolved type at load time (source of truth for dirty detection)
@@ -153,23 +159,27 @@ export default function SurveyManagePage() {
     const loadColumnMappings = useCallback(async () => {
         setLoadingCols(true);
 
-        // 1. Fetch units first (fast)
+        // 1. Fetch units first (fast). Include score_subgroups so we can populate
+        // the subgroup dropdown next to each column.
         const { data: unitsData } = await supabase
             .from('organization_units')
-            .select('id, name, short_name')
+            .select('id, name, short_name, score_subgroups')
             .order('name');
         setUnits(unitsData || []);
         const unitMap = new Map((unitsData || []).map(u => [u.id, u.name]));
 
-        // Fetch explicit column types from cache (source of truth after first save)
+        // Fetch explicit column types + subgroup names from cache (source of truth after first save)
         const { data: colTypeCache } = await supabase
             .from('survey_column_cache')
-            .select('source_column, column_type')
+            .select('source_column, column_type, subgroup_name')
             .eq('survey_id', parseInt(surveyId));
         const colTypeCacheMap = new Map<string, DataType>(
             (colTypeCache || [])
                 .filter((r: any) => r.column_type)
                 .map((r: any) => [r.source_column, r.column_type as DataType])
+        );
+        const colSubgroupCacheMap = new Map<string, string | null>(
+            (colTypeCache || []).map((r: any) => [r.source_column, r.subgroup_name ?? null])
         );
 
         // 2. Extract Respondent IDs with pagination
@@ -260,6 +270,7 @@ export default function SurveyManagePage() {
                 g.is_quantitative ? "SCORE" : g.requires_analysis ? "TEXT" : "CATEGORY"
             );
 
+            const subgroupName = colSubgroupCacheMap.get(key) ?? null;
             return {
                 source_column: g.source_column,
                 target_unit_id: g.target_unit_id,
@@ -268,11 +279,13 @@ export default function SurveyManagePage() {
                 is_quantitative: g.is_quantitative,
                 requires_analysis: g.requires_analysis,
                 has_segments: segmentCounts.get(key) || 0,
+                subgroup_name: subgroupName,
                 // Initialize editable fields to current values
                 newUnitId: g.target_unit_id,
                 newType: currentType,
                 _initialType: currentType,
                 newRule: g.score_rule || (currentType === "SCORE" ? "NUMBER" : undefined),
+                newSubgroupName: subgroupName,
                 customMapping: g.custom_mapping || {},
                 _minId: g.minId,
             };
@@ -613,7 +626,8 @@ export default function SurveyManagePage() {
     // Detect which columns have unsaved changes
     const dirtyColumns = useMemo(() => {
         return columns.filter(c => {
-            return c.newUnitId !== c.target_unit_id || c.newType !== c._initialType || c.ruleChanged;
+            const subgroupChanged = (c.newSubgroupName ?? null) !== (c.subgroup_name ?? null);
+            return c.newUnitId !== c.target_unit_id || c.newType !== c._initialType || c.ruleChanged || subgroupChanged;
         });
     }, [columns]);
 
@@ -634,6 +648,15 @@ export default function SurveyManagePage() {
             }
 
             for (const col of dirtyColumns) {
+                // Skip raw-input work for columns whose ONLY change is subgroup —
+                // subgroup lives in survey_column_cache, not raw_feedback_inputs.
+                // The colTypeCache upsert later in this function will handle it.
+                const subgroupOnlyChange =
+                    col.newUnitId === col.target_unit_id &&
+                    col.newType === col._initialType &&
+                    !col.ruleChanged;
+                if (subgroupOnlyChange) continue;
+
                 // Get input IDs for this column
                 const inputsToUpdate: any[] = [];
                 const CHUNK = 500;
@@ -712,11 +735,14 @@ export default function SurveyManagePage() {
                 }
             }
 
-            // Persist explicit column types so they survive analysis flipping requires_analysis
+            // Persist explicit column types + subgroup names so they survive analysis
+            // flipping requires_analysis. survey_column_cache is the per-survey-per-column
+            // source of truth read by the cache rebuild and the Manage UI.
             const colTypeRows = dirtyColumns.map(col => ({
                 survey_id: parseInt(surveyId),
                 source_column: col.source_column,
                 column_type: col.newType || 'CATEGORY',
+                subgroup_name: col.newSubgroupName ?? null,
             }));
             for (let i = 0; i < colTypeRows.length; i += 50) {
                 await supabase.from('survey_column_cache')
@@ -787,9 +813,10 @@ export default function SurveyManagePage() {
 
             <div className="max-w-[1600px] mx-auto px-4 md:px-8 py-10 space-y-8">
                 <Tabs defaultValue="details" className="w-full">
-                    <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden w-full max-w-3xl grid grid-cols-3">
+                    <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden w-full max-w-4xl grid grid-cols-4">
                         <TabsTrigger value="details" className="gap-2 h-full rounded-none data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm"><Info className="w-4 h-4" /> Survey Settings</TabsTrigger>
                         <TabsTrigger value="columns" className="gap-2 h-full rounded-none data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm"><Columns3 className="w-4 h-4" /> Column Mapping</TabsTrigger>
+                        <TabsTrigger value="audit" className="gap-2 h-full rounded-none data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm"><Calculator className="w-4 h-4" /> Score Audit</TabsTrigger>
                         <TabsTrigger value="enrollments" className="gap-2 h-full rounded-none data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm"><GraduationCap className="w-4 h-4" /> Student Enrollment</TabsTrigger>
                     </TabsList>
 
@@ -1092,6 +1119,33 @@ export default function SurveyManagePage() {
                                                                         </Select>
                                                                     </div>
                                                                 )}
+                                                                {/* Subgroup dropdown — only meaningful for SCORE columns whose
+                                                                    target unit has defined score_subgroups. Lets the user roll
+                                                                    multiple columns into one named bucket (e.g. IT's "Mobile App"). */}
+                                                                {currentType === "SCORE" && col.newRule !== "NPS_0_10" && (() => {
+                                                                    const targetUnit = units.find(u => u.id === (col.newUnitId ?? col.target_unit_id));
+                                                                    const subgroups = targetUnit?.score_subgroups || [];
+                                                                    if (subgroups.length === 0) return null;
+                                                                    return (
+                                                                        <div className="w-44 shrink-0">
+                                                                            <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Subgroup</label>
+                                                                            <Select
+                                                                                value={col.newSubgroupName ?? "__INDIVIDUAL__"}
+                                                                                onValueChange={val => updateColumn(col.source_column, 'newSubgroupName', val === "__INDIVIDUAL__" ? null : val)}
+                                                                            >
+                                                                                <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                                                                                    <SelectValue />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    <SelectItem value="__INDIVIDUAL__">(Individual)</SelectItem>
+                                                                                    {subgroups.map(sg => (
+                                                                                        <SelectItem key={sg} value={sg}>{sg}</SelectItem>
+                                                                                    ))}
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        </div>
+                                                                    );
+                                                                })()}
                                                             </div>
                                                         </div>
 
@@ -1196,6 +1250,10 @@ export default function SurveyManagePage() {
                                 )}
                             </CardContent>
                         </Card>
+                    </TabsContent>
+
+                    <TabsContent value="audit" className="space-y-6 mt-0">
+                        <ScoreAudit surveyId={surveyId} />
                     </TabsContent>
 
                     <TabsContent value="enrollments" className="space-y-6 max-w-5xl mx-auto">

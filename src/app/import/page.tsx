@@ -18,12 +18,16 @@ import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 
-type Unit = { id: number; name: string; description?: string };
+type Unit = { id: number; name: string; description?: string; score_subgroups?: string[] };
 type ColumnConfig = {
   unitId: string;
   type: "TEXT" | "SCORE" | "CATEGORY" | "IGNORE";
   rule?: "LIKERT" | "BOOLEAN" | "NUMBER" | "TEXT_SCALE" | "CUSTOM_MAPPING" | "NPS_0_10";
   customMapping?: Record<string, number | null>;
+  // When the column's target unit has score_subgroups defined, this names which
+  // subgroup the column belongs to. NULL = column is its own implicit subgroup
+  // (flat per-respondent macro), matching default behavior for units without subgroups.
+  subgroupName?: string | null;
 };
 
 // --- Helper: Identity Column Selector ---
@@ -397,13 +401,16 @@ export default function ImportPage() {
         setProgress(Math.round((processedRows / csvData.length) * 100));
         setStatusMessage(`Processed ${processedRows} rows...`);
       }
-      // Persist explicit column types so they survive analysis flipping requires_analysis
+      // Persist explicit column types + subgroup assignments so they survive
+      // analysis flipping requires_analysis. survey_column_cache is the per-survey-per-column
+      // source of truth read by the cache rebuild and the Manage UI.
       const colTypeCacheRows = Object.entries(columnConfigs)
         .filter(([, cfg]) => cfg.type !== "IGNORE" && cfg.unitId)
         .map(([header, cfg]) => ({
           survey_id: surveyId,
           source_column: header,
           column_type: cfg.type,
+          subgroup_name: cfg.type === "SCORE" && cfg.rule !== "NPS_0_10" ? (cfg.subgroupName ?? null) : null,
         }));
       if (colTypeCacheRows.length > 0) {
         for (let i = 0; i < colTypeCacheRows.length; i += 50) {
@@ -800,6 +807,35 @@ export default function ImportPage() {
                                               <SelectItem value="NPS_0_10">NPS (0–10)</SelectItem>
                                             </SelectContent>
                                           </Select>
+                                          {/* Subgroup selector — only appears when the target unit has
+                                              score_subgroups defined and the rule isn't NPS. Lets multiple
+                                              columns roll into one named bucket (e.g. IT's "Mobile App"). */}
+                                          {config.rule !== "NPS_0_10" && (() => {
+                                            const targetUnit = units.find(u => u.id.toString() === config.unitId);
+                                            const subgroups = targetUnit?.score_subgroups || [];
+                                            if (subgroups.length === 0) return null;
+                                            return (
+                                              <div className="mt-3 space-y-1">
+                                                <label className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                                                  <Layers className="w-3 h-3 text-amber-500" /> subgroup
+                                                </label>
+                                                <Select
+                                                  value={config.subgroupName ?? "__INDIVIDUAL__"}
+                                                  onValueChange={(val) => updateConfig(h, 'subgroupName', val === "__INDIVIDUAL__" ? null : val)}
+                                                >
+                                                  <SelectTrigger className="h-9 bg-white dark:bg-slate-950 shadow-sm border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                                    <SelectValue />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    <SelectItem value="__INDIVIDUAL__">(Individual column)</SelectItem>
+                                                    {subgroups.map(sg => (
+                                                      <SelectItem key={sg} value={sg}>{sg}</SelectItem>
+                                                    ))}
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                            );
+                                          })()}
                                         </>
                                       ) : config.type === "TEXT" ? (
                                         <div className="h-10 flex items-center gap-2 text-[10px] mt-6 font-black text-green-700 dark:text-green-400 bg-green-100/50 dark:bg-green-950/30 px-3 rounded-lg border border-green-200/50 dark:border-green-800/50 uppercase tracking-tighter">

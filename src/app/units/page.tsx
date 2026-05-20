@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import Link from "next/link";
-import { ArrowRight, Building2, Search, School, Edit2, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { ArrowRight, Building2, Search, School, Edit2, Plus, Trash2, AlertTriangle, X, Layers } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { OrganizationUnit } from "@/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -24,6 +24,8 @@ export default function UnitsPage() {
     const [editingUnit, setEditingUnit] = useState<OrganizationUnit | null>(null);
     const [editDescription, setEditDescription] = useState("");
     const [editShortName, setEditShortName] = useState("");
+    const [editSubgroups, setEditSubgroups] = useState<string[]>([]);
+    const [newSubgroupName, setNewSubgroupName] = useState("");
     const [saving, setSaving] = useState(false);
 
     // Create & Delete State
@@ -56,17 +58,30 @@ export default function UnitsPage() {
         if (!editingUnit) return;
         setSaving(true);
         try {
+            // Normalize subgroups: trim, drop empties, dedupe (case-insensitive)
+            const cleanedSubgroups: string[] = [];
+            const seen = new Set<string>();
+            for (const raw of editSubgroups) {
+                const name = raw.trim();
+                if (!name) continue;
+                const key = name.toLowerCase();
+                if (seen.has(key)) continue;
+                seen.add(key);
+                cleanedSubgroups.push(name);
+            }
+
             const { error } = await supabase
                 .from('organization_units')
                 .update({
                     description: editDescription,
-                    short_name: editShortName
+                    short_name: editShortName,
+                    score_subgroups: cleanedSubgroups,
                 })
                 .eq('id', editingUnit.id);
 
             if (error) throw error;
 
-            setUnits(units.map(u => u.id === editingUnit.id ? { ...u, description: editDescription, short_name: editShortName } : u));
+            setUnits(units.map(u => u.id === editingUnit.id ? { ...u, description: editDescription, short_name: editShortName, score_subgroups: cleanedSubgroups } : u));
             toast.success("Unit details updated!");
             setEditingUnit(null);
         } catch (error: any) {
@@ -74,6 +89,21 @@ export default function UnitsPage() {
         } finally {
             setSaving(false);
         }
+    };
+
+    const handleAddSubgroup = () => {
+        const name = newSubgroupName.trim();
+        if (!name) return;
+        if (editSubgroups.some(s => s.toLowerCase() === name.toLowerCase())) {
+            toast.error(`Subgroup "${name}" already exists.`);
+            return;
+        }
+        setEditSubgroups([...editSubgroups, name]);
+        setNewSubgroupName("");
+    };
+
+    const handleRemoveSubgroup = (idx: number) => {
+        setEditSubgroups(editSubgroups.filter((_, i) => i !== idx));
     };
 
     const handleCreateUnit = async () => {
@@ -204,6 +234,8 @@ export default function UnitsPage() {
                                                     setEditingUnit(unit);
                                                     setEditDescription(unit.description || "");
                                                     setEditShortName(unit.short_name || "");
+                                                    setEditSubgroups(unit.score_subgroups || []);
+                                                    setNewSubgroupName("");
                                                 }}
                                             >
                                                 <Edit2 className="w-4 h-4 mr-1" />
@@ -247,6 +279,61 @@ export default function UnitsPage() {
                                 className="min-h-[100px] resize-none"
                             />
                             <p className="text-xs text-slate-500">The AI uses this to accurate route feedback.</p>
+                        </div>
+
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                                <Layers className="w-4 h-4 text-slate-500" />
+                                Score Subgroups (Optional)
+                            </label>
+                            <p className="text-xs text-slate-500">
+                                Define named subgroups when this unit's SSI should be a roll-up of sub-averages rather than a flat per-question average. Example: IT Department uses <strong>Mobile App</strong> and <strong>Wifi</strong> — final SSI = avg(mobile_app_avg, wifi_avg). After defining the names here, assign each column to a subgroup in the survey's Column Mapping page (or during import).
+                            </p>
+                            {editSubgroups.length > 0 && (
+                                <div className="flex flex-wrap gap-2 pt-1">
+                                    {editSubgroups.map((name, idx) => (
+                                        <Badge
+                                            key={`${name}-${idx}`}
+                                            variant="secondary"
+                                            className="pl-2.5 pr-1 py-1 gap-1 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                                        >
+                                            <span className="text-xs">{name}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveSubgroup(idx)}
+                                                className="hover:bg-blue-200 rounded p-0.5"
+                                                aria-label={`Remove ${name}`}
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </Badge>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex gap-2 pt-1">
+                                <Input
+                                    placeholder="e.g. Mobile App"
+                                    value={newSubgroupName}
+                                    onChange={(e) => setNewSubgroupName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            handleAddSubgroup();
+                                        }
+                                    }}
+                                    className="h-9 text-sm"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleAddSubgroup}
+                                    disabled={!newSubgroupName.trim()}
+                                    className="shrink-0 h-9"
+                                >
+                                    <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                                </Button>
+                            </div>
                         </div>
                     </div>
                     <DialogFooter className="flex items-center sm:justify-between w-full mt-4">

@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 
-// POST: Force recompute cache for a survey (e.g. after re-import)
-// DELETE: Clear cache for a survey
+// POST: Force recompute cache for a survey (e.g. after re-import).
+// `?onlyQuant=true` clears just survey_quant_cache (used by Score Audit's rebuild
+// button — leaves AI/NPS/faculty caches intact so unrelated pages don't break).
+// `?onlyQuant=true&alsoFaculty=true` additionally clears the faculty score cache.
 export async function POST(req: NextRequest) {
     const surveyId = req.nextUrl.searchParams.get("surveyId");
+    const onlyQuant = req.nextUrl.searchParams.get("onlyQuant") === "true";
+    const alsoFaculty = req.nextUrl.searchParams.get("alsoFaculty") === "true";
     if (!surveyId) {
         return NextResponse.json({ error: "surveyId required" }, { status: 400 });
     }
 
     const sid = parseInt(surveyId);
+    if (onlyQuant) {
+        const ops = [supabase.from('survey_quant_cache').delete().eq('survey_id', sid)];
+        if (alsoFaculty) {
+            ops.push(supabase.from('survey_faculty_score_cache').delete().eq('survey_id', sid));
+        }
+        await Promise.all(ops);
+        return NextResponse.json({ message: `Quant cache cleared for survey ${surveyId}. Next report load will recompute.` });
+    }
+
     await Promise.all([
         supabase.from('survey_quant_cache').delete().eq('survey_id', sid),
         supabase.from('survey_cross_mentions_cache').delete().eq('survey_id', sid),

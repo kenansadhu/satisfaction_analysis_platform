@@ -12,6 +12,10 @@ export interface OrganizationUnit {
     description?: string;
     analysis_context?: string;
     analysis_status?: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+    // Ordered list of subgroup names used to roll up multi-column scores.
+    // Example: IT Department uses ["Mobile App", "Wifi"] so its SSI is the
+    // average of (avg of 4 mobile-app questions, the wifi question).
+    score_subgroups?: string[];
 }
 
 export interface Survey {
