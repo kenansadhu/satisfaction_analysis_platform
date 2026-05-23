@@ -9,12 +9,13 @@ import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
 import { ActionPriorityMatrix } from "@/components/analytics/ActionPriorityMatrix";
 import CrossUnitMentions from "@/components/analytics/CrossUnitMentions";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, Share2, Target } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, Share2, Target, LayoutDashboard } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
 import YearComparison from "@/components/executive/YearComparison";
 import SSIReport from "@/components/executive/SSIReport";
+import SummaryTab from "@/components/executive/SummaryTab";
 import SuggestionHub from "@/components/executive/SuggestionHub";
 import { NpsTab } from "@/components/executive/NpsTab";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
@@ -47,6 +48,10 @@ export default function ExecutiveDashboard() {
 
     // NPS totals (institution-wide, shown in the dark hero strip)
     const [npsTotals, setNpsTotals] = useState<{ nps_score: number | null; total: number } | null>(null);
+
+    // Platform settings for unit filtering
+    const [npsUnitIds, setNpsUnitIds] = useState<Set<number>>(new Set());
+    const [excludedScoreUnitIds, setExcludedScoreUnitIds] = useState<Set<number>>(new Set());
 
     // Survey loading is now handled by SurveyContext
 
@@ -107,6 +112,17 @@ export default function ExecutiveDashboard() {
         fetchMetrics();
     }, [selectedSurvey]);
 
+    // Fetch platform settings once on mount
+    useEffect(() => {
+        Promise.all([
+            fetch('/api/settings/nps-units').then(r => r.json()),
+            fetch('/api/settings/excluded-score-units').then(r => r.json()),
+        ]).then(([npsData, exclData]) => {
+            setNpsUnitIds(new Set<number>(npsData.npsUnitIds || []));
+            setExcludedScoreUnitIds(new Set<number>(exclData.excludedUnitIds || []));
+        }).catch(console.error);
+    }, []);
+
     // Fetch NPS totals for the dark hero strip (separate from the tab's full fetch).
     useEffect(() => {
         if (!selectedSurvey || selectedSurvey === "all") { setNpsTotals(null); return; }
@@ -133,27 +149,34 @@ export default function ExecutiveDashboard() {
             />
 
             <div className="max-w-7xl mx-auto px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <Tabs defaultValue="report" className="w-full">
+                <Tabs defaultValue="summary" className="w-full">
                     <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden">
+                        <TabsTrigger value="summary" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <LayoutDashboard className="w-4 h-4 text-sky-500" /> Summary
+                        </TabsTrigger>
                         <TabsTrigger value="report" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <FileText className="w-4 h-4 text-emerald-500" /> Report
+                            <FileText className="w-4 h-4 text-emerald-500" /> SSI Index
                         </TabsTrigger>
                         <TabsTrigger value="insights" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <BarChart2 className="w-4 h-4 text-purple-500" /> Insights
                         </TabsTrigger>
-                        <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
+                        <TabsTrigger value="nps" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <Target className="w-4 h-4 text-blue-500" /> NPS
                         </TabsTrigger>
                         <TabsTrigger value="suggestions" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <Lightbulb className="w-4 h-4 text-amber-500" /> Suggestions
                         </TabsTrigger>
-                        <TabsTrigger value="nps" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
-                            <Target className="w-4 h-4 text-blue-500" /> NPS
-                        </TabsTrigger>
                         <TabsTrigger value="depmap" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
                             <TrendingUp className="w-4 h-4 text-indigo-500" /> Dependency Map
                         </TabsTrigger>
+                        <TabsTrigger value="comparison" className="rounded-none flex items-center gap-2 px-5 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:shadow-sm">
+                            <GitCompareArrows className="w-4 h-4 text-amber-500" /> Year Comparison
+                        </TabsTrigger>
                     </TabsList>
+
+                    <TabsContent value="summary" className="mt-6 focus-visible:ring-0">
+                        <SummaryTab surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
+                    </TabsContent>
 
                     <TabsContent value="report" className="mt-6 focus-visible:ring-0">
                         <SSIReport surveyId={selectedSurvey === "all" ? undefined : selectedSurvey} />
@@ -210,8 +233,13 @@ export default function ExecutiveDashboard() {
                                         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Units</p>
                                     </div>
                                     <div className="mt-3">
-                                        <span className="text-4xl font-black text-white tabular-nums">{loading ? "—" : units.filter(u => u.total > 0).length}</span>
-                                        {!loading && <span className="text-xl font-normal text-slate-500">/{units.length}</span>}
+                                        {(() => {
+                                            const nonNpsUnits = units.filter(u => !npsUnitIds.has(u.id));
+                                            return <>
+                                                <span className="text-4xl font-black text-white tabular-nums">{loading ? "—" : nonNpsUnits.filter(u => u.total > 0).length}</span>
+                                                {!loading && <span className="text-xl font-normal text-slate-500">/{nonNpsUnits.length}</span>}
+                                            </>;
+                                        })()}
                                     </div>
                                     <p className="text-xs text-slate-500 mt-2">with feedback data</p>
                                 </div>
@@ -254,8 +282,11 @@ export default function ExecutiveDashboard() {
                                 <p className="text-xs text-slate-400 ml-6">Which topics are driving praise or problems across the institution</p>
                             </div>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <PraisesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setPraisesMax} />
-                                <IssuesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setIssuesMax} />
+                                <PraisesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setPraisesMax} excludeUnitIds={[...npsUnitIds]} />
+                                <IssuesRadar surveyId={selectedSurvey} maxDomain={maxRadarDomain} onMaxCalculated={setIssuesMax} excludeUnitIds={[...npsUnitIds]} />
+                            </div>
+                            <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
+                                <ActionPriorityMatrix units={units.filter(u => !npsUnitIds.has(u.id))} />
                             </div>
                             {selectedSurvey && selectedSurvey !== "all" && (
                                 <>
@@ -267,38 +298,21 @@ export default function ExecutiveDashboard() {
                             )}
                         </div>
 
-                        {/* 3. UNIT PERFORMANCE — action priorities + full sentiment breakdown */}
+                        {/* 3. SENTIMENT BY UNIT — full sentiment breakdown */}
                         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5">
                             <div>
                                 <div className="flex items-center gap-2 mb-0.5">
                                     <Activity className="w-4 h-4 text-slate-500" />
-                                    <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Unit Performance</h2>
+                                    <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Sentiment by Unit</h2>
                                 </div>
-                                <p className="text-xs text-slate-400 ml-6">Where to focus — action priorities and full sentiment breakdown by unit</p>
+                                <p className="text-xs text-slate-400 ml-6">Full sentiment breakdown for units included in the Satisfaction Index</p>
                             </div>
-                            <ActionPriorityMatrix units={units} />
-                            <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
-                                {loading ? (
-                                    <div className="h-96 w-full bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
-                                ) : (
-                                    <SentimentHeatmap units={units} surveyId={selectedSurvey ?? undefined} />
-                                )}
-                            </div>
+                            {loading ? (
+                                <div className="h-96 w-full bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+                            ) : (
+                                <SentimentHeatmap units={units.filter(u => !excludedScoreUnitIds.has(u.id))} surveyId={selectedSurvey ?? undefined} />
+                            )}
                         </div>
-
-                        {/* 4. CROSS-UNIT REFERENCES — which units do students mention in other units' feedback */}
-                        {selectedSurvey && selectedSurvey !== "all" && (
-                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-0.5">
-                                        <Share2 className="w-4 h-4 text-slate-500" />
-                                        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Cross-Unit References</h2>
-                                    </div>
-                                    <p className="text-xs text-slate-400 ml-6">Which units are students mentioning when giving feedback to other units</p>
-                                </div>
-                                <CrossUnitMentions surveyId={selectedSurvey} hideHeader />
-                            </div>
-                        )}
 
                     </TabsContent>
 
@@ -314,10 +328,22 @@ export default function ExecutiveDashboard() {
                         <NpsTab surveyId={selectedSurvey ?? null} />
                     </TabsContent>
 
-                    <TabsContent value="depmap" className="focus-visible:ring-0 animate-in fade-in">
+                    <TabsContent value="depmap" className="focus-visible:ring-0 animate-in fade-in space-y-6">
                         <div className="h-[1080px] w-full bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
                             <DependencyGraph surveyId={selectedSurvey || "all"} />
                         </div>
+                        {selectedSurvey && selectedSurvey !== "all" && (
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                        <Share2 className="w-4 h-4 text-slate-500" />
+                                        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Cross-Unit References</h2>
+                                    </div>
+                                    <p className="text-xs text-slate-400 ml-6">Which units are students mentioning when giving feedback to other units</p>
+                                </div>
+                                <CrossUnitMentions surveyId={selectedSurvey} hideHeader />
+                            </div>
+                        )}
                     </TabsContent>
                 </Tabs>
             </div>

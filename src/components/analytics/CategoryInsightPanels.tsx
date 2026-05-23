@@ -104,36 +104,42 @@ function CategoryPanel({ insight, loading }: { insight?: CategoryInsight; loadin
                                 >
                                     {unit.short_name}
                                 </span>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scoreChipClass(unit.positive_pct)}`}>
-                                    {unit.positive_pct}%
-                                </span>
+                                {unit.total === 0 ? (
+                                    <span className="text-xs px-2 py-0.5 rounded-full text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                                        No data
+                                    </span>
+                                ) : (
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scoreChipClass(unit.positive_pct)}`}>
+                                        {unit.positive_pct}%
+                                    </span>
+                                )}
                             </div>
 
                             {/* Stacked sentiment bar */}
                             <div className="ml-7 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
-                                <div
-                                    className="h-full bg-emerald-500 transition-all duration-700"
-                                    style={{ width: `${unit.positive_pct}%` }}
-                                    title={`Positive: ${unit.positive}`}
-                                />
-                                <div
-                                    className="h-full bg-slate-300 dark:bg-slate-600"
-                                    style={{ width: `${unit.total > 0 ? (unit.neutral / unit.total * 100) : 0}%` }}
-                                    title={`Neutral: ${unit.neutral}`}
-                                />
-                                <div
-                                    className="h-full bg-red-400"
-                                    style={{ width: `${unit.negative_pct}%` }}
-                                    title={`Negative: ${unit.negative}`}
-                                />
+                                {unit.total > 0 ? (
+                                    <>
+                                        <div className="h-full bg-emerald-500 transition-all duration-700" style={{ width: `${unit.positive_pct}%` }} title={`Positive: ${unit.positive}`} />
+                                        <div className="h-full bg-slate-300 dark:bg-slate-600" style={{ width: `${(unit.neutral / unit.total * 100)}%` }} title={`Neutral: ${unit.neutral}`} />
+                                        <div className="h-full bg-red-400" style={{ width: `${unit.negative_pct}%` }} title={`Negative: ${unit.negative}`} />
+                                    </>
+                                ) : (
+                                    <div className="h-full w-full bg-slate-200 dark:bg-slate-700 rounded-full" title="No comments for this category" />
+                                )}
                             </div>
 
                             {/* Hover detail */}
-                            <div className="ml-7 flex justify-between text-[10px] text-slate-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <span className="text-emerald-600 dark:text-emerald-500">{unit.positive} pos</span>
-                                <span>{unit.neutral} neu</span>
-                                <span className="text-red-500">{unit.negative} neg · {unit.total} total</span>
-                            </div>
+                            {unit.total > 0 ? (
+                                <div className="ml-7 flex justify-between text-[10px] text-slate-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <span className="text-emerald-600 dark:text-emerald-500">{unit.positive} pos</span>
+                                    <span>{unit.neutral} neu</span>
+                                    <span className="text-red-500">{unit.negative} neg · {unit.total} total</span>
+                                </div>
+                            ) : (
+                                <div className="ml-7 text-[10px] text-slate-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity italic">
+                                    No student comments about this category for this unit
+                                </div>
+                            )}
                         </div>
                     ))
                 )}

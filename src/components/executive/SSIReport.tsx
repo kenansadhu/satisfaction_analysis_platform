@@ -266,104 +266,64 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                 </div>
             </div>
 
-            {/* === QUICK VISUALIZATIONS === */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Top 3 Units */}
-                <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-emerald-500 to-green-400" />
-                    <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                            <TrendingUp className="w-4 h-4 text-emerald-600" /> Top Performing
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2.5">
-                        {topUnits.map((u, i) => (
-                            <div key={u.unit_id} className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-xs font-bold text-emerald-500 w-4">{i + 1}</span>
-                                    <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{u.short_name || u.unit_name}</span>
-                                </div>
-                                <span className={`font-bold text-sm ${scoreColor(u.satisfaction_index)}`}>{u.satisfaction_index?.toFixed(2)}</span>
-                            </div>
-                        ))}
-                    </CardContent>
-                </Card>
-
-                {/* Bottom 3 Units */}
-                <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-red-500 to-orange-400" />
-                    <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                            <AlertCircle className="w-4 h-4 text-red-600" /> Needs Attention
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2.5">
-                        {bottomUnits.map((u, i) => (
-                            <div key={u.unit_id} className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-xs font-bold text-red-500 w-4">{unitsWithScores.length - 2 + i}</span>
-                                    <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{u.short_name || u.unit_name}</span>
-                                </div>
-                                <span className={`font-bold text-sm ${scoreColor(u.satisfaction_index)}`}>{u.satisfaction_index?.toFixed(2)}</span>
-                            </div>
-                        ))}
-                    </CardContent>
-                </Card>
-
-                {/* Feedback Sentiment Summary */}
-                <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-violet-500 to-purple-400" />
-                    <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                            <Activity className="w-4 h-4 text-violet-600" /> Sentiment Overview
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="flex-1 h-5 rounded-full overflow-hidden flex bg-slate-100 dark:bg-slate-800">
-                                <div className="bg-emerald-500 h-full transition-all" style={{ width: `${totalFeedback > 0 ? (totalPositive / totalFeedback * 100) : 0}%` }} />
-                                <div className="bg-slate-400 h-full transition-all" style={{ width: `${totalFeedback > 0 ? ((totalFeedback - totalPositive - totalNegative) / totalFeedback * 100) : 0}%` }} />
-                                <div className="bg-red-500 h-full transition-all" style={{ width: `${totalFeedback > 0 ? (totalNegative / totalFeedback * 100) : 0}%` }} />
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-1 text-center text-xs">
-                            <div>
-                                <div className="font-bold text-emerald-600 text-sm">{totalFeedback > 0 ? (totalPositive / totalFeedback * 100).toFixed(0) : 0}%</div>
-                                <div className="text-slate-400">Positive</div>
-                            </div>
-                            <div>
-                                <div className="font-bold text-slate-500 text-sm">{totalFeedback > 0 ? ((totalFeedback - totalPositive - totalNegative) / totalFeedback * 100).toFixed(0) : 0}%</div>
-                                <div className="text-slate-400">Neutral</div>
-                            </div>
-                            <div>
-                                <div className="font-bold text-red-600 text-sm">{totalFeedback > 0 ? (totalNegative / totalFeedback * 100).toFixed(0) : 0}%</div>
-                                <div className="text-slate-400">Negative</div>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Campus Quick Stats */}
-                <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-blue-500 to-cyan-400" />
-                    <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                            <MapPin className="w-4 h-4 text-blue-600" /> Campus Index
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2.5">
-                        {campusSatisfaction.map(cs => (
-                            <div key={cs.campus} className="flex items-center justify-between">
-                                <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{shortCampus(cs.campus)}</span>
-                                <div className="flex items-center gap-2">
-                                    <div className={`h-1.5 rounded-full ${cs.satisfaction_index >= 3.20 ? 'bg-emerald-500' : cs.satisfaction_index >= 3.00 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${Math.max(20, cs.satisfaction_index / 4 * 60)}px` }} />
-                                    <span className={`font-bold text-sm ${scoreColor(cs.satisfaction_index)}`}>{cs.satisfaction_index.toFixed(2)}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </CardContent>
-                </Card>
-            </div>
+            {/* === SECTION 2: SATISFACTION INDEX OVERVIEW TABLE === */}
+            <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                        <BarChart3 className="w-5 h-5 text-emerald-600" /> Satisfaction Index by Unit
+                    </CardTitle>
+                    <CardDescription>
+                        Average score on 1-4 scale per unit. Target: ≥ 3.20.
+                        <span className="inline-flex items-center gap-3 ml-3">
+                            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> ≥ 3.20</span>
+                            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> 3.00–3.19</span>
+                            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt; 3.00</span>
+                        </span>
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-slate-200 dark:border-slate-700">
+                                    <th className="text-left py-3 px-4 font-semibold text-slate-600 dark:text-slate-400">Unit</th>
+                                    {campuses.map(c => (
+                                        <th key={c} className="text-center py-3 px-3 font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">{shortCampus(c)}</th>
+                                    ))}
+                                    <th className="text-center py-3 px-4 font-bold text-slate-800 dark:text-slate-200">Average</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sortedUnits.map(unit => (
+                                    <tr key={unit.unit_id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                                        <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">
+                                            {unit.unit_name}
+                                            {unit.short_name && <span className="text-slate-400 ml-1 text-xs">({unit.short_name})</span>}
+                                        </td>
+                                        {unit.campus_scores.map(cs => (
+                                            <td key={cs.campus} className="text-center py-3 px-3">
+                                                {cs.average !== null ? (
+                                                    <span className={`font-semibold ${scoreColor(cs.average)}`}>
+                                                        {cs.average.toFixed(2)}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-300 dark:text-slate-600">n/a</span>
+                                                )}
+                                            </td>
+                                        ))}
+                                        <td className={`text-center py-3 px-4 ${scoreBg(unit.satisfaction_index)} rounded-lg`}>
+                                            <span className={`font-bold text-lg ${scoreColor(unit.satisfaction_index)}`}>
+                                                {unit.satisfaction_index?.toFixed(2) || "n/a"}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* === SECTION 1: PARTICIPATION === */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -526,65 +486,6 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                     </Card>
                 );
             })()}
-
-            {/* === SECTION 2: SATISFACTION INDEX OVERVIEW TABLE === */}
-            <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                        <BarChart3 className="w-5 h-5 text-emerald-600" /> Satisfaction Index by Unit
-                    </CardTitle>
-                    <CardDescription>
-                        Average score on 1-4 scale per unit. Target: ≥ 3.20.
-                        <span className="inline-flex items-center gap-3 ml-3">
-                            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> ≥ 3.20</span>
-                            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> 3.00–3.19</span>
-                            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt; 3.00</span>
-                        </span>
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-slate-200 dark:border-slate-700">
-                                    <th className="text-left py-3 px-4 font-semibold text-slate-600 dark:text-slate-400">Unit</th>
-                                    {campuses.map(c => (
-                                        <th key={c} className="text-center py-3 px-3 font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">{shortCampus(c)}</th>
-                                    ))}
-                                    <th className="text-center py-3 px-4 font-bold text-slate-800 dark:text-slate-200">Average</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {sortedUnits.map(unit => (
-                                    <tr key={unit.unit_id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
-                                        <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">
-                                            {unit.unit_name}
-                                            {unit.short_name && <span className="text-slate-400 ml-1 text-xs">({unit.short_name})</span>}
-                                        </td>
-                                        {unit.campus_scores.map(cs => (
-                                            <td key={cs.campus} className="text-center py-3 px-3">
-                                                {cs.average !== null ? (
-                                                    <span className={`font-semibold ${scoreColor(cs.average)}`}>
-                                                        {cs.average.toFixed(2)}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-slate-300 dark:text-slate-600">n/a</span>
-                                                )}
-                                            </td>
-                                        ))}
-                                        <td className={`text-center py-3 px-4 ${scoreBg(unit.satisfaction_index)} rounded-lg`}>
-                                            <span className={`font-bold text-lg ${scoreColor(unit.satisfaction_index)}`}>
-                                                {unit.satisfaction_index?.toFixed(2) || "n/a"}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </CardContent>
-            </Card>
         </div>
     );
 }

@@ -73,9 +73,9 @@ export function ActionPriorityMatrix({ units }: { units: UnitPerformance[] }) {
     }, [data]);
 
     const urgentUnits = useMemo(() =>
-        data.filter(u => u.negPct >= medianNeg && u.total >= medianVol)
+        data.filter(u => u.score < 40)
             .sort((a, b) => b.negPct - a.negPct),
-        [data, medianNeg, medianVol]
+        [data]
     );
 
     if (data.length === 0) return null;

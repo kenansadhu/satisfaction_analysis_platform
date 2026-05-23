@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     // ── Try cache ──────────────────────────────────────────────────────────────
     const { data: cached, error: cacheErr } = await supabase
         .from("survey_cross_mentions_cache")
-        .select("mentioned_unit_id, total_mentions, source_unit_count, positive_count, negative_count, neutral_count")
+        .select("mentioned_unit_id, total_mentions, source_unit_count, positive_count, negative_count, neutral_count, source_units_breakdown")
         .eq("survey_id", sid)
         .gt("total_mentions", 0);
 
@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
                 positive_count: r.positive_count,
                 negative_count: r.negative_count,
                 neutral_count: r.neutral_count,
+                source_units_breakdown: r.source_units_breakdown || [],
             };
         }).sort((a, b) => b.total_mentions - a.total_mentions);
 

@@ -6,14 +6,17 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useActiveSurvey } from "@/context/SurveyContext";
 import { computeSentimentScore } from "@/lib/utils";
 import {
     GraduationCap, Users, Target, CheckCircle2, AlertTriangle, XCircle,
-    BookOpen, Building2, AlertCircle, ThumbsUp, ThumbsDown
+    BookOpen, Building2, AlertCircle, ThumbsUp, ThumbsDown, BarChart2, Sparkles
 } from "lucide-react";
 import { NpsCard } from "@/components/nps/NpsCard";
 import { emptyNpsCounts, NpsCounts } from "@/lib/nps";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import FacultyInsightChat from "@/components/analysis/FacultyInsightChat";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -215,7 +218,7 @@ export default function FacultyDetailPage() {
                 }
             />
 
-            <div className="max-w-7xl mx-auto px-8 py-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="max-w-7xl mx-auto px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
                 {/* No survey selected */}
                 {!surveyId && (
@@ -225,7 +228,20 @@ export default function FacultyDetailPage() {
                     </div>
                 )}
 
-                {surveyId && loading && <LoadingSkeleton />}
+                {surveyId && (
+                <Tabs defaultValue="insights" className="w-full">
+                    <TabsList className="mb-8 p-0 bg-slate-200/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl inline-flex h-12 items-center justify-center overflow-hidden">
+                        <TabsTrigger value="insights" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-teal-700 data-[state=active]:shadow-sm">
+                            <BarChart2 className="w-4 h-4" /> Insights
+                        </TabsTrigger>
+                        <TabsTrigger value="ai" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-violet-600 data-[state=active]:shadow-sm">
+                            <Sparkles className="w-4 h-4" /> AI Specialist
+                        </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="insights" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="space-y-8">
+                {loading && <LoadingSkeleton />}
 
                 {surveyId && !loading && data && (() => {
                     const { totalRespondents, totalEnrolled, responseRate, programQuality, campusExperience } = data;
@@ -600,6 +616,21 @@ export default function FacultyDetailPage() {
                         </>
                     );
                 })()}
+                    </div>
+                    </TabsContent>
+
+                    <TabsContent value="ai" className="focus-visible:ring-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <ErrorBoundary fallbackTitle="AI Specialist crashed">
+                            <FacultyInsightChat
+                                facultyId={facultyId}
+                                surveyId={surveyId ?? undefined}
+                                facultyName={data?.faculty?.name ?? facultyName}
+                                surveyTitle={activeSurvey?.title}
+                            />
+                        </ErrorBoundary>
+                    </TabsContent>
+                </Tabs>
+                )}
             </div>
         </PageShell>
     );

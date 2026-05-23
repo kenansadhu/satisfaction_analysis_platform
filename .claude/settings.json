@@ -27,7 +27,8 @@
       "Bash(dir \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\\\\executive\")",
       "Bash(dir /b \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\\\\api\")",
       "Bash(ls -la src/)",
-      "Bash(ls -la app/)"
+      "Bash(ls -la app/)",
+      "Bash(dir src *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",

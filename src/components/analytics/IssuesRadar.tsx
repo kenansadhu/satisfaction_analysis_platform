@@ -6,7 +6,7 @@ import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Responsi
 import { Loader2 } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyId: string, maxDomain?: number, onMaxCalculated?: (max: number) => void }) {
+export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated, excludeUnitIds }: { surveyId: string, maxDomain?: number, onMaxCalculated?: (max: number) => void, excludeUnitIds?: number[] }) {
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -23,7 +23,8 @@ export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyId
                     return;
                 }
 
-                const rows: any[] = json.rows || [];
+                const excludeSet = new Set(excludeUnitIds || []);
+                const rows: any[] = (json.rows || []).filter((r: any) => !excludeSet.has(r.unit_id));
                 if (rows.length === 0) { setData([]); return; }
 
                 const maxCount = Math.max(...rows.map((r: any) => r.segment_count));
@@ -49,7 +50,8 @@ export function IssuesRadar({ surveyId, maxDomain, onMaxCalculated }: { surveyId
         };
 
         fetchRadarData();
-    }, [surveyId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [surveyId, JSON.stringify(excludeUnitIds)]);
 
     return (
         <Card className="border-slate-200 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900 h-full border-t-4 border-t-red-500">

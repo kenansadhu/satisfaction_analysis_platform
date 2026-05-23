@@ -228,7 +228,7 @@ function ScoreDistribution({ scores }: { scores: number[] }) {
                     <BarChart3 className="w-4 h-4 text-slate-500" />
                     <CardTitle className="text-base">Score distribution</CardTitle>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                     How {total.toLocaleString()} respondents distributed across the 0–10 scale. The shape matters more than the
                     average — a flat spread signals polarization, a tall peak signals consensus.
                 </p>
@@ -253,7 +253,7 @@ function ScoreDistribution({ scores }: { scores: number[] }) {
                                 title={`Score ${score}: ${count.toLocaleString()} (${pctOfTotal.toFixed(1)}%)`}
                             >
                                 {/* Hover label floats above the bar */}
-                                <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-semibold text-slate-700 dark:text-slate-300 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                                <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-semibold text-slate-700 dark:text-slate-300 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
                                     {count.toLocaleString()} ({pctOfTotal.toFixed(1)}%)
                                 </span>
                             </div>
@@ -278,7 +278,7 @@ function ScoreDistribution({ scores }: { scores: number[] }) {
                         );
                     })}
                 </div>
-                <div className="flex justify-between text-[10px] uppercase tracking-wider text-slate-400 mt-3 font-semibold">
+                <div className="flex justify-between text-xs uppercase tracking-wider text-slate-400 mt-3 font-semibold">
                     <span><span className="text-red-500">●</span> Detractors (0–6)</span>
                     <span><span className="text-amber-500">●</span> Passives (7–8)</span>
                     <span><span className="text-emerald-500">●</span> Promoters (9–10)</span>
@@ -370,7 +370,7 @@ function DriverPanel({
                 <CardTitle className={`text-sm font-bold flex items-center gap-2 ${accent === "red" ? "text-red-700 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"}`}>
                     {icon} {title}
                 </CardTitle>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Categories most often mentioned by {bucketKey}s. Shows where to focus to {accent === "red" ? "reduce" : "amplify"} the signal.
                 </p>
             </CardHeader>
@@ -394,7 +394,7 @@ function DriverPanel({
                             {quote && (
                                 <blockquote className={`text-xs text-slate-600 dark:text-slate-400 italic border-l-2 ${accent === "red" ? "border-l-red-300 dark:border-l-red-800" : "border-l-emerald-300 dark:border-l-emerald-800"} pl-2.5 py-0.5 mt-1 ${quoteBg} rounded-r`}>
                                     &ldquo;{quote.segment_text}&rdquo;
-                                    <span className="block text-[10px] text-slate-400 not-italic mt-0.5">— {quote.faculty}</span>
+                                    <span className="block text-xs text-slate-400 not-italic mt-0.5">— {quote.faculty}</span>
                                 </blockquote>
                             )}
                         </div>
@@ -459,16 +459,16 @@ function VoiceColumn({
                 <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${headerClass[accent]}`}>
                     {icon} {title}
                 </span>
-                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">{subtitle}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">{subtitle}</span>
             </div>
             <div className="p-3 space-y-3">
                 {quotes.length === 0 ? (
                     <p className="text-xs text-slate-400">No comments in this bucket.</p>
                 ) : (
                     quotes.map((q, i) => (
-                        <div key={i} className="text-xs text-slate-700 dark:text-slate-300">
+                        <div key={i} className="text-sm text-slate-700 dark:text-slate-300">
                             <p className="italic break-words">&ldquo;{q.segment_text}&rdquo;</p>
-                            <p className="text-[10px] text-slate-400 not-italic mt-1">— {q.faculty}</p>
+                            <p className="text-xs text-slate-400 not-italic mt-1">— {q.faculty}</p>
                         </div>
                     ))
                 )}
@@ -491,7 +491,7 @@ function CategoryBucketTable({ qual }: { qual: QualUnit }) {
                     <BarChart3 className="w-4 h-4 text-slate-500" />
                     <CardTitle className="text-base">Categories — bucket breakdown</CardTitle>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                     For each theme students mentioned, which bucket the comment came from. A category dominated
                     by red is a recurring complaint area; one dominated by green is a strength.
                 </p>
@@ -500,7 +500,7 @@ function CategoryBucketTable({ qual }: { qual: QualUnit }) {
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
-                            <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase tracking-wider text-slate-400">
+                            <tr className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase tracking-wider text-slate-400">
                                 <th className="text-left font-semibold py-2 pr-3 min-w-[180px]">Category</th>
                                 <th className="text-left font-semibold py-2 px-2 w-full">Bucket distribution</th>
                                 <th className="text-right font-semibold py-2 pl-2 w-20">Total</th>
@@ -525,7 +525,7 @@ function CategoryBucketTable({ qual }: { qual: QualUnit }) {
                                                 {c.promoter > 0 && <div className="bg-emerald-500" style={{ width: `${proPct}%` }} title={`Promoters: ${c.promoter} (${proPct.toFixed(0)}%)`} />}
                                                 {c.unknown > 0 && <div className="bg-slate-300 dark:bg-slate-600" style={{ width: `${uPct}%` }} title={`Did not answer NPS: ${c.unknown}`} />}
                                             </div>
-                                            <div className="flex gap-3 text-[10px] text-slate-500 dark:text-slate-400 mt-1 tabular-nums">
+                                            <div className="flex gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1 tabular-nums">
                                                 {c.detractor > 0 && <span className="text-red-600 dark:text-red-400">{c.detractor} D</span>}
                                                 {c.passive > 0 && <span className="text-amber-600 dark:text-amber-400">{c.passive} Pa</span>}
                                                 {c.promoter > 0 && <span className="text-emerald-600 dark:text-emerald-400">{c.promoter} Pr</span>}
@@ -541,7 +541,7 @@ function CategoryBucketTable({ qual }: { qual: QualUnit }) {
                         </tbody>
                     </table>
                 </div>
-                <p className="text-[10px] text-slate-400 mt-2">
+                <p className="text-xs text-slate-400 mt-2">
                     Legend: <span className="text-red-600">D</span> = detractor (0–6) · <span className="text-amber-600">Pa</span> = passive (7–8) · <span className="text-emerald-600">Pr</span> = promoter (9–10) · ? = did not answer the NPS score column
                 </p>
             </CardContent>
@@ -604,9 +604,9 @@ function SentimentBucketMatrix({ qual }: { qual: QualUnit }) {
                     <table className="w-full text-sm border-collapse">
                         <thead>
                             <tr>
-                                <th className="text-left font-semibold text-[10px] uppercase tracking-wider text-slate-400 py-2 pr-3 min-w-[140px]"></th>
+                                <th className="text-left font-semibold text-xs uppercase tracking-wider text-slate-400 py-2 pr-3 min-w-[140px]"></th>
                                 {sentCols.map(s => (
-                                    <th key={s} className="text-center font-semibold text-[10px] uppercase tracking-wider py-2 px-2 min-w-[110px]">
+                                    <th key={s} className="text-center font-semibold text-xs uppercase tracking-wider py-2 px-2 min-w-[110px]">
                                         <span className={
                                             s === "negative" ? "text-red-600 dark:text-red-400" :
                                             s === "positive" ? "text-emerald-600 dark:text-emerald-400" :
@@ -616,7 +616,7 @@ function SentimentBucketMatrix({ qual }: { qual: QualUnit }) {
                                         </span>
                                     </th>
                                 ))}
-                                <th className="text-right font-semibold text-[10px] uppercase tracking-wider text-slate-400 py-2 pl-2 min-w-[60px]">Row n</th>
+                                <th className="text-right font-semibold text-xs uppercase tracking-wider text-slate-400 py-2 pl-2 min-w-[60px]">Row n</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -634,7 +634,7 @@ function SentimentBucketMatrix({ qual }: { qual: QualUnit }) {
                                                     <div className="text-base font-black tabular-nums text-slate-800 dark:text-slate-100 leading-none">
                                                         {cell.count.toLocaleString()}
                                                     </div>
-                                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 tabular-nums">
+                                                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 tabular-nums">
                                                         {pct.toFixed(0)}% of row
                                                     </div>
                                                 </div>
@@ -649,7 +649,7 @@ function SentimentBucketMatrix({ qual }: { qual: QualUnit }) {
                         </tbody>
                     </table>
                 </div>
-                <p className="text-[10px] text-slate-400 mt-3 leading-relaxed">
+                <p className="text-xs text-slate-400 mt-3 leading-relaxed">
                     <span className="inline-block w-2 h-2 rounded-sm bg-violet-300 dark:bg-violet-800 mr-1 align-middle" /> hidden insight &nbsp;
                     <span className="inline-block w-2 h-2 rounded-sm bg-amber-200 dark:bg-amber-900 mr-1 align-middle" /> drift signal (passive leaning toward another bucket) &nbsp;
                     <span className="inline-block w-2 h-2 rounded-sm bg-slate-200 dark:bg-slate-700 mr-1 align-middle" /> expected
@@ -679,7 +679,7 @@ function HiddenInsights({ qual }: { qual: QualUnit }) {
                             <CardTitle className="text-sm font-bold text-violet-800 dark:text-violet-300">
                                 Critical fans — promoters who still complain
                             </CardTitle>
-                            <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                                 These respondents gave 9–10 (would recommend) <em>and</em> left negative feedback.
                                 Their critiques are the most credible — they want you to succeed.
                             </p>
@@ -694,7 +694,7 @@ function HiddenInsights({ qual }: { qual: QualUnit }) {
                             {criticalFans.slice(0, 5).map((q, i) => (
                                 <blockquote key={i} className="text-xs text-slate-700 dark:text-slate-300 border-l-2 border-violet-300 dark:border-violet-700 pl-3 py-0.5">
                                     <p className="italic break-words">&ldquo;{q.segment_text}&rdquo;</p>
-                                    <p className="text-[10px] text-slate-400 not-italic mt-1">— {q.faculty}</p>
+                                    <p className="text-xs text-slate-400 not-italic mt-1">— {q.faculty}</p>
                                 </blockquote>
                             ))}
                         </div>
@@ -713,7 +713,7 @@ function HiddenInsights({ qual }: { qual: QualUnit }) {
                             <CardTitle className="text-sm font-bold text-blue-800 dark:text-blue-300">
                                 Recoverable detractors — they see strengths
                             </CardTitle>
-                            <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                                 These respondents gave 0–6 (wouldn&apos;t recommend) <em>but</em> left positive comments.
                                 They see real value — something specific tipped them over. Highest-leverage cohort.
                             </p>
@@ -728,7 +728,7 @@ function HiddenInsights({ qual }: { qual: QualUnit }) {
                             {recoverableDetractors.slice(0, 5).map((q, i) => (
                                 <blockquote key={i} className="text-xs text-slate-700 dark:text-slate-300 border-l-2 border-blue-300 dark:border-blue-700 pl-3 py-0.5">
                                     <p className="italic break-words">&ldquo;{q.segment_text}&rdquo;</p>
-                                    <p className="text-[10px] text-slate-400 not-italic mt-1">— {q.faculty}</p>
+                                    <p className="text-xs text-slate-400 not-italic mt-1">— {q.faculty}</p>
                                 </blockquote>
                             ))}
                         </div>
@@ -768,7 +768,7 @@ function PerFacultyTable({ rows }: { rows: NpsFacultyRow[] }) {
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                    <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase tracking-wider text-slate-400">
+                                    <tr className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase tracking-wider text-slate-400">
                                         <th className="text-left font-semibold py-2 pr-3">Faculty</th>
                                         <th className="text-right font-semibold py-2 px-2 w-20">NPS</th>
                                         <th className="text-left font-semibold py-2 px-2 w-64">Distribution</th>
@@ -795,7 +795,7 @@ function PerFacultyTable({ rows }: { rows: NpsFacultyRow[] }) {
                         </div>
                     </div>
                 ))}
-                <p className="text-[10px] text-slate-400">
+                <p className="text-xs text-slate-400">
                     Tip: an NPS column reflects how willing each faculty&apos;s students are to recommend their study program.
                     Top entries here are advocates worth amplifying; bottom entries are early-warning signals.
                 </p>
