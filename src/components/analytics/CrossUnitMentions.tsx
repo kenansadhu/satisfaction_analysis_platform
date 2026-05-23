@@ -72,7 +72,7 @@ function SourceBreakdownPanel({ breakdown }: { breakdown: SourceUnitBreakdown[] 
     );
 }
 
-export default function CrossUnitMentions({ surveyId, hideHeader }: { surveyId?: string; hideHeader?: boolean }) {
+export default function CrossUnitMentions({ surveyId, hideHeader, npsUnitIds = [] }: { surveyId?: string; hideHeader?: boolean; npsUnitIds?: number[] }) {
     const [mentions, setMentions] = useState<MentionedUnit[]>([]);
     const [loading, setLoading] = useState(false);
     const [fromCache, setFromCache] = useState(false);
@@ -92,6 +92,15 @@ export default function CrossUnitMentions({ surveyId, hideHeader }: { surveyId?:
             .finally(() => setLoading(false));
     }, [surveyId]);
 
+    const filteredMentions = npsUnitIds.length > 0
+        ? mentions
+            .filter(m => !npsUnitIds.includes(m.unit_id))
+            .map(m => ({
+                ...m,
+                source_units_breakdown: m.source_units_breakdown?.filter(s => !npsUnitIds.includes(s.source_unit_id)) ?? [],
+            }))
+        : mentions;
+
     if (!surveyId || surveyId === "all") return null;
 
     if (loading) {
@@ -102,7 +111,7 @@ export default function CrossUnitMentions({ surveyId, hideHeader }: { surveyId?:
         );
     }
 
-    if (!mentions.length) {
+    if (!filteredMentions.length) {
         return (
             <p className="text-sm text-slate-400 dark:text-slate-500 italic py-2">
                 No cross-unit mentions detected for this survey.
@@ -110,7 +119,7 @@ export default function CrossUnitMentions({ surveyId, hideHeader }: { surveyId?:
         );
     }
 
-    const maxMentions = Math.max(...mentions.map(m => m.total_mentions), 1);
+    const maxMentions = Math.max(...filteredMentions.map(m => m.total_mentions), 1);
 
     return (
         <div className="space-y-3">
@@ -141,7 +150,7 @@ export default function CrossUnitMentions({ surveyId, hideHeader }: { surveyId?:
                 <span className="w-4 shrink-0" />
             </div>
 
-            {mentions.map((m, idx) => {
+            {filteredMentions.map((m, idx) => {
                 const total = m.total_mentions;
                 const posPct = total > 0 ? (m.positive_count / total) * 100 : 0;
                 const negPct = total > 0 ? (m.negative_count / total) * 100 : 0;

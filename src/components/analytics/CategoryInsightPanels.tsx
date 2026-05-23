@@ -151,9 +151,11 @@ function CategoryPanel({ insight, loading }: { insight?: CategoryInsight; loadin
 export function CategoryInsightPanels({
     surveyId,
     hideHeader = false,
+    excludeUnitIds = [],
 }: {
     surveyId: string | null | undefined;
     hideHeader?: boolean;
+    excludeUnitIds?: number[];
 }) {
     const [categories, setCategories] = useState<CategoryInsight[]>([]);
     const [loading, setLoading] = useState(false);
@@ -170,6 +172,10 @@ export function CategoryInsightPanels({
             .catch(() => setCategories([]))
             .finally(() => setLoading(false));
     }, [surveyId]);
+
+    const filteredCategories = excludeUnitIds.length > 0
+        ? categories.map(cat => ({ ...cat, units: cat.units.filter(u => !excludeUnitIds.includes(u.unit_id)) }))
+        : categories;
 
     if (!surveyId || surveyId === "all") return null;
 
@@ -191,8 +197,8 @@ export function CategoryInsightPanels({
                         <CategoryPanel loading />
                         <CategoryPanel loading />
                     </>
-                ) : categories.length > 0 ? (
-                    categories.map(cat => (
+                ) : filteredCategories.length > 0 ? (
+                    filteredCategories.map(cat => (
                         <CategoryPanel key={cat.category_name} insight={cat} loading={false} />
                     ))
                 ) : (

@@ -292,7 +292,7 @@ export default function ExecutiveDashboard() {
                                 <>
                                     <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
                                         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Shared categories ranked by satisfaction across all units</p>
-                                        <CategoryInsightPanels surveyId={selectedSurvey} hideHeader />
+                                        <CategoryInsightPanels surveyId={selectedSurvey} hideHeader excludeUnitIds={[...npsUnitIds]} />
                                     </div>
                                 </>
                             )}
@@ -330,7 +330,7 @@ export default function ExecutiveDashboard() {
 
                     <TabsContent value="depmap" className="focus-visible:ring-0 animate-in fade-in space-y-6">
                         <div className="h-[1080px] w-full bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <DependencyGraph surveyId={selectedSurvey || "all"} />
+                            <DependencyGraph surveyId={selectedSurvey || "all"} npsUnitIds={[...npsUnitIds]} />
                         </div>
                         {selectedSurvey && selectedSurvey !== "all" && (
                             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
@@ -341,7 +341,7 @@ export default function ExecutiveDashboard() {
                                     </div>
                                     <p className="text-xs text-slate-400 ml-6">Which units are students mentioning when giving feedback to other units</p>
                                 </div>
-                                <CrossUnitMentions surveyId={selectedSurvey} hideHeader />
+                                <CrossUnitMentions surveyId={selectedSurvey} hideHeader npsUnitIds={[...npsUnitIds]} />
                             </div>
                         )}
                     </TabsContent>

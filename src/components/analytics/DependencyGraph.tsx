@@ -26,7 +26,7 @@ interface GraphNode {
     y?: number;
 }
 
-export function DependencyGraph({ surveyId }: { surveyId: string }) {
+export function DependencyGraph({ surveyId, npsUnitIds = [] }: { surveyId: string; npsUnitIds?: number[] }) {
     const [mentions, setMentions] = useState<CrossMention[]>([]);
     const [loading, setLoading] = useState(true);
     const [isClient, setIsClient] = useState(false);
@@ -68,14 +68,21 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
         return () => obs.disconnect();
     }, []);
 
+    const filteredMentions = useMemo(() =>
+        npsUnitIds.length > 0
+            ? mentions.filter(m => !npsUnitIds.includes(m.sourceId) && !npsUnitIds.includes(m.targetId))
+            : mentions,
+        [mentions, npsUnitIds]
+    );
+
     const graphData = useMemo(() => {
-        if (!mentions.length) return { nodes: [] as GraphNode[], links: [] as { source: string; target: string; value: number }[] };
+        if (!filteredMentions.length) return { nodes: [] as GraphNode[], links: [] as { source: string; target: string; value: number }[] };
 
         const nameMap = new Map<number, string>();
         const receivedMap = new Map<number, number>();
         const sentMap = new Map<number, number>();
 
-        for (const m of mentions) {
+        for (const m of filteredMentions) {
             nameMap.set(m.sourceId, m.sourceName);
             nameMap.set(m.targetId, m.targetName);
             receivedMap.set(m.targetId, (receivedMap.get(m.targetId) || 0) + m.count);
@@ -83,7 +90,7 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
         }
 
         const unitSet = new Set<number>();
-        for (const m of mentions) { unitSet.add(m.sourceId); unitSet.add(m.targetId); }
+        for (const m of filteredMentions) { unitSet.add(m.sourceId); unitSet.add(m.targetId); }
         const maxReceived = Math.max(...Array.from(receivedMap.values()), 1);
 
         const nodes: GraphNode[] = Array.from(unitSet).map(id => ({
@@ -91,10 +98,10 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
             name: nameMap.get(id) || `Unit ${id}`,
             received: receivedMap.get(id) || 0,
             sent: sentMap.get(id) || 0,
-            val: Math.max(((receivedMap.get(id) || 0) / maxReceived) * 18 + 4, 4),
+            val: Math.max(((receivedMap.get(id) || 0) / maxReceived) * 12 + 3, 3),
         }));
 
-        const links = mentions.map(m => ({
+        const links = filteredMentions.map(m => ({
             source: m.sourceId.toString(),
             target: m.targetId.toString(),
             value: m.count,
@@ -105,8 +112,8 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
 
     useEffect(() => {
         if (!graphRef.current || !graphData.nodes.length) return;
-        graphRef.current.d3Force('charge')?.strength(-400);
-        graphRef.current.d3Force('link')?.distance(180);
+        graphRef.current.d3Force('charge')?.strength(-600);
+        graphRef.current.d3Force('link')?.distance(220);
         graphRef.current.d3ReheatSimulation();
     }, [graphData]);
 
@@ -116,7 +123,7 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
     );
 
     const nodeCanvasObject = useCallback((node: GraphNode & { x: number; y: number }, ctx: CanvasRenderingContext2D, globalScale: number) => {
-        const r = Math.sqrt(node.val) * 2.5 + 3;
+        const r = Math.sqrt(node.val) * 2.0 + 2;
         const fontSize = Math.max(9, 11 / globalScale);
         const label = node.name.length > 13 ? node.name.slice(0, 12) + '…' : node.name;
         const isHovered = hoveredNode?.id === node.id;
@@ -152,7 +159,7 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
     }, [hoveredNode, maxReceived]);
 
     const nodePointerAreaPaint = useCallback((node: GraphNode & { x: number; y: number }, color: string, ctx: CanvasRenderingContext2D) => {
-        const r = Math.sqrt(node.val) * 2.5 + 8;
+        const r = Math.sqrt(node.val) * 2.0 + 6;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
@@ -170,17 +177,17 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
             node.fy = undefined;
         });
         if (graphRef.current) {
-            graphRef.current.d3Force('charge')?.strength(-400);
-            graphRef.current.d3Force('link')?.distance(180);
+            graphRef.current.d3Force('charge')?.strength(-600);
+            graphRef.current.d3Force('link')?.distance(220);
             graphRef.current.d3ReheatSimulation();
         }
     }, [graphData.nodes]);
 
-    const topMentions = mentions.slice(0, 6);
+    const topMentions = filteredMentions.slice(0, 6);
 
     const stats = useMemo(() => {
         if (!graphData.nodes.length) return null;
-        const totalMentions = mentions.reduce((s, m) => s + m.count, 0);
+        const totalMentions = filteredMentions.reduce((s, m) => s + m.count, 0);
         const sorted = [...graphData.nodes].sort((a, b) => b.received - a.received);
         const mostReferenced = sorted[0];
         const mostMentioning = [...graphData.nodes].sort((a, b) => b.sent - a.sent)[0];
@@ -226,7 +233,7 @@ export function DependencyGraph({ surveyId }: { surveyId: string }) {
                         <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
                         <p className="text-sm text-slate-400 font-medium animate-pulse">Mapping unit connections...</p>
                     </div>
-                ) : mentions.length === 0 ? (
+                ) : filteredMentions.length === 0 ? (
                     <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-4 px-8">
                         <Network className="w-12 h-12 opacity-20" />
                         <div className="text-sm text-center">
