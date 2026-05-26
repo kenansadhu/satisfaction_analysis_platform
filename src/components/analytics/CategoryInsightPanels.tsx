@@ -173,9 +173,15 @@ export function CategoryInsightPanels({
             .finally(() => setLoading(false));
     }, [surveyId]);
 
-    const filteredCategories = excludeUnitIds.length > 0
-        ? categories.map(cat => ({ ...cat, units: cat.units.filter(u => !excludeUnitIds.includes(u.unit_id)) }))
-        : categories;
+    const filteredCategories = categories
+        .map(cat => ({
+            ...cat,
+            units: cat.units.filter(u =>
+                u.positive > 0 &&
+                (excludeUnitIds.length === 0 || !excludeUnitIds.includes(u.unit_id))
+            ),
+        }))
+        .filter(cat => cat.units.length > 0);
 
     if (!surveyId || surveyId === "all") return null;
 

@@ -14,7 +14,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw, ShieldAlert, Calendar, BarChart2, AlertTriangle, Target, Sparkles } from "lucide-react";
+import { Settings, Database, CheckCircle2, AlertCircle, Loader2, Trash2, RefreshCcw, ShieldAlert, Calendar, BarChart2, AlertTriangle, Target, Sparkles, BookOpen } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -42,6 +42,8 @@ export default function SettingsPage() {
     const [savingExclusions, setSavingExclusions] = useState(false);
     const [npsUnitIds, setNpsUnitIds] = useState<number[]>([]);
     const [savingNpsUnits, setSavingNpsUnits] = useState(false);
+    const [studyProgramUnitId, setStudyProgramUnitId] = useState<number | null>(null);
+    const [savingStudyProgramUnit, setSavingStudyProgramUnit] = useState(false);
 
     // Executive AI summary state
     const [execSummaryGeneratedAt, setExecSummaryGeneratedAt] = useState<string | null>(null);
@@ -242,6 +244,9 @@ export default function SettingsPage() {
         fetch("/api/settings/nps-units")
             .then(r => r.json())
             .then(d => setNpsUnitIds(d.npsUnitIds || []));
+        fetch("/api/settings/study-program-unit")
+            .then(r => r.json())
+            .then(d => setStudyProgramUnitId(d.studyProgramUnitId ?? null));
         import("@/lib/supabase").then(({ supabase }) =>
             supabase.from("organization_units").select("id, name").order("name")
                 .then(({ data }) => setAllUnits(data || []))
@@ -291,6 +296,23 @@ export default function SettingsPage() {
             toast.error("Failed to save NPS settings.");
         } finally {
             setSavingNpsUnits(false);
+        }
+    };
+
+    const saveStudyProgramUnit = async () => {
+        setSavingStudyProgramUnit(true);
+        try {
+            const res = await fetch("/api/settings/study-program-unit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ studyProgramUnitId }),
+            });
+            if (res.ok) toast.success("Study program unit saved.");
+            else toast.error("Failed to save setting.");
+        } catch {
+            toast.error("Failed to save setting.");
+        } finally {
+            setSavingStudyProgramUnit(false);
         }
     };
 
@@ -747,6 +769,70 @@ export default function SettingsPage() {
                                             className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
                                         >
                                             {savingNpsUnits ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                            Save
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {/* Divider */}
+                                <div className="border-t border-slate-200 dark:border-slate-800" />
+
+                                {/* Subsection 3: Study Program Unit */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <BookOpen className="w-3.5 h-3.5 text-violet-500" />
+                                        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">Study Program unit</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 -mt-1">
+                                        Select the unit that represents <strong>Study Program (Prodi)</strong> feedback. This unit&apos;s comments and scores are shown under the Study Programs tab on Faculty Insights, separate from campus service units. Only one unit can be selected.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {allUnits.map(unit => {
+                                            const isSelected = studyProgramUnitId === unit.id;
+                                            return (
+                                                <button
+                                                    key={unit.id}
+                                                    onClick={() => setStudyProgramUnitId(isSelected ? null : unit.id)}
+                                                    className={cn(
+                                                        "flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all duration-150",
+                                                        isSelected
+                                                            ? "border-violet-200 dark:border-violet-900/50 bg-violet-50/50 dark:bg-violet-950/20"
+                                                            : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40"
+                                                    )}
+                                                >
+                                                    <div className={cn(
+                                                        "w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors",
+                                                        isSelected
+                                                            ? "border-violet-500 bg-violet-500"
+                                                            : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
+                                                    )}>
+                                                        {isSelected && (
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                                                        )}
+                                                    </div>
+                                                    <span className={cn(
+                                                        "text-sm font-medium truncate",
+                                                        isSelected ? "text-violet-700 dark:text-violet-300" : "text-slate-700 dark:text-slate-300"
+                                                    )}>
+                                                        {unit.name}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                        <p className="text-xs text-slate-400">
+                                            {studyProgramUnitId != null
+                                                ? `"${allUnits.find(u => u.id === studyProgramUnitId)?.name}" selected`
+                                                : "No unit selected — falls back to unit named \"Study Program\""}
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            onClick={saveStudyProgramUnit}
+                                            disabled={savingStudyProgramUnit}
+                                            className="gap-2 bg-violet-600 hover:bg-violet-700 text-white"
+                                        >
+                                            {savingStudyProgramUnit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                                             Save
                                         </Button>
                                     </div>

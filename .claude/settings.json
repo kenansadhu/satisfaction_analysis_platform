@@ -28,11 +28,16 @@
       "Bash(dir /b \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\\\\api\")",
       "Bash(ls -la src/)",
       "Bash(ls -la app/)",
-      "Bash(dir src *)"
+      "Bash(dir src *)",
+      "Bash(grep -E \"\\\\.\\(sql|ts\\)$\")",
+      "Bash(mkdir \"c:\\\\Users\\\\kenan\\\\Documents\\\\Creations\\\\New SSI Analysis and Report\\\\student-voice-platform\\\\src\\\\app\\\\api\\\\surveys\\\\[id]\\\\column-stats\")",
+      "Bash(xargs wc -l)",
+      "Bash(xargs ls -la)"
     ],
     "additionalDirectories": [
       "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",
-      "c:\\Users\\kenan\\.claude\\projects\\c--Users-kenan-OneDrive-Documents-Creations-New-SSI-Analysis-and-Report-New-2026-student-voice-platform\\memory"
+      "c:\\Users\\kenan\\.claude\\projects\\c--Users-kenan-OneDrive-Documents-Creations-New-SSI-Analysis-and-Report-New-2026-student-voice-platform\\memory",
+      "c:\\Users\\kenan\\Documents\\Creations\\New SSI Analysis and Report\\student-voice-platform\\src\\app\\api\\surveys\\[id]"
     ]
   }
 }

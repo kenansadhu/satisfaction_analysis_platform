@@ -70,10 +70,14 @@ export async function GET(req: NextRequest) {
     }
 
     // 3. Cache miss — find Study Program unit to split PQ vs CE scores
-    const { data: units } = await supabase
-        .from("organization_units")
-        .select("id, name");
-    const studyProgramUnitId = (units || []).find(u => u.name === "Study Program")?.id ?? null;
+    const [{ data: units }, { data: spSetting }] = await Promise.all([
+        supabase.from("organization_units").select("id, name"),
+        supabase.from("platform_settings").select("value").eq("key", "study_program_unit_id").maybeSingle(),
+    ]);
+    const spSettingId = spSetting?.value != null ? parseInt(spSetting.value) : null;
+    const studyProgramUnitId = spSettingId != null
+        ? spSettingId
+        : ((units || []).find(u => u.name === "Study Program")?.id ?? null);
 
     // 4. Paginate respondents — capture id+faculty so we can score-fetch by respondent_id below.
     const respCountMap = new Map<string, number>();

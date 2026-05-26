@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    ArrowRight, Database, Users, Building2, Sparkles,
+    ArrowRight, Database, Users, Building2,
     TrendingUp, Zap, PieChart, GraduationCap, Activity,
     LayoutDashboard, Upload, BrainCircuit, GitBranch,
     BarChart3, MessageSquareText, Network, Star,
@@ -138,31 +138,60 @@ export default function HomePage() {
                 <div className="absolute top-1/2 right-0 w-64 h-64 bg-violet-500/10 rounded-full blur-2xl pointer-events-none" />
 
                 <div className="relative max-w-6xl mx-auto px-8 pt-16 pb-14">
-                    {/* Badge */}
-                    <div className="inline-flex items-center gap-2 bg-blue-500/10 border border-blue-400/20 rounded-full px-4 py-1.5 text-sm text-blue-300 mb-6">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        AI-Powered Student Analytics
-                    </div>
+                    {/* Hero: two columns */}
+                    <div className="flex flex-col lg:flex-row gap-10 items-start mb-14">
 
-                    {/* Headline */}
-                    <h1 className="text-5xl font-extrabold text-white tracking-tight leading-tight mb-4">
-                        Student Voice Platform
-                        <br />
-                        <span className="bg-gradient-to-r from-blue-400 via-indigo-300 to-violet-400 bg-clip-text text-transparent">
-                            Intelligence at Every Level
-                        </span>
-                    </h1>
-                    <p className="text-slate-400 text-xl max-w-2xl mb-10 leading-relaxed">
-                        From raw survey CSV to AI-generated executive summaries — complete institutional analytics in one platform.
-                    </p>
+                        {/* Left: headline + CTA */}
+                        <div className="flex-1 min-w-0">
+                            <h1 className="text-5xl font-extrabold text-white tracking-tight leading-none mb-3">
+                                Satisfaction Voice
+                            </h1>
+                            <p className="text-2xl font-semibold tracking-tight mb-10 bg-gradient-to-r from-blue-400 via-indigo-300 to-violet-400 bg-clip-text text-transparent">
+                                Agentic AI for institutional intelligence
+                            </p>
+                            <Link href="/executive">
+                                <Button className="bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50 gap-2.5 text-base px-7 py-3 h-auto font-semibold rounded-xl">
+                                    Open Executive Dashboard <ArrowRight className="w-5 h-5" />
+                                </Button>
+                            </Link>
+                        </div>
 
-                    {/* CTA row */}
-                    <div className="flex items-center gap-4 mb-14">
-                        <Link href="/executive">
-                            <Button className="bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50 gap-2.5 text-base px-7 py-3 h-auto font-semibold rounded-xl">
-                                Open Executive Dashboard <ArrowRight className="w-5 h-5" />
-                            </Button>
-                        </Link>
+                        {/* Right: AI Scientist card */}
+                        <div className="lg:w-[380px] w-full shrink-0">
+                            <div className="relative rounded-2xl overflow-hidden bg-white/[0.04] border border-white/10 p-6">
+                                <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-violet-500/20 blur-2xl pointer-events-none" />
+                                <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-indigo-600/15 blur-2xl pointer-events-none" />
+                                <div className="relative">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className="p-1.5 bg-violet-500/20 rounded-lg">
+                                            <BrainCircuit className="w-4 h-4 text-violet-400" />
+                                        </div>
+                                        <span className="text-[10px] font-bold uppercase tracking-widest text-violet-300/70">AI Data Scientist</span>
+                                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5">New</span>
+                                    </div>
+                                    <p className="text-2xl font-bold text-white leading-snug mb-5">
+                                        Ask anything<br />
+                                        <span className="text-violet-300 font-semibold">about your data.</span>
+                                    </p>
+                                    <div className="space-y-2 mb-6">
+                                        {[
+                                            "Which units have the most negative feedback?",
+                                            "Top 5 complaints from the Library, ranked",
+                                            "What are students saying about the IT department?",
+                                        ].map((q, i) => (
+                                            <div key={i} className="text-xs text-slate-300/80 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 italic">
+                                                &ldquo;{q}&rdquo;
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <Link href="/ai-scientist">
+                                        <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white gap-2 rounded-xl font-semibold">
+                                            Open AI Scientist <ArrowRight className="w-4 h-4" />
+                                        </Button>
+                                    </Link>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Stats row */}
@@ -338,7 +367,7 @@ export default function HomePage() {
                 <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
                     <div className="flex items-center gap-2 text-sm text-slate-400">
                         <GitBranch className="w-4 h-4" />
-                        Student Voice Platform · AI Analytics Engine
+                        Satisfaction Voice · AI Analytics Engine
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-slate-400">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />

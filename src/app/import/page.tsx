@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import Papa from "papaparse";
-import { Upload, CheckCircle, Search, ArrowRight, MapPin, Building2, GraduationCap, Filter, Loader2, Save, CalendarDays, Eye, AlertTriangle, ArrowLeft, Sparkles, User, Info, BarChart3, List, Tag, FileSpreadsheet, Layers, ShieldCheck } from "lucide-react";
+import { Upload, CheckCircle, Search, ArrowRight, MapPin, Building2, GraduationCap, Filter, Loader2, Save, CalendarDays, Eye, AlertTriangle, ArrowLeft, Sparkles, User, Info, BarChart3, List, Tag, FileSpreadsheet, Layers, ShieldCheck, Plus, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -28,6 +28,8 @@ type ColumnConfig = {
   // subgroup the column belongs to. NULL = column is its own implicit subgroup
   // (flat per-respondent macro), matching default behavior for units without subgroups.
   subgroupName?: string | null;
+  // Named display group — columns sharing a group name are combined into one chart.
+  displayGroup?: string | null;
 };
 
 // --- Helper: Identity Column Selector ---
@@ -127,6 +129,7 @@ export default function ImportPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [surveyTitle, setSurveyTitle] = useState("");
   const [surveyDescription, setSurveyDescription] = useState("");
+  const [surveyYear, setSurveyYear] = useState<number | "">(new Date().getFullYear());
 
   const [locationCols, setLocationCols] = useState<string[]>([]);
   const [facultyCols, setFacultyCols] = useState<string[]>([]);
@@ -134,6 +137,8 @@ export default function ImportPage() {
   const [yearCols, setYearCols] = useState<string[]>([]);
 
   const [columnConfigs, setColumnConfigs] = useState<Record<string, ColumnConfig>>({});
+  const [displayGroups, setDisplayGroups] = useState<string[]>([]);
+  const [newGroupName, setNewGroupName] = useState("");
 
   const [previewHeader, setPreviewHeader] = useState<string | null>(null);
   const [filterText, setFilterText] = useState("");
@@ -292,7 +297,7 @@ export default function ImportPage() {
     setIsProcessing(true);
     let surveyId: number | null = null;
     try {
-      const { data: survey, error: surveyError } = await supabase.from('surveys').insert({ title: surveyTitle, description: surveyDescription }).select().single();
+      const { data: survey, error: surveyError } = await supabase.from('surveys').insert({ title: surveyTitle, description: surveyDescription, year: surveyYear || null }).select().single();
       if (surveyError) throw surveyError;
       surveyId = survey.id;
 
@@ -411,6 +416,7 @@ export default function ImportPage() {
           source_column: header,
           column_type: cfg.type,
           subgroup_name: cfg.type === "SCORE" && cfg.rule !== "NPS_0_10" ? (cfg.subgroupName ?? null) : null,
+          display_group: cfg.type === "SCORE" ? (cfg.displayGroup ?? null) : null,
         }));
       if (colTypeCacheRows.length > 0) {
         for (let i = 0; i < colTypeCacheRows.length; i += 50) {
@@ -496,6 +502,20 @@ export default function ImportPage() {
                           onChange={e => setSurveyTitle(e.target.value)}
                           placeholder="e.g. Student Satisfaction 2025"
                           className="text-lg py-6 font-semibold bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-blue-500/20"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <CalendarDays className="w-3.5 h-3.5" /> Survey Year
+                        </label>
+                        <Input
+                          type="number"
+                          value={surveyYear}
+                          onChange={e => setSurveyYear(e.target.value ? parseInt(e.target.value) : "")}
+                          placeholder="e.g. 2025"
+                          className="bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-blue-500/20 w-36"
+                          min={2000}
+                          max={2100}
                         />
                       </div>
                       <div className="space-y-2">
@@ -705,6 +725,68 @@ export default function ImportPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">
+                    {/* Column Groups panel */}
+                    <div className="mx-8 mt-6 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 bg-white dark:bg-slate-900">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-purple-500" />
+                        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Column Groups</h3>
+                        {displayGroups.length > 0 && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">{displayGroups.length} group{displayGroups.length !== 1 ? "s" : ""}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400">Create named groups first, then assign Score columns to them. Grouped binary columns combine into one chart.</p>
+                      {displayGroups.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {displayGroups.map(g => (
+                            <div key={g} className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300">
+                              <Layers className="w-3 h-3 text-purple-400 shrink-0" />
+                              {g}
+                              <button
+                                onClick={() => {
+                                  setDisplayGroups(prev => prev.filter(x => x !== g));
+                                  setColumnConfigs(prev => {
+                                    const next = { ...prev };
+                                    Object.keys(next).forEach(k => {
+                                      if (next[k].displayGroup === g) next[k] = { ...next[k], displayGroup: null };
+                                    });
+                                    return next;
+                                  });
+                                }}
+                                className="ml-1 text-slate-400 hover:text-red-500 transition-colors"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="New group name (e.g. M-Flex Learning Activities)"
+                          value={newGroupName}
+                          onChange={e => setNewGroupName(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              const name = newGroupName.trim();
+                              if (name && !displayGroups.includes(name)) { setDisplayGroups(prev => [...prev, name]); setNewGroupName(""); }
+                            }
+                          }}
+                          className="flex-1 h-8 text-sm px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        />
+                        <button
+                          disabled={!newGroupName.trim() || displayGroups.includes(newGroupName.trim())}
+                          onClick={() => {
+                            const name = newGroupName.trim();
+                            if (name && !displayGroups.includes(name)) { setDisplayGroups(prev => [...prev, name]); setNewGroupName(""); }
+                          }}
+                          className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-purple-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Group
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="max-h-[800px] overflow-y-auto p-8 space-y-6 custom-scrollbar bg-slate-50/50 dark:bg-slate-950/30">
                       {headers.filter(h => !isIdentity(h) && h.toLowerCase().includes(filterText.toLowerCase())).map(h => {
                         const config = columnConfigs[h] || { type: "IGNORE", unitId: "" };
@@ -836,6 +918,27 @@ export default function ImportPage() {
                                               </div>
                                             );
                                           })()}
+                                          {displayGroups.length > 0 && (
+                                            <div className="mt-3 space-y-1">
+                                              <label className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                                                <Layers className="w-3 h-3 text-purple-500" /> display group
+                                              </label>
+                                              <Select
+                                                value={config.displayGroup ?? "__NONE__"}
+                                                onValueChange={(val) => updateConfig(h, 'displayGroup', val === "__NONE__" ? null : val)}
+                                              >
+                                                <SelectTrigger className={`!h-auto min-h-9 py-1.5 !whitespace-normal shadow-sm border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:whitespace-normal *:data-[slot=select-value]:break-words *:data-[slot=select-value]:text-left ${config.displayGroup ? "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300" : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300"}`}>
+                                                  <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  <SelectItem value="__NONE__">No group</SelectItem>
+                                                  {displayGroups.map(g => (
+                                                    <SelectItem key={g} value={g}>{g}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                            </div>
+                                          )}
                                         </>
                                       ) : config.type === "TEXT" ? (
                                         <div className="h-10 flex items-center gap-2 text-[10px] mt-6 font-black text-green-700 dark:text-green-400 bg-green-100/50 dark:bg-green-950/30 px-3 rounded-lg border border-green-200/50 dark:border-green-800/50 uppercase tracking-tighter">

@@ -68,6 +68,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     // Per-column subgroup assignment loaded from survey_column_cache. Drives the
     // subgroup-aware per-respondent macro that computes the unit's headline SSI.
     const [subgroupByColumn, setSubgroupByColumn] = useState<Map<string, string | null>>(new Map());
+    const [displayGroupByColumn, setDisplayGroupByColumn] = useState<Map<string, string | null>>(new Map());
 
     // Filter Options & Active State
     const [filterOptions, setFilterOptions] = useState<{ locations: string[], faculties: string[], programs: string[] }>({ locations: [], faculties: [], programs: [] });
@@ -87,6 +88,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     const [rawDataPage, setRawDataPage] = useState(0);
     const [rawDataSearch, setRawDataSearch] = useState("");
     const [rawDataTotal, setRawDataTotal] = useState(0);
+    const [rawDataSuggestionOnly, setRawDataSuggestionOnly] = useState(false);
     const RAW_PAGE_SIZE = 25;
 
     useEffect(() => {
@@ -107,12 +109,15 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
 
     useEffect(() => {
         if (!unitId || !surveyId || isCurrentlyAnalyzing) { setIncomingMentions(null); return; }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
         setIncomingLoading(true);
-        fetch(`/api/executive/incoming-mentions?unitId=${unitId}&surveyId=${surveyId}`)
+        fetch(`/api/executive/incoming-mentions?unitId=${unitId}&surveyId=${surveyId}`, { signal: controller.signal })
             .then(r => r.json())
             .then(data => setIncomingMentions(data))
             .catch(() => setIncomingMentions(null))
-            .finally(() => setIncomingLoading(false));
+            .finally(() => { clearTimeout(timeout); setIncomingLoading(false); });
+        return () => { controller.abort(); clearTimeout(timeout); };
     }, [unitId, surveyId, isCurrentlyAnalyzing]);
 
     // --- DATA LOADING ---
@@ -231,7 +236,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                     (q) => q.eq('is_quantitative', true).not('numerical_score', 'is', null)
                 ),
                 surveyId
-                    ? supabase.from('survey_column_cache').select('source_column, column_type, subgroup_name').eq('survey_id', parseInt(surveyId))
+                    ? supabase.from('survey_column_cache').select('source_column, column_type, subgroup_name, display_group').eq('survey_id', parseInt(surveyId))
                     : Promise.resolve({ data: [] }),
             ]);
 
@@ -250,6 +255,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                     .map((r: any) => [r.source_column, r.subgroup_name ?? null])
             );
             setSubgroupByColumn(subgroupMap);
+            const displayGroupMap = new Map<string, string | null>(
+                ((colTypeCacheRes as any).data || [])
+                    .map((r: any) => [r.source_column, r.display_group ?? null])
+            );
+            setDisplayGroupByColumn(displayGroupMap);
             const colsWithSegments = new Set<string>();
             qData.forEach((r: any) => {
                 if (r.feedback_segments && r.feedback_segments.length > 0) colsWithSegments.add(r.source_column);
@@ -575,6 +585,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
 
         if (tab === "comments") {
             let filtered = allSegments;
+            if (rawDataSuggestionOnly) filtered = filtered.filter((s: any) => s.is_suggestion);
             if (search) filtered = filtered.filter(s => s.segment_text?.toLowerCase().includes(search.toLowerCase()));
             setRawDataTotal(filtered.length);
             setRawDataEntries(filtered.slice(from, to + 1));
@@ -593,7 +604,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
             setRawDataEntries(filtered.slice(from, to + 1));
         }
         setRawDataLoading(false);
-    }, [unitId, surveyId, allSegments]);
+    }, [unitId, surveyId, allSegments, rawDataSuggestionOnly]);
 
     useEffect(() => {
         loadRawData(rawDataTab, rawDataPage, rawDataSearch);
@@ -678,8 +689,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                 <p className="text-4xl font-black text-white mt-3 tabular-nums">{baseRawInputs.length.toLocaleString()}</p>
                                 <div className="mt-2 space-y-0.5">
                                     <p className="text-xs text-slate-500">
-                                        {totalSegmentCount.toLocaleString()} segments ·{" "}
-                                        <span className="text-emerald-400">{verifiedCount.toLocaleString()} verified</span>
+                                        {totalSegmentCount.toLocaleString()} segments analyzed
                                     </p>
                                 </div>
                             </div>
@@ -757,7 +767,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                 <h2 className="text-xs font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-widest">Performance Metrics</h2>
                                 <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">Satisfaction scores and categorical distributions</span>
                             </div>
-                            <DashboardQuantView quantGroups={quantGroups} handleQuantDrillDown={handleQuantDrillDown} />
+                            <DashboardQuantView quantGroups={quantGroups} handleQuantDrillDown={handleQuantDrillDown} displayGroupByColumn={displayGroupByColumn} />
                         </div>
                     )}
 
@@ -838,6 +848,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         rawDataEntries={rawDataEntries}
                         rawDataTotal={rawDataTotal}
                         RAW_PAGE_SIZE={RAW_PAGE_SIZE}
+                        suggestionOnly={rawDataSuggestionOnly}
+                        setSuggestionOnly={setRawDataSuggestionOnly}
                     />
                 </div>
             )}

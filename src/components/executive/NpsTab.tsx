@@ -162,51 +162,42 @@ export function NpsTab({ surveyId }: { surveyId: string | null }) {
 
     return (
         <div className="space-y-6">
-            {/* Per-NPS-column block: card + score distribution + drivers + voices */}
-            {data.units.map(u => (
-                <NpsUnitBlock
-                    key={`${u.unit_id}::${u.column}`}
-                    unit={u}
-                    qual={qualByUnit.get(u.unit_id)}
-                />
-            ))}
+            {/* 1. NPS score card + score distribution (overview) */}
+            {data.units.map(u => {
+                const qual = qualByUnit.get(u.unit_id);
+                return (
+                    <div key={`overview-${u.unit_id}::${u.column}`} className="space-y-4">
+                        <NpsCard title={u.column} subtitle={u.unit_name} counts={toCounts(u)} />
+                        {qual && u.total > 0 && <ScoreDistribution scores={qual.score_distribution} />}
+                    </div>
+                );
+            })}
 
-            {/* Faculty leaderboard */}
+            {/* 2. Faculty leaderboard */}
             <PerFacultyTable rows={data.faculties} />
-        </div>
-    );
-}
 
-// ── Per-column block ─────────────────────────────────────────────────────────
-
-function NpsUnitBlock({ unit, qual }: { unit: NpsUnitRow; qual: QualUnit | undefined }) {
-    return (
-        <div className="space-y-4">
-            <NpsCard
-                title={unit.column}
-                subtitle={unit.unit_name}
-                counts={toCounts(unit)}
-            />
-
-            {qual && unit.total > 0 && <ScoreDistribution scores={qual.score_distribution} />}
-
-            {qual && qual.sentiment.total > 0 && (
-                <>
-                    <DriverAnalysis qual={qual} />
-                    <SentimentBucketMatrix qual={qual} />
-                    <HiddenInsights qual={qual} />
-                    <BucketVoices qual={qual} />
-                    <CategoryBucketTable qual={qual} />
-                </>
-            )}
-
-            {qual && qual.sentiment.total === 0 && (
-                <Card className="border-dashed border-slate-200 dark:border-slate-800">
-                    <CardContent className="py-6 text-sm text-slate-500 dark:text-slate-400 text-center">
-                        No analyzed comments for this NPS unit yet. Run analysis on its text column from the survey page.
-                    </CardContent>
-                </Card>
-            )}
+            {/* 3. Driver analysis + deep dives */}
+            {data.units.map(u => {
+                const qual = qualByUnit.get(u.unit_id);
+                if (!qual) return null;
+                if (qual.sentiment.total === 0) {
+                    return (
+                        <Card key={`empty-${u.unit_id}::${u.column}`} className="border-dashed border-slate-200 dark:border-slate-800">
+                            <CardContent className="py-6 text-sm text-slate-500 dark:text-slate-400 text-center">
+                                No analyzed comments for this NPS unit yet. Run analysis on its text column from the survey page.
+                            </CardContent>
+                        </Card>
+                    );
+                }
+                return (
+                    <div key={`detail-${u.unit_id}::${u.column}`} className="space-y-4">
+                        <DriverAnalysis qual={qual} />
+                        <SentimentBucketMatrix qual={qual} />
+                        <HiddenInsights qual={qual} />
+                        <CategoryBucketTable qual={qual} />
+                    </div>
+                );
+            })}
         </div>
     );
 }

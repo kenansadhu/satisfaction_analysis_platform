@@ -23,7 +23,7 @@ import { BoxedMessageRenderer } from "./BoxedMessageRenderer";
 
 type ChartConfig = {
     id: string;
-    type: "BAR" | "HORIZONTAL_BAR" | "PIE" | "SCATTER" | "LINE";
+    type: "BAR" | "HORIZONTAL_BAR" | "STACKED_BAR" | "STACKED_HORIZONTAL_BAR" | "PIE" | "SCATTER" | "LINE";
     title: string;
     description: string;
     xKey: string;
@@ -357,7 +357,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
 
         // Dynamic height: horizontal bars grow with row count; vertical bars cap at 440px
         const chartHeight =
-            chart.type === 'HORIZONTAL_BAR' ? Math.max(260, chartData.length * 50 + 60) :
+            chart.type === 'HORIZONTAL_BAR' || chart.type === 'STACKED_HORIZONTAL_BAR' ? Math.max(260, chartData.length * 50 + 60) :
             chart.type === 'PIE'            ? 320 :
             chart.type === 'SCATTER'        ? 360 :
             Math.max(300, Math.min(440, chartData.length * 28 + 120));
@@ -523,6 +523,45 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                         )}
                                     </LineChart>
 
+                                ) : chart.type === "STACKED_BAR" ? (
+                                    <BarChart data={chartData} margin={{ bottom: 60, top: 12, left: 0, right: 12 }}
+                                        barCategoryGap="20%" barGap={0}>
+                                        {sharedDefs}
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                        <XAxis dataKey="name" tick={<RotatedTick />} height={60} interval={0}
+                                            axisLine={false} tickLine={false} />
+                                        <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.025)' }} />
+                                        <Legend formatter={formatKey} wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
+                                        {(chart.yKeys?.length ? chart.yKeys : [chart.yKey]).filter(Boolean).map((key, i) => (
+                                            <Bar key={key} dataKey={key!} name={chart.yLabelMap?.[key!] || key!}
+                                                stackId="stack" fill={getBarColor(key!, i)}
+                                                radius={i === (chart.yKeys?.length ?? 1) - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                                                onMouseEnter={() => setHoveredSeries(key!)}
+                                                onMouseLeave={() => setHoveredSeries(null)} />
+                                        ))}
+                                    </BarChart>
+
+                                ) : chart.type === "STACKED_HORIZONTAL_BAR" ? (
+                                    <BarChart data={chartData} layout="vertical"
+                                        margin={{ left: 8, right: 32, top: 4, bottom: 4 }}
+                                        barCategoryGap="20%" barGap={0}>
+                                        {sharedDefs}
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                                        <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                                        <YAxis dataKey="name" type="category" width={yAxisWidth}
+                                            tick={{ fontSize: 10, fill: '#475569' }} axisLine={false} tickLine={false} />
+                                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(99,102,241,0.04)' }} />
+                                        <Legend formatter={formatKey} wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
+                                        {(chart.yKeys?.length ? chart.yKeys : [chart.yKey]).filter(Boolean).map((key, i) => (
+                                            <Bar key={key} dataKey={key!} name={chart.yLabelMap?.[key!] || key!}
+                                                stackId="stack" fill={getBarColor(key!, i)}
+                                                radius={i === (chart.yKeys?.length ?? 1) - 1 ? [0, 4, 4, 0] : [0, 0, 0, 0]}
+                                                onMouseEnter={() => setHoveredSeries(key!)}
+                                                onMouseLeave={() => setHoveredSeries(null)} />
+                                        ))}
+                                    </BarChart>
+
                                 ) : (
                                     /* Default: vertical BAR */
                                     <BarChart data={chartData} margin={{ bottom: 60, top: 12, left: 0, right: 12 }}
@@ -665,7 +704,7 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                     <div>
                                         <p className="font-semibold text-slate-800 dark:text-slate-200 mb-1">AI context not built yet</p>
                                         <p className="text-sm text-slate-500 dark:text-slate-400">
-                                            Go to <span className="font-medium text-slate-700 dark:text-slate-300">Surveys → Manage → Build AI Context</span> to synthesize this survey, then return here.
+                                            Go to <span className="font-medium text-slate-700 dark:text-slate-300">Settings → Rebuild All Caches</span> to synthesize this survey, then return here.
                                         </p>
                                     </div>
                                 </div>

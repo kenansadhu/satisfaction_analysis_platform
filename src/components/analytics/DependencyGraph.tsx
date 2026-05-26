@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, useCallback, MutableRefObject } from "react";
-import dynamic from "next/dynamic";
+import { useEffect, useState, useMemo } from "react";
+import { Loader2, Network, ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Network, ArrowRight, RotateCcw } from "lucide-react";
-// Explicitly resolve .default to handle both CJS and ESM builds
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ForceGraph2D = dynamic(() => import("react-force-graph-2d").then(m => (m as any).default || m), { ssr: false }) as any;
 
 interface CrossMention {
     sourceId: number;
@@ -16,192 +12,165 @@ interface CrossMention {
     count: number;
 }
 
-interface GraphNode {
-    id: string;
-    name: string;
-    received: number;
-    sent: number;
-    val: number;
-    x?: number;
-    y?: number;
+const COLORS = [
+    '#6366f1', '#8b5cf6', '#3b82f6', '#06b6d4',
+    '#10b981', '#f59e0b', '#ef4444', '#ec4899',
+    '#84cc16', '#f97316', '#14b8a6', '#a855f7',
+    '#0ea5e9', '#22c55e', '#eab308', '#64748b',
+];
+
+function toXY(angle: number, r: number): [number, number] {
+    return [r * Math.sin(angle), -r * Math.cos(angle)];
+}
+
+function arcD(sa: number, ea: number, ir: number, or_: number): string {
+    const [ax, ay] = toXY(sa, or_);
+    const [bx, by] = toXY(ea, or_);
+    const [cx, cy] = toXY(ea, ir);
+    const [dx, dy] = toXY(sa, ir);
+    const lg = ea - sa > Math.PI ? 1 : 0;
+    return `M${ax},${ay} A${or_},${or_} 0 ${lg},1 ${bx},${by} L${cx},${cy} A${ir},${ir} 0 ${lg},0 ${dx},${dy} Z`;
+}
+
+function ribbonD(ss: number, se: number, ts: number, te: number, r: number): string {
+    const [x1, y1] = toXY(ss, r);
+    const [x2, y2] = toXY(se, r);
+    const [x3, y3] = toXY(ts, r);
+    const [x4, y4] = toXY(te, r);
+    const sl = se - ss > Math.PI ? 1 : 0;
+    const tl = te - ts > Math.PI ? 1 : 0;
+    return `M${x1},${y1} A${r},${r} 0 ${sl},1 ${x2},${y2} Q0,0 ${x3},${y3} A${r},${r} 0 ${tl},1 ${x4},${y4} Q0,0 ${x1},${y1} Z`;
+}
+
+interface GroupItem {
+    index: number;
+    value: number;
+    startAngle: number;
+    endAngle: number;
+    midAngle: number;
+}
+
+interface ChordItem {
+    srcIdx: number;
+    tgtIdx: number;
+    value: number;
+    src: { sa: number; ea: number };
+    tgt: { sa: number; ea: number };
+}
+
+function buildLayout(sym: number[][], pad = 0.028): { groups: GroupItem[]; chords: ChordItem[] } {
+    const n = sym.length;
+    const rowSums = sym.map(r => r.reduce((a, b) => a + b, 0));
+    const total = rowSums.reduce((a, b) => a + b, 0);
+    if (total === 0) return { groups: [], chords: [] };
+
+    const scale = (2 * Math.PI - pad * n) / total;
+    let cur = 0;
+    const groups: GroupItem[] = rowSums.map((val, i) => {
+        const sa = cur;
+        const ea = sa + val * scale;
+        cur = ea + pad;
+        return { index: i, value: val, startAngle: sa, endAngle: ea, midAngle: (sa + ea) / 2 };
+    });
+
+    const cursors = groups.map(g => g.startAngle);
+    const chords: ChordItem[] = [];
+
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const v = sym[i][j];
+            if (v === 0) continue;
+            const span = v * scale;
+            const srcSa = cursors[i]; cursors[i] += span;
+            const tgtSa = cursors[j]; cursors[j] += span;
+            chords.push({ srcIdx: i, tgtIdx: j, value: v, src: { sa: srcSa, ea: srcSa + span }, tgt: { sa: tgtSa, ea: tgtSa + span } });
+        }
+    }
+
+    return { groups, chords };
 }
 
 export function DependencyGraph({ surveyId, npsUnitIds = [] }: { surveyId: string; npsUnitIds?: number[] }) {
     const [mentions, setMentions] = useState<CrossMention[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isClient, setIsClient] = useState(false);
-    const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const graphRef = useRef<any>(null);
-    const [dimensions, setDimensions] = useState({ width: 800, height: 460 });
-
-    useEffect(() => { setIsClient(true); }, []);
+    const [hovered, setHovered] = useState<number | null>(null);
 
     useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                const url = surveyId === 'all'
-                    ? '/api/analytics/dependency-graph'
-                    : `/api/analytics/dependency-graph?surveyId=${surveyId}`;
-                const res = await fetch(url);
-                const json = await res.json();
-                if (json.error) throw new Error(json.error);
-                setMentions(json.mentions || []);
-            } catch (err) {
-                console.error('DependencyGraph fetch failed:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
+        setLoading(true);
+        const url = surveyId === 'all'
+            ? '/api/analytics/dependency-graph'
+            : `/api/analytics/dependency-graph?surveyId=${surveyId}`;
+        fetch(url)
+            .then(r => r.json())
+            .then(d => setMentions(d.mentions || []))
+            .catch(() => setMentions([]))
+            .finally(() => setLoading(false));
     }, [surveyId]);
 
-
-    useEffect(() => {
-        if (!containerRef.current) return;
-        const obs = new ResizeObserver(entries => {
-            const { width, height } = entries[0].contentRect;
-            if (width > 0 && height > 0) setDimensions({ width, height });
-        });
-        obs.observe(containerRef.current);
-        return () => obs.disconnect();
-    }, []);
-
-    const filteredMentions = useMemo(() =>
+    const filtered = useMemo(() =>
         npsUnitIds.length > 0
             ? mentions.filter(m => !npsUnitIds.includes(m.sourceId) && !npsUnitIds.includes(m.targetId))
             : mentions,
         [mentions, npsUnitIds]
     );
 
-    const graphData = useMemo(() => {
-        if (!filteredMentions.length) return { nodes: [] as GraphNode[], links: [] as { source: string; target: string; value: number }[] };
-
-        const nameMap = new Map<number, string>();
-        const receivedMap = new Map<number, number>();
-        const sentMap = new Map<number, number>();
-
-        for (const m of filteredMentions) {
-            nameMap.set(m.sourceId, m.sourceName);
-            nameMap.set(m.targetId, m.targetName);
-            receivedMap.set(m.targetId, (receivedMap.get(m.targetId) || 0) + m.count);
-            sentMap.set(m.sourceId, (sentMap.get(m.sourceId) || 0) + m.count);
+    const { units, sym, dir } = useMemo(() => {
+        if (!filtered.length) return { units: [] as { id: number; name: string; color: string }[], sym: [] as number[][], dir: [] as number[][] };
+        const names = new Map<number, string>();
+        const ids = new Set<number>();
+        for (const m of filtered) {
+            ids.add(m.sourceId); ids.add(m.targetId);
+            names.set(m.sourceId, m.sourceName);
+            names.set(m.targetId, m.targetName);
         }
-
-        const unitSet = new Set<number>();
-        for (const m of filteredMentions) { unitSet.add(m.sourceId); unitSet.add(m.targetId); }
-        const maxReceived = Math.max(...Array.from(receivedMap.values()), 1);
-
-        const nodes: GraphNode[] = Array.from(unitSet).map(id => ({
-            id: id.toString(),
-            name: nameMap.get(id) || `Unit ${id}`,
-            received: receivedMap.get(id) || 0,
-            sent: sentMap.get(id) || 0,
-            val: Math.max(((receivedMap.get(id) || 0) / maxReceived) * 12 + 3, 3),
+        const units = Array.from(ids).sort((a, b) => a - b).map((id, i) => ({
+            id, name: names.get(id)!, color: COLORS[i % COLORS.length],
         }));
-
-        const links = filteredMentions.map(m => ({
-            source: m.sourceId.toString(),
-            target: m.targetId.toString(),
-            value: m.count,
-        }));
-
-        return { nodes, links };
-    }, [mentions]);
-
-    useEffect(() => {
-        if (!graphRef.current || !graphData.nodes.length) return;
-        graphRef.current.d3Force('charge')?.strength(-600);
-        graphRef.current.d3Force('link')?.distance(220);
-        graphRef.current.d3ReheatSimulation();
-    }, [graphData]);
-
-    const maxReceived = useMemo(() =>
-        Math.max(...graphData.nodes.map(n => n.received), 1),
-        [graphData.nodes]
-    );
-
-    const nodeCanvasObject = useCallback((node: GraphNode & { x: number; y: number }, ctx: CanvasRenderingContext2D, globalScale: number) => {
-        const r = Math.sqrt(node.val) * 2.0 + 2;
-        const fontSize = Math.max(9, 11 / globalScale);
-        const label = node.name.length > 13 ? node.name.slice(0, 12) + '…' : node.name;
-        const isHovered = hoveredNode?.id === node.id;
-
-        if (isHovered) {
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, r + 5, 0, 2 * Math.PI);
-            ctx.fillStyle = 'rgba(99,102,241,0.18)';
-            ctx.fill();
+        const idxMap = new Map(units.map((u, i) => [u.id, i]));
+        const n = units.length;
+        const sym: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+        const dir: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+        for (const m of filtered) {
+            const i = idxMap.get(m.sourceId)!, j = idxMap.get(m.targetId)!;
+            sym[i][j] += m.count;
+            sym[j][i] += m.count;
+            dir[i][j] += m.count;
         }
+        return { units, sym, dir };
+    }, [filtered]);
 
-        const intensity = node.received / maxReceived;
-        let fillColor = '#94a3b8';
-        if (intensity > 0.7) fillColor = '#3730a3';
-        else if (intensity > 0.4) fillColor = '#6366f1';
-        else if (intensity > 0.1) fillColor = '#818cf8';
-
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-        ctx.fillStyle = fillColor;
-        ctx.globalAlpha = isHovered ? 1 : 0.9;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.lineWidth = 1.5 / globalScale;
-        ctx.stroke();
-
-        ctx.font = `${isHovered ? 'bold ' : ''}${fontSize}px system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = isHovered ? '#1e293b' : '#475569';
-        ctx.fillText(label, node.x, node.y + r + 2 / globalScale);
-    }, [hoveredNode, maxReceived]);
-
-    const nodePointerAreaPaint = useCallback((node: GraphNode & { x: number; y: number }, color: string, ctx: CanvasRenderingContext2D) => {
-        const r = Math.sqrt(node.val) * 2.0 + 6;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-        ctx.fill();
-    }, []);
-
-    const handleNodeDragEnd = useCallback((node: any) => {
-        node.fx = node.x;
-        node.fy = node.y;
-    }, []);
-
-    const resetPositions = useCallback(() => {
-        graphData.nodes.forEach((node: any) => {
-            node.fx = undefined;
-            node.fy = undefined;
-        });
-        if (graphRef.current) {
-            graphRef.current.d3Force('charge')?.strength(-600);
-            graphRef.current.d3Force('link')?.distance(220);
-            graphRef.current.d3ReheatSimulation();
-        }
-    }, [graphData.nodes]);
-
-    const topMentions = filteredMentions.slice(0, 6);
+    const { groups, chords } = useMemo(() => buildLayout(sym), [sym]);
 
     const stats = useMemo(() => {
-        if (!graphData.nodes.length) return null;
-        const totalMentions = filteredMentions.reduce((s, m) => s + m.count, 0);
-        const sorted = [...graphData.nodes].sort((a, b) => b.received - a.received);
-        const mostReferenced = sorted[0];
-        const mostMentioning = [...graphData.nodes].sort((a, b) => b.sent - a.sent)[0];
-        return { totalMentions, mostReferenced, mostMentioning };
-    }, [graphData.nodes, mentions]);
+        if (!filtered.length) return null;
+        const total = filtered.reduce((s, m) => s + m.count, 0);
+        const recv = new Map<number, number>(), sent = new Map<number, number>(), names = new Map<number, string>();
+        for (const m of filtered) {
+            recv.set(m.targetId, (recv.get(m.targetId) || 0) + m.count);
+            sent.set(m.sourceId, (sent.get(m.sourceId) || 0) + m.count);
+            names.set(m.sourceId, m.sourceName); names.set(m.targetId, m.targetName);
+        }
+        const topRecv = [...recv.entries()].sort((a, b) => b[1] - a[1])[0];
+        const topSent = [...sent.entries()].sort((a, b) => b[1] - a[1])[0];
+        return {
+            total,
+            mostReferenced: topRecv ? { name: names.get(topRecv[0])!, count: topRecv[1] } : null,
+            mostMentioning: topSent ? { name: names.get(topSent[0])!, count: topSent[1] } : null,
+        };
+    }, [filtered]);
+
+    const topSignals = useMemo(() => [...filtered].sort((a, b) => b.count - a.count).slice(0, 5), [filtered]);
+
+    const OR = 182, IR = 155, LR = 197;
 
     return (
         <div className="flex flex-col h-full gap-3 p-1">
             {!loading && stats && (
                 <div className="shrink-0 grid grid-cols-3 gap-2">
                     {[
-                        { label: "Total Cross-Mentions", value: stats.totalMentions, sub: "between units" },
-                        { label: "Most Referenced", value: stats.mostReferenced?.name ?? "—", sub: `${stats.mostReferenced?.received ?? 0} times referenced` },
-                        { label: "Most Mentioning", value: stats.mostMentioning?.name ?? "—", sub: `${stats.mostMentioning?.sent ?? 0} outbound mentions` },
+                        { label: "Total Cross-Mentions", value: stats.total, sub: "between units" },
+                        { label: "Most Referenced", value: stats.mostReferenced?.name ?? "—", sub: `${stats.mostReferenced?.count ?? 0} times referenced` },
+                        { label: "Most Mentioning", value: stats.mostMentioning?.name ?? "—", sub: `${stats.mostMentioning?.count ?? 0} outbound mentions` },
                     ].map(({ label, value, sub }) => (
                         <div key={label} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl px-4 py-3">
                             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
@@ -211,11 +180,12 @@ export function DependencyGraph({ surveyId, npsUnitIds = [] }: { surveyId: strin
                     ))}
                 </div>
             )}
-            {!loading && topMentions.length > 0 && (
-                <div className="shrink-0 space-y-2">
+
+            {!loading && topSignals.length > 0 && (
+                <div className="shrink-0 space-y-1.5">
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Strongest Cross-Unit Signals</p>
                     <div className="flex flex-wrap gap-1.5">
-                        {topMentions.map((m, i) => (
+                        {topSignals.map((m, i) => (
                             <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 rounded-full text-xs">
                                 <span className="font-semibold text-indigo-700 dark:text-indigo-300">{m.sourceName}</span>
                                 <ArrowRight className="w-2.5 h-2.5 text-indigo-400" />
@@ -227,71 +197,131 @@ export function DependencyGraph({ surveyId, npsUnitIds = [] }: { surveyId: strin
                 </div>
             )}
 
-            <div ref={containerRef} className="flex-1 relative rounded-xl overflow-hidden bg-slate-50/80 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800">
+            <div className="flex-1 relative rounded-xl overflow-hidden bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-center min-h-[320px]">
                 {loading ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                    <div className="flex flex-col items-center gap-3">
                         <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
                         <p className="text-sm text-slate-400 font-medium animate-pulse">Mapping unit connections...</p>
                     </div>
-                ) : filteredMentions.length === 0 ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-4 px-8">
+                ) : filtered.length === 0 ? (
+                    <div className="flex flex-col items-center text-slate-400 gap-4 px-8">
                         <Network className="w-12 h-12 opacity-20" />
                         <div className="text-sm text-center">
                             <p className="font-semibold text-slate-500">No cross-unit mentions detected</p>
-                            <p className="text-xs mt-2 text-slate-400 max-w-xs leading-relaxed">This graph populates when students reference other departments in their feedback during AI analysis. Run analysis on more units to populate the graph.</p>
+                            <p className="text-xs mt-2 text-slate-400 max-w-xs leading-relaxed">
+                                This graph populates when students reference other departments in their feedback during AI analysis.
+                            </p>
                         </div>
                         <Badge variant="outline" className="text-xs font-normal opacity-60">Requires AI tagging with related_unit_ids</Badge>
                     </div>
                 ) : (
-                    <>
-                        {hoveredNode && (
-                            <div className="absolute top-3 left-3 z-10 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl px-4 py-3 shadow-xl text-sm pointer-events-none">
-                                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1.5">{hoveredNode.name}</p>
-                                <div className="space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
-                                    <p>Cross-referenced by others: <span className="font-semibold text-indigo-600 dark:text-indigo-400">{hoveredNode.received} mentions</span></p>
-                                    <p>References other units: <span className="font-semibold text-slate-600 dark:text-slate-300">{hoveredNode.sent} mentions</span></p>
-                                </div>
-                            </div>
-                        )}
-                        <div className="absolute bottom-3 right-3 z-10 flex items-center gap-3 text-[10px] text-slate-500 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm rounded-lg px-2.5 py-1.5 border border-slate-100 dark:border-slate-800">
-                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-indigo-800 inline-block" /> High traffic</span>
-                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block" /> Moderate</span>
-                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" /> Low</span>
-                        </div>
-                        <button
-                            onClick={resetPositions}
-                            className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm rounded-lg px-2.5 py-1.5 border border-slate-100 dark:border-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-200 dark:hover:border-indigo-800 transition-colors"
-                        >
-                            <RotateCcw className="w-3 h-3" /> Reset positions
-                        </button>
-                        {isClient && (
-                            <ForceGraph2D
-                                ref={graphRef}
-                                graphData={graphData}
-                                width={dimensions.width}
-                                height={dimensions.height}
-                                nodeCanvasObject={nodeCanvasObject}
-                                nodeCanvasObjectMode={() => 'replace'}
-                                nodePointerAreaPaint={nodePointerAreaPaint}
-                                linkWidth={(link: { value: number }) => Math.log(link.value + 1) * 1.5 + 0.5}
-                                linkDirectionalArrowLength={0}
-                                linkColor={() => 'rgba(99,102,241,0.35)'}
-                                linkDirectionalParticles={3}
-                                linkDirectionalParticleWidth={(link: { value: number }) => Math.log(link.value + 1) + 1}
-                                linkDirectionalParticleColor={() => '#6366f1'}
-                                onNodeDragEnd={handleNodeDragEnd}
-                                onNodeHover={(node: GraphNode | null) => setHoveredNode(node || null)}
-                                backgroundColor="transparent"
-                                d3AlphaDecay={0.01}
-                                d3VelocityDecay={0.25}
-                                cooldownTicks={200}
-                                onEngineStop={() => graphRef.current?.zoomToFit(400, 40)}
-                                enableZoomInteraction
-                                enablePanInteraction
-                            />
-                        )}
-                    </>
+                    <svg
+                        viewBox="-265 -265 530 530"
+                        className="w-full h-full"
+                        style={{ maxHeight: '100%' }}
+                        onMouseLeave={() => setHovered(null)}
+                    >
+                        {/* Ribbons rendered first (behind arcs) */}
+                        <g>
+                            {chords.map((c, idx) => {
+                                const hi = hovered !== null && (c.srcIdx === hovered || c.tgtIdx === hovered);
+                                const dim = hovered !== null && !hi;
+
+                                let color = units[c.srcIdx].color;
+                                if (hi && hovered !== null) {
+                                    const otherIdx = c.srcIdx === hovered ? c.tgtIdx : c.srcIdx;
+                                    const out = dir[hovered][otherIdx];
+                                    const inc = dir[otherIdx][hovered];
+                                    if (out > inc) color = '#f59e0b';       // amber = outgoing
+                                    else if (inc > out) color = '#10b981';  // emerald = incoming
+                                }
+
+                                return (
+                                    <path
+                                        key={idx}
+                                        d={ribbonD(c.src.sa, c.src.ea, c.tgt.sa, c.tgt.ea, IR - 1)}
+                                        fill={color}
+                                        fillOpacity={dim ? 0.03 : hi ? 0.55 : 0.18}
+                                        stroke={color}
+                                        strokeOpacity={dim ? 0.05 : hi ? 0.8 : 0.3}
+                                        strokeWidth={0.5}
+                                        style={{ transition: 'fill-opacity 0.15s, stroke-opacity 0.15s' }}
+                                    />
+                                );
+                            })}
+                        </g>
+
+                        {/* Arc segments + labels */}
+                        <g>
+                            {groups.map((g) => {
+                                const u = units[g.index];
+                                const isH = hovered === g.index;
+                                const isDim = hovered !== null && !isH;
+                                const showLabel = (g.endAngle - g.startAngle) > 0.07;
+                                const deg = g.midAngle * 180 / Math.PI - 90;
+                                const flip = g.midAngle > Math.PI;
+                                return (
+                                    <g
+                                        key={g.index}
+                                        onMouseEnter={() => setHovered(g.index)}
+                                        onMouseLeave={() => setHovered(null)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <path
+                                            d={arcD(g.startAngle, g.endAngle, IR, OR)}
+                                            fill={u.color}
+                                            fillOpacity={isDim ? 0.25 : 1}
+                                            stroke="white"
+                                            strokeWidth={1.5}
+                                            style={{ transition: 'fill-opacity 0.15s' }}
+                                        />
+                                        {showLabel && (
+                                            <text
+                                                transform={`rotate(${deg}) translate(${LR},0)${flip ? ' rotate(180)' : ''}`}
+                                                textAnchor={flip ? "end" : "start"}
+                                                dominantBaseline="middle"
+                                                fontSize={9}
+                                                fontWeight={isH ? "700" : "500"}
+                                                fill={isDim ? "#94a3b8" : u.color}
+                                                style={{ transition: 'fill 0.15s', userSelect: 'none', pointerEvents: 'none' }}
+                                            >
+                                                {u.name.length > 16 ? u.name.slice(0, 15) + '…' : u.name}
+                                            </text>
+                                        )}
+                                    </g>
+                                );
+                            })}
+                        </g>
+
+                        {/* Center info on hover */}
+                        {hovered !== null && (() => {
+                            const u = units[hovered];
+                            const r = filtered.filter(m => m.targetId === u.id).reduce((acc, m) => acc + m.count, 0);
+                            const s = filtered.filter(m => m.sourceId === u.id).reduce((acc, m) => acc + m.count, 0);
+                            return (
+                                <g pointerEvents="none">
+                                    <text textAnchor="middle" y={-20} fontSize={11} fontWeight="700" fill={u.color}>
+                                        {u.name.length > 22 ? u.name.slice(0, 21) + '…' : u.name}
+                                    </text>
+                                    <text textAnchor="middle" y={-4} fontSize={9} fill="#64748b">↑ {r} received</text>
+                                    <text textAnchor="middle" y={11} fontSize={9} fill="#64748b">↓ {s} sent</text>
+                                </g>
+                            );
+                        })()}
+                    </svg>
                 )}
+            </div>
+
+            {/* Direction legend — HTML so it's readable at any size */}
+            <div className={`shrink-0 flex items-center justify-center gap-5 text-xs transition-opacity duration-200 ${hovered !== null ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
+                    <span className="w-3 h-3 rounded-full bg-amber-400 inline-block" />
+                    Outgoing — this unit mentions others
+                </span>
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                    <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
+                    Incoming — others mention this unit
+                </span>
             </div>
         </div>
     );

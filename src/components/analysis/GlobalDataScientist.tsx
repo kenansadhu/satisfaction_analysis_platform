@@ -100,7 +100,7 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
     const generateDiscovery = async () => {
         setLoadingDiscover(true);
         setError(null);
-        toast.info("Gemini 3.1 Pro is hunting for macro-connections...");
+        toast.info("AI is hunting for macro-connections...");
 
         try {
             const res = await fetch('/api/ai/generate-dashboard', {
@@ -400,7 +400,7 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
                             <Sparkles className="w-8 h-8 text-purple-300" />
                             AI Data Scientist
                             <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-500/30 border border-indigo-400/30 text-indigo-100 ml-2 hidden sm:inline-block">
-                                Gemini 3.1 Pro
+                                Gemini 3.5 Flash
                             </span>
                         </span>
                     </h2>

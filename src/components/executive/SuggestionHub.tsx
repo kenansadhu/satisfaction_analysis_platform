@@ -396,19 +396,6 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
     return (
         <div className="space-y-5">
 
-            {/* Cache freshness indicator */}
-            {cachedAt ? (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>Cached data · Built {new Date(cachedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                </div>
-            ) : !fromCache && suggestions.length > 0 ? (
-                <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                    <span>Live data (cache not built) · Consider rebuilding the cache in Settings for faster loads</span>
-                </div>
-            ) : null}
-
             {/* Stats strip */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {[

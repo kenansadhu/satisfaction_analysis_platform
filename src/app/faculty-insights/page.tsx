@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { computeSentimentScore } from "@/lib/utils";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -144,6 +143,31 @@ export default function FacultyInsightsPage() {
     const avgPQ = pqScores.length > 0 ? (pqScores.reduce((a, b) => a + b, 0) / pqScores.length).toFixed(2) : null;
     const avgCE = ceScores.length > 0 ? (ceScores.reduce((a, b) => a + b, 0) / ceScores.length).toFixed(2) : null;
 
+    const overallRR = totalEnrolled > 0 ? Math.round((totalRespondents / totalEnrolled) * 100) : null;
+    const strongFaculties = pqScores.filter(s => s >= 3.20).length;
+    const fairFaculties = pqScores.filter(s => s >= 3.00 && s < 3.20).length;
+    const poorFaculties = pqScores.filter(s => s < 3.00).length;
+    const topFaculty = withData.length > 0
+        ? [...withData].sort((a, b) => (b.data?.programQuality.avg_score ?? 0) - (a.data?.programQuality.avg_score ?? 0))[0]
+        : null;
+    const overallNps = faculties.reduce((acc, f) => {
+        if (!f.nps) return acc;
+        return { promoter: acc.promoter + f.nps.promoter, passive: acc.passive + f.nps.passive, detractor: acc.detractor + f.nps.detractor, total: acc.total + f.nps.total };
+    }, { promoter: 0, passive: 0, detractor: 0, total: 0 });
+    const overallNpsScore = overallNps.total > 0 ? computeNpsScore(overallNps) : null;
+
+    const totalPQPos = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.positive || 0), 0);
+    const totalPQNeg = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.negative || 0), 0);
+    const totalPQTotal = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.total || 0), 0);
+    const pqPosPct = totalPQTotal > 0 ? Math.round((totalPQPos / totalPQTotal) * 100) : 0;
+    const pqNegPct = totalPQTotal > 0 ? Math.round((totalPQNeg / totalPQTotal) * 100) : 0;
+
+    const totalCEPos = withData.reduce((s, f) => s + (f.data?.campusExperience.sentiment.positive || 0), 0);
+    const totalCENeg = withData.reduce((s, f) => s + (f.data?.campusExperience.sentiment.negative || 0), 0);
+    const totalCETotal = withData.reduce((s, f) => s + (f.data?.campusExperience.sentiment.total || 0), 0);
+    const cePosPct = totalCETotal > 0 ? Math.round((totalCEPos / totalCETotal) * 100) : 0;
+    const ceNegPct = totalCETotal > 0 ? Math.round((totalCENeg / totalCETotal) * 100) : 0;
+
     return (
         <PageShell>
             <PageHeader
@@ -160,70 +184,179 @@ export default function FacultyInsightsPage() {
 
             <div className="max-w-7xl mx-auto px-8 py-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-                {/* Hero banner */}
+                {/* Hero Card */}
                 {!loading && withData.length > 0 && (
-                    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-600 p-6 text-white shadow-lg">
-                        <div className="absolute -top-8 -right-8 w-36 h-36 bg-white/10 rounded-full pointer-events-none" />
-                        <div className="absolute top-3 right-12 w-16 h-16 bg-white/5 rounded-full pointer-events-none" />
-                        <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                            <div>
-                                <h2 className="text-lg font-black mb-1">Faculty Performance Overview</h2>
-                                <p className="text-teal-100 text-sm">
-                                    {totalRespondents.toLocaleString()} respondents across {withData.length} faculties
-                                    {totalEnrolled > 0 && ` · ${((totalRespondents / totalEnrolled) * 100).toFixed(1)}% response rate`}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-5 shrink-0">
-                                <div className="text-center">
-                                    <div className="text-3xl font-black tabular-nums">{avgPQ ?? "—"}</div>
-                                    <div className="flex items-center gap-1 justify-center mt-0.5">
-                                        <BookOpen className="w-3 h-3 text-teal-200" />
-                                        <span className="text-xs text-teal-100">Avg Program Quality</span>
-                                    </div>
+                    <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 border border-teal-900/50 shadow-2xl">
+                        {/* Decorative blobs */}
+                        <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-teal-600/20 blur-3xl pointer-events-none" />
+                        <div className="absolute -bottom-16 -right-16 w-64 h-64 rounded-full bg-cyan-600/15 blur-3xl pointer-events-none" />
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-32 rounded-full bg-teal-500/5 blur-2xl pointer-events-none" />
+
+                        {/* Main content */}
+                        <div className="relative flex flex-col lg:flex-row gap-0 divide-y lg:divide-y-0 lg:divide-x divide-white/10">
+
+                            {/* Left: Avg PQ Score */}
+                            <div className="flex flex-col items-center justify-center px-10 py-8 lg:w-60 shrink-0 gap-1">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
+                                    <BookOpen className="w-3 h-3" /> Program Quality
                                 </div>
-                                <div className="w-px h-10 bg-white/25 shrink-0" />
-                                <div className="text-center">
-                                    <div className="text-3xl font-black tabular-nums">{avgCE ?? "—"}</div>
-                                    <div className="flex items-center gap-1 justify-center mt-0.5">
-                                        <Building2 className="w-3 h-3 text-teal-200" />
-                                        <span className="text-xs text-teal-100">Avg Campus Experience</span>
+                                <div className={`text-5xl font-black tabular-nums leading-none ${
+                                    avgPQ !== null && parseFloat(avgPQ) >= 3.20 ? "text-emerald-400" :
+                                    avgPQ !== null && parseFloat(avgPQ) >= 3.00 ? "text-amber-400" : "text-red-400"
+                                }`}>{avgPQ ?? "—"}</div>
+                                <div className="text-sm text-teal-200/40 font-medium mt-1">out of 4.00</div>
+                                <div className="mt-3 text-center">
+                                    <div className="text-base font-semibold text-white/80">{withData.length} <span className="text-white/40 font-normal">of</span> {faculties.length}</div>
+                                    <div className="text-xs text-teal-300/60 font-medium uppercase tracking-wide">faculties analyzed</div>
+                                </div>
+                            </div>
+
+                            {/* Center-left: Avg CE Score */}
+                            <div className="flex flex-col items-center justify-center px-10 py-8 lg:w-60 shrink-0 gap-1">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
+                                    <Building2 className="w-3 h-3" /> Campus Experience
+                                </div>
+                                <div className={`text-5xl font-black tabular-nums leading-none ${
+                                    avgCE !== null && parseFloat(avgCE) >= 3.20 ? "text-emerald-400" :
+                                    avgCE !== null && parseFloat(avgCE) >= 3.00 ? "text-amber-400" : "text-red-400"
+                                }`}>{avgCE ?? "—"}</div>
+                                <div className="text-sm text-teal-200/40 font-medium mt-1">out of 4.00</div>
+                                <div className="mt-3 text-center">
+                                    <div className="text-base font-semibold text-white/80">
+                                        {overallRR !== null ? <span className={overallRR >= 80 ? "text-emerald-400" : overallRR >= 50 ? "text-amber-400" : "text-red-400"}>{overallRR}%</span> : "—"}
+                                    </div>
+                                    <div className="text-xs text-teal-300/60 font-medium uppercase tracking-wide">response rate</div>
+                                </div>
+                            </div>
+
+                            {/* Right: Top faculty + NPS + respondents */}
+                            <div className="flex flex-col justify-center gap-6 px-8 py-8 flex-1 min-w-0">
+                                <div>
+                                    <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-2">Top Faculty (PQ)</div>
+                                    {topFaculty ? (
+                                        <div className="flex items-start gap-2.5">
+                                            <div className="p-2 bg-emerald-500/20 rounded-lg shrink-0 mt-0.5">
+                                                <GraduationCap className="w-4 h-4 text-emerald-400" />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-bold text-white leading-snug truncate">{topFaculty.name}</div>
+                                                <div className={`text-xl font-black tabular-nums leading-none mt-0.5 ${scoreColor(topFaculty.data?.programQuality.avg_score ?? null)}`}>
+                                                    {topFaculty.data?.programQuality.avg_score?.toFixed(2) ?? "—"}
+                                                    <span className="text-sm font-medium text-white/30 ml-0.5">/4.00</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : <span className="text-white/30 text-sm">—</span>}
+                                </div>
+
+                                <div className="flex items-center gap-8">
+                                    <div>
+                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1">Overall NPS</div>
+                                        <div className={`text-xl font-black tabular-nums leading-none ${overallNpsScore === null ? "text-white/30" : overallNpsScore >= 50 ? "text-emerald-400" : overallNpsScore >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                                            {overallNpsScore !== null ? (overallNpsScore > 0 ? `+${overallNpsScore}` : overallNpsScore) : "—"}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1">Respondents</div>
+                                        <div className="flex items-baseline gap-1.5">
+                                            <Users className="w-3.5 h-3.5 text-teal-400 shrink-0 self-center" />
+                                            <span className="text-xl font-black text-white tabular-nums">{totalRespondents.toLocaleString()}</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                )}
 
-                {/* Stat cards — Faculties + Respondents */}
-                {!loading && faculties.length > 0 && (
-                    <div className="grid grid-cols-2 gap-3">
-                        {[
-                            { label: "Faculties", value: faculties.length, icon: GraduationCap, color: "text-teal-600", bg: "bg-teal-50 dark:bg-teal-950/40" },
-                            { label: "Respondents", value: totalRespondents > 0 ? totalRespondents.toLocaleString() : "—", icon: Users, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950/40" },
-                        ].map(stat => (
-                            <div key={stat.label} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-5 py-4 flex items-center gap-3">
-                                <div className={`p-2 rounded-lg ${stat.bg} shrink-0`}>
-                                    <stat.icon className={`w-4 h-4 ${stat.color}`} />
+                        {/* Bottom strip: Faculty Distribution + Sentiment Bars */}
+                        <div className="relative border-t border-white/10 px-8 py-5 flex flex-col lg:flex-row gap-6">
+                            {/* Faculty tier distribution */}
+                            {pqScores.length > 0 && (
+                                <div className="lg:w-64 shrink-0 space-y-3">
+                                    <div className="text-[10px] font-semibold uppercase tracking-widest text-teal-300/70">Faculty Score Distribution (PQ)</div>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-baseline mb-1">
+                                                    <span className="text-[11px] font-semibold text-emerald-300">Strong</span>
+                                                    <span className="text-[10px] text-white/40 tabular-nums">{strongFaculties}</span>
+                                                </div>
+                                                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                                    <div className="h-full rounded-full bg-emerald-400 transition-all duration-700"
+                                                        style={{ width: pqScores.length > 0 ? `${(strongFaculties / pqScores.length) * 100}%` : "0%" }} />
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] text-white/30 w-10 text-right shrink-0">≥ 3.20</span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-baseline mb-1">
+                                                    <span className="text-[11px] font-semibold text-amber-300">Fair</span>
+                                                    <span className="text-[10px] text-white/40 tabular-nums">{fairFaculties}</span>
+                                                </div>
+                                                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                                    <div className="h-full rounded-full bg-amber-400 transition-all duration-700"
+                                                        style={{ width: pqScores.length > 0 ? `${(fairFaculties / pqScores.length) * 100}%` : "0%" }} />
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] text-white/30 w-10 text-right shrink-0">3.00–</span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-baseline mb-1">
+                                                    <span className="text-[11px] font-semibold text-red-300">Needs Attention</span>
+                                                    <span className="text-[10px] text-white/40 tabular-nums">{poorFaculties}</span>
+                                                </div>
+                                                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                                    <div className="h-full rounded-full bg-red-400 transition-all duration-700"
+                                                        style={{ width: pqScores.length > 0 ? `${(poorFaculties / pqScores.length) * 100}%` : "0%" }} />
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] text-white/30 w-10 text-right shrink-0">&lt; 3.00</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="min-w-0">
-                                    <div className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums leading-tight">{stat.value}</div>
-                                    <div className="text-xs text-slate-500 font-medium">{stat.label}</div>
-                                </div>
+                            )}
+
+                            {/* Sentiment bars */}
+                            <div className="flex-1 flex flex-col gap-3 justify-center">
+                                {totalPQTotal > 0 && (
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                        <div className="text-xs font-semibold uppercase tracking-widest text-violet-300/70 shrink-0 w-40">Program Quality</div>
+                                        <div className="flex-1 flex flex-col gap-1 min-w-0">
+                                            <div className="flex h-2 rounded-full overflow-hidden bg-white/10">
+                                                {pqPosPct > 0 && <div style={{ width: `${pqPosPct}%` }} className="bg-violet-400 transition-all duration-700" />}
+                                                {(100 - pqPosPct - pqNegPct) > 0 && <div style={{ width: `${100 - pqPosPct - pqNegPct}%` }} className="bg-violet-300/30 transition-all duration-700" />}
+                                                {pqNegPct > 0 && <div style={{ width: `${pqNegPct}%` }} className="bg-red-400 transition-all duration-700" />}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4 shrink-0 text-xs font-semibold tabular-nums">
+                                            <span className="text-violet-300">{pqPosPct}% pos</span>
+                                            <span className="text-white/20">·</span>
+                                            <span className="text-red-400">{pqNegPct}% neg</span>
+                                        </div>
+                                    </div>
+                                )}
+                                {totalCETotal > 0 && (
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                        <div className="text-xs font-semibold uppercase tracking-widest text-cyan-300/70 shrink-0 w-40">Campus Experience</div>
+                                        <div className="flex-1 flex flex-col gap-1 min-w-0">
+                                            <div className="flex h-2 rounded-full overflow-hidden bg-white/10">
+                                                {cePosPct > 0 && <div style={{ width: `${cePosPct}%` }} className="bg-cyan-400 transition-all duration-700" />}
+                                                {(100 - cePosPct - ceNegPct) > 0 && <div style={{ width: `${100 - cePosPct - ceNegPct}%` }} className="bg-cyan-300/30 transition-all duration-700" />}
+                                                {ceNegPct > 0 && <div style={{ width: `${ceNegPct}%` }} className="bg-red-400 transition-all duration-700" />}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4 shrink-0 text-xs font-semibold tabular-nums">
+                                            <span className="text-cyan-300">{cePosPct}% pos</span>
+                                            <span className="text-white/20">·</span>
+                                            <span className="text-red-400">{ceNegPct}% neg</span>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Legend */}
-                {!loading && withData.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded bg-violet-500 opacity-70" />
-                            <span>Program Quality — what students say about their study program's academic services</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded bg-cyan-500 opacity-70" />
-                            <span>Campus Experience — how satisfied students in this faculty are with campus services</span>
                         </div>
                     </div>
                 )}
@@ -234,142 +367,132 @@ export default function FacultyInsightsPage() {
                     <Input placeholder="Search faculties..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
                 </div>
 
-                {/* Grid */}
+                {/* Row list */}
                 {loading ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-64 rounded-2xl" />)}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                            <div key={i} className="px-8 py-5 flex items-center gap-6">
+                                <Skeleton className="w-6 h-6 rounded" />
+                                <Skeleton className="w-10 h-10 rounded-xl shrink-0" />
+                                <Skeleton className="h-5 flex-1 rounded" />
+                                <Skeleton className="w-20 h-8 rounded-lg" />
+                                <Skeleton className="w-20 h-8 rounded-lg" />
+                                <Skeleton className="w-20 h-4 rounded" />
+                                <Skeleton className="w-14 h-6 rounded" />
+                            </div>
+                        ))}
                     </div>
                 ) : filtered.length === 0 ? (
                     <div className="text-center py-20 text-slate-400">
                         <GraduationCap className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                        <p className="font-medium">{faculties.length === 0 ? "No faculties found. Add faculties in the management page first." : "No faculties match your search."}</p>
+                        <p className="font-medium">{faculties.length === 0 ? "No faculties found." : "No faculties match your search."}</p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {filtered.map(faculty => {
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50 dark:bg-slate-950">
+                        {/* Column header */}
+                        <div className="hidden lg:flex items-center gap-6 px-6 py-3 bg-slate-50 dark:bg-slate-950 text-[10px] font-semibold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                            <span className="w-6 shrink-0" />
+                            <span className="w-10 shrink-0" />
+                            <span className="flex-1">Faculty</span>
+                            <span className="w-28 shrink-0 text-center">Prog. Quality</span>
+                            <span className="w-28 shrink-0 text-center">Campus Exp.</span>
+                            <span className="w-28 shrink-0">Response Rate</span>
+                            <span className="w-20 shrink-0 text-right">NPS</span>
+                            <span className="w-5 shrink-0" />
+                        </div>
+
+                        <div className="p-2 space-y-1">
+                        {filtered.map((faculty, idx) => {
                             const d = faculty.data;
                             const pqScore = d?.programQuality.avg_score ?? null;
                             const ceScore = d?.campusExperience.avg_score ?? null;
-                            const pqSent = d ? computeSentimentScore(d.programQuality.sentiment.positive, d.programQuality.sentiment.neutral, d.programQuality.sentiment.negative) : null;
-                            const ceSent = d ? computeSentimentScore(d.campusExperience.sentiment.positive, d.campusExperience.sentiment.neutral, d.campusExperience.sentiment.negative) : null;
+                            const npsScore = faculty.nps && faculty.nps.total > 0 ? computeNpsScore(faculty.nps) : null;
+                            const rr = d?.response_rate ?? null;
 
                             return (
-                                <Link key={faculty.id} href={`/faculty-insights/${faculty.id}`} className="group">
-                                    <div className="h-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-teal-300 dark:hover:border-teal-700 hover:shadow-xl dark:hover:shadow-teal-950/20 transition-all duration-200 group-hover:-translate-y-1 overflow-hidden flex flex-col">
+                                <Link key={faculty.id} href={`/faculty-insights/${faculty.id}`} className="group block rounded-xl">
+                                    <div className="relative flex items-center gap-6 px-5 py-4 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/60 hover:border-teal-200 dark:hover:border-teal-800/60 hover:shadow-md dark:hover:shadow-teal-950/20 transition-all duration-200 cursor-pointer">
+                                        {/* Left accent — subtle always, bright on hover */}
+                                        <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-teal-200 dark:bg-teal-900 group-hover:bg-teal-500 transition-colors duration-200" />
 
-                                        <div className="p-5 flex-1 space-y-4">
-                                            {/* Faculty name row */}
-                                            <div className="flex items-start gap-3">
-                                                <div className="p-2.5 bg-teal-50 dark:bg-teal-950/40 rounded-xl shrink-0 mt-0.5">
-                                                    <GraduationCap className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base leading-snug group-hover:text-teal-700 dark:group-hover:text-teal-400 transition-colors">
-                                                        {faculty.name}
-                                                    </h3>
-                                                    {faculty.short_name && (
-                                                        <Badge variant="secondary" className="text-[10px] mt-1 font-medium">{faculty.short_name}</Badge>
-                                                    )}
-                                                </div>
-                                            </div>
+                                        {/* Index */}
+                                        <span className="text-2xl font-black text-slate-100 dark:text-slate-800 tabular-nums leading-none select-none w-6 shrink-0 text-right">
+                                            {String(idx + 1).padStart(2, "0")}
+                                        </span>
 
-                                            {d ? (
+                                        {/* Icon */}
+                                        <div className="p-2.5 bg-teal-50 dark:bg-teal-950/40 rounded-xl shrink-0 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 transition-colors duration-200">
+                                            <GraduationCap className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                                        </div>
+
+                                        {/* Name */}
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-bold text-slate-900 dark:text-slate-100 text-base leading-snug group-hover:text-teal-700 dark:group-hover:text-teal-400 transition-colors truncate">
+                                                {faculty.name}
+                                            </p>
+                                            {faculty.short_name && (
+                                                <Badge variant="secondary" className="text-[10px] mt-0.5 font-medium">{faculty.short_name}</Badge>
+                                            )}
+                                        </div>
+
+                                        {/* Program Quality */}
+                                        <div className="hidden lg:flex w-28 shrink-0 flex-col items-center gap-1.5">
+                                            {pqScore !== null ? (
                                                 <>
-                                                    {/* Two score blocks side by side */}
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        {/* Program Quality */}
-                                                        <div className={`rounded-xl border p-3 ${scoreBorderBg(pqScore)}`}>
-                                                            <div className="flex items-center gap-1 mb-1.5">
-                                                                <BookOpen className="w-3 h-3 text-violet-500 dark:text-violet-400 shrink-0" />
-                                                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Program Quality</span>
-                                                            </div>
-                                                            <div className="flex items-end gap-2">
-                                                                {pqScore !== null ? (
-                                                                    <span className={`text-2xl font-black tabular-nums leading-none ${scoreColor(pqScore)}`}>{pqScore}</span>
-                                                                ) : (
-                                                                    <span className="text-base font-bold text-slate-300">—</span>
-                                                                )}
-                                                            </div>
-                                                            {d.programQuality.sentiment.total > 0 && (
-                                                                <MiniSentimentBar s={d.programQuality.sentiment} />
-                                                            )}
-                                                        </div>
-
-                                                        {/* Campus Experience */}
-                                                        <div className={`rounded-xl border p-3 ${scoreBorderBg(ceScore)}`}>
-                                                            <div className="flex items-center gap-1 mb-1.5">
-                                                                <Building2 className="w-3 h-3 text-cyan-500 dark:text-cyan-400 shrink-0" />
-                                                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Campus Exp.</span>
-                                                            </div>
-                                                            <div className="flex items-end gap-2">
-                                                                {ceScore !== null ? (
-                                                                    <span className={`text-2xl font-black tabular-nums leading-none ${scoreColor(ceScore)}`}>{ceScore}</span>
-                                                                ) : (
-                                                                    <span className="text-base font-bold text-slate-300">—</span>
-                                                                )}
-                                                            </div>
-                                                            {d.campusExperience.sentiment.total > 0 && (
-                                                                <MiniSentimentBar s={d.campusExperience.sentiment} />
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Participation row */}
-                                                    {d.response_rate !== null && (
-                                                        <div className="flex items-center gap-3 text-xs text-slate-400">
-                                                            <span className={`flex items-center gap-1 font-semibold ${d.response_rate >= 80 ? "text-emerald-600" : d.response_rate >= 50 ? "text-amber-500" : "text-red-500"}`}>
-                                                                <Target className="w-3 h-3" />
-                                                                {d.response_rate}% response rate
-                                                            </span>
-                                                        </div>
+                                                    <span className={`text-lg font-black tabular-nums leading-none ${scoreColor(pqScore)}`}>{pqScore}</span>
+                                                    {d && d.programQuality.sentiment.total > 0 && (
+                                                        <div className="w-full"><MiniSentimentBar s={d.programQuality.sentiment} /></div>
                                                     )}
-
-                                                    {/* NPS strip — only when this faculty has NPS responses */}
-                                                    {faculty.nps && faculty.nps.total > 0 && (() => {
-                                                        const nps = computeNpsScore(faculty.nps);
-                                                        return (
-                                                            <div className="rounded-lg border border-blue-100 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 px-3 py-2">
-                                                                <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                                                                        <Target className="w-3 h-3" /> NPS
-                                                                    </span>
-                                                                    <span className={`text-base font-black tabular-nums ${npsBenchmarkColor(nps)}`}>
-                                                                        {nps === null ? "—" : nps > 0 ? `+${nps}` : nps}
-                                                                    </span>
-                                                                </div>
-                                                                <NpsBucketBar counts={faculty.nps} variant="mini" showLabels={false} />
-                                                                <p className="text-[10px] text-slate-400 mt-1.5">n = {faculty.nps.total.toLocaleString()}</p>
-                                                            </div>
-                                                        );
-                                                    })()}
                                                 </>
                                             ) : (
-                                                <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                                                    <Users className="w-3.5 h-3.5" />
-                                                    {activeSurveyId && activeSurveyId !== "all"
-                                                        ? "No data for this survey"
-                                                        : "Select a survey to see scores"}
-                                                </div>
-                                            )}
-
-                                            {faculty.description && (
-                                                <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-2 leading-relaxed">
-                                                    {faculty.description}
-                                                </p>
+                                                <span className="text-slate-300 dark:text-slate-600 text-sm font-bold">—</span>
                                             )}
                                         </div>
 
-                                        {/* Footer */}
-                                        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                                            <span className="text-xs font-semibold text-slate-400 group-hover:text-teal-600 dark:group-hover:text-teal-400 flex items-center gap-1 transition-colors">
-                                                View Details
-                                                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                                            </span>
+                                        {/* Campus Experience */}
+                                        <div className="hidden lg:flex w-28 shrink-0 flex-col items-center gap-1.5">
+                                            {ceScore !== null ? (
+                                                <>
+                                                    <span className={`text-lg font-black tabular-nums leading-none ${scoreColor(ceScore)}`}>{ceScore}</span>
+                                                    {d && d.campusExperience.sentiment.total > 0 && (
+                                                        <div className="w-full"><MiniSentimentBar s={d.campusExperience.sentiment} /></div>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <span className="text-slate-300 dark:text-slate-600 text-sm font-bold">—</span>
+                                            )}
                                         </div>
+
+                                        {/* Response rate */}
+                                        <div className="hidden lg:block w-28 shrink-0">
+                                            {rr !== null ? (
+                                                <span className={`text-sm font-bold flex items-center gap-1.5 ${rr >= 80 ? "text-emerald-600 dark:text-emerald-400" : rr >= 50 ? "text-amber-500 dark:text-amber-400" : "text-red-500 dark:text-red-400"}`}>
+                                                    <Target className="w-3.5 h-3.5 shrink-0" />
+                                                    {rr}%
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
+                                            )}
+                                        </div>
+
+                                        {/* NPS */}
+                                        <div className="hidden lg:block w-20 shrink-0 text-right">
+                                            {npsScore !== null ? (
+                                                <span className={`text-lg font-black tabular-nums ${npsBenchmarkColor(npsScore)}`}>
+                                                    {npsScore > 0 ? `+${npsScore}` : npsScore}
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
+                                            )}
+                                        </div>
+
+                                        {/* Arrow — always visible, animates on hover */}
+                                        <ArrowRight className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:text-teal-500 group-hover:translate-x-1 transition-all duration-200 shrink-0" />
                                     </div>
                                 </Link>
                             );
                         })}
+                        </div>
                     </div>
                 )}
             </div>

@@ -54,7 +54,7 @@ export default function UnitInsightsDetailPage() {
                             <BarChart2 className="w-4 h-4" /> Insights
                         </TabsTrigger>
                         <TabsTrigger value="voices" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-pink-600 data-[state=active]:shadow-sm">
-                            <MessageSquare className="w-4 h-4" /> Voices
+                            <MessageSquare className="w-4 h-4" /> Students' Voices
                         </TabsTrigger>
                         <TabsTrigger value="ai" className="rounded-none flex items-center gap-2 px-6 h-full data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-violet-600 data-[state=active]:shadow-sm">
                             <Sparkles className="w-4 h-4" /> AI Specialist

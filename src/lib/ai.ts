@@ -2,12 +2,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { supabaseServer } from "@/lib/supabase-server";
 
 // --- Constants ---
-export const AI_MODEL = process.env.AI_MODEL || "gemini-2.5-flash";
+export const AI_MODEL = process.env.AI_MODEL || "gemini-3.5-flash";
 const MAX_INPUT_LENGTH = 50000;
 
 export const GEMINI_MODELS = [
     { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", description: "Fastest & cheapest — for simple classification tasks", inputRate: 0.10, outputRate: 0.40,  thinkingRate: 0,    tier: "fast" },
     { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash",      description: "Fast & balanced — recommended for most analysis",       inputRate: 0.15, outputRate: 0.60,  thinkingRate: 3.50, tier: "balanced" },
+    { id: "gemini-3.5-flash",      label: "Gemini 3.5 Flash",      description: "Frontier intelligence at high speed — agentic workflows & complex analysis", inputRate: 1.25, outputRate: 10.00, thinkingRate: 3.50, tier: "pro" },
     { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro",        description: "Highest quality reasoning — complex reports & analysis", inputRate: 1.25, outputRate: 10.00, thinkingRate: 3.50, tier: "pro" },
 ];
 
@@ -15,6 +16,7 @@ export const GEMINI_MODELS = [
 const TOKEN_PRICING: Record<string, { input: number; output: number; thinking: number }> = {
     "gemini-2.5-flash-lite": { input: 0.10, output: 0.40,  thinking: 0    },
     "gemini-2.5-flash":      { input: 0.15, output: 0.60,  thinking: 3.50 },
+    "gemini-3.5-flash":      { input: 1.25, output: 10.00, thinking: 3.50 },
     "gemini-2.5-pro":        { input: 1.25, output: 10.00, thinking: 3.50 },
 };
 

@@ -95,10 +95,16 @@ export default function CrossUnitMentions({ surveyId, hideHeader, npsUnitIds = [
     const filteredMentions = npsUnitIds.length > 0
         ? mentions
             .filter(m => !npsUnitIds.includes(m.unit_id))
-            .map(m => ({
-                ...m,
-                source_units_breakdown: m.source_units_breakdown?.filter(s => !npsUnitIds.includes(s.source_unit_id)) ?? [],
-            }))
+            .map(m => {
+                const filteredBreakdown = m.source_units_breakdown?.filter(s => !npsUnitIds.includes(s.source_unit_id)) ?? [];
+                const recalculatedTotal = filteredBreakdown.reduce((sum, s) => sum + s.total, 0);
+                return {
+                    ...m,
+                    total_mentions: recalculatedTotal,
+                    source_units_breakdown: filteredBreakdown,
+                };
+            })
+            .filter(m => m.total_mentions > 0)
         : mentions;
 
     if (!surveyId || surveyId === "all") return null;
@@ -150,7 +156,7 @@ export default function CrossUnitMentions({ surveyId, hideHeader, npsUnitIds = [
                 <span className="w-4 shrink-0" />
             </div>
 
-            {filteredMentions.map((m, idx) => {
+            {[...filteredMentions].sort((a, b) => b.total_mentions - a.total_mentions).map((m, idx) => {
                 const total = m.total_mentions;
                 const posPct = total > 0 ? (m.positive_count / total) * 100 : 0;
                 const negPct = total > 0 ? (m.negative_count / total) * 100 : 0;

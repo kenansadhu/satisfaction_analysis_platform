@@ -180,12 +180,13 @@ Key rules:
 
 // ─── Model Definitions ─────────────────────────────────────────────────────────
 const GEMINI_MODELS = [
-    { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", description: "Fastest & cheapest — for simple classification tasks", inputRate: 0.018, outputRate: 0.072, tier: "fast" },
-    { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash",      description: "Fast & balanced — recommended for most analysis",       inputRate: 0.075, outputRate: 0.30,  tier: "balanced" },
-    { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro",        description: "Highest quality reasoning — complex reports & deep analysis", inputRate: 1.25, outputRate: 10.00, tier: "pro" },
+    { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", description: "Fastest & cheapest — for simple classification tasks",          inputRate: 0.018, outputRate: 0.072, tier: "fast" },
+    { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash",      description: "Fast & balanced — recommended for most analysis",                inputRate: 0.075, outputRate: 0.30,  tier: "balanced" },
+    { id: "gemini-3.5-flash",      label: "Gemini 3.5 Flash",      description: "Frontier intelligence at high speed — agentic & complex analysis", inputRate: 1.25,  outputRate: 10.00, tier: "pro" },
+    { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro",        description: "Highest quality reasoning — complex reports & deep analysis",    inputRate: 1.25,  outputRate: 10.00, tier: "pro" },
 ];
 
-const DEFAULT_FALLBACK = "gemini-2.5-flash";
+const DEFAULT_FALLBACK = "gemini-3.5-flash";
 const GLOBAL_KEY = "__global__";
 
 // ─── Page Shell ────────────────────────────────────────────────────────────────
@@ -499,7 +500,7 @@ function ModelPricingTab() {
                     </div>
                 </CardHeader>
                 <CardContent className="pt-5">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {GEMINI_MODELS.map(model => {
                             const isSelected = defaultModel === model.id;
                             return (

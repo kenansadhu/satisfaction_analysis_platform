@@ -19,6 +19,7 @@ import SummaryTab from "@/components/executive/SummaryTab";
 import SuggestionHub from "@/components/executive/SuggestionHub";
 import { NpsTab } from "@/components/executive/NpsTab";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
+import { CrossUnitComments } from "@/components/analytics/CrossUnitComments";
 import { useActiveSurvey } from "@/context/SurveyContext";
 
 type UnitPerformance = {
@@ -52,6 +53,7 @@ export default function ExecutiveDashboard() {
     // Platform settings for unit filtering
     const [npsUnitIds, setNpsUnitIds] = useState<Set<number>>(new Set());
     const [excludedScoreUnitIds, setExcludedScoreUnitIds] = useState<Set<number>>(new Set());
+    const [studyProgramUnitId, setStudyProgramUnitId] = useState<number | null>(null);
 
     // Survey loading is now handled by SurveyContext
 
@@ -117,9 +119,11 @@ export default function ExecutiveDashboard() {
         Promise.all([
             fetch('/api/settings/nps-units').then(r => r.json()),
             fetch('/api/settings/excluded-score-units').then(r => r.json()),
-        ]).then(([npsData, exclData]) => {
+            fetch('/api/settings/study-program-unit').then(r => r.json()),
+        ]).then(([npsData, exclData, spData]) => {
             setNpsUnitIds(new Set<number>(npsData.npsUnitIds || []));
             setExcludedScoreUnitIds(new Set<number>(exclData.excludedUnitIds || []));
+            setStudyProgramUnitId(spData.studyProgramUnitId ?? null);
         }).catch(console.error);
     }, []);
 
@@ -195,12 +199,12 @@ export default function ExecutiveDashboard() {
                                     <div className="flex items-end gap-4">
                                         {loading
                                             ? <Loader2 className="w-16 h-16 animate-spin text-indigo-400" />
-                                            : <span className="text-8xl font-black text-white leading-none tabular-nums">{overallScore}</span>
+                                            : <span className={`text-8xl font-black leading-none tabular-nums ${overallScore >= 60 ? "text-emerald-400" : overallScore >= 40 ? "text-amber-400" : "text-red-400"}`}>{overallScore}</span>
                                         }
                                         <div className="mb-2 space-y-1.5">
                                             <span className="text-3xl text-indigo-300 font-light">/100</span>
-                                            <p className={`text-sm font-semibold ${overallScore >= 70 ? "text-emerald-400" : overallScore >= 50 ? "text-amber-400" : "text-red-400"}`}>
-                                                {overallScore >= 70 ? "Healthy Institution" : overallScore >= 50 ? "Needs Attention" : "Critical Condition"}
+                                            <p className={`text-sm font-semibold ${overallScore >= 60 ? "text-emerald-400" : overallScore >= 40 ? "text-amber-400" : "text-red-400"}`}>
+                                                {overallScore >= 60 ? "Healthy Institution" : overallScore >= 40 ? "Needs Attention" : "Critical Condition"}
                                             </p>
                                         </div>
                                     </div>
@@ -234,10 +238,10 @@ export default function ExecutiveDashboard() {
                                     </div>
                                     <div className="mt-3">
                                         {(() => {
-                                            const nonNpsUnits = units.filter(u => !npsUnitIds.has(u.id));
+                                            const activeUnits = units.filter(u => !npsUnitIds.has(u.id) && !excludedScoreUnitIds.has(u.id) && u.id !== studyProgramUnitId);
                                             return <>
-                                                <span className="text-4xl font-black text-white tabular-nums">{loading ? "—" : nonNpsUnits.filter(u => u.total > 0).length}</span>
-                                                {!loading && <span className="text-xl font-normal text-slate-500">/{nonNpsUnits.length}</span>}
+                                                <span className="text-4xl font-black text-white tabular-nums">{loading ? "—" : activeUnits.filter(u => u.total > 0).length}</span>
+                                                {!loading && <span className="text-xl font-normal text-slate-500">/{activeUnits.length}</span>}
                                             </>;
                                         })()}
                                     </div>
@@ -288,14 +292,6 @@ export default function ExecutiveDashboard() {
                             <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
                                 <ActionPriorityMatrix units={units.filter(u => !npsUnitIds.has(u.id))} />
                             </div>
-                            {selectedSurvey && selectedSurvey !== "all" && (
-                                <>
-                                    <div className="border-t border-slate-100 dark:border-slate-800 pt-5">
-                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Shared categories ranked by satisfaction across all units</p>
-                                        <CategoryInsightPanels surveyId={selectedSurvey} hideHeader excludeUnitIds={[...npsUnitIds]} />
-                                    </div>
-                                </>
-                            )}
                         </div>
 
                         {/* 3. SENTIMENT BY UNIT — full sentiment breakdown */}
@@ -313,6 +309,20 @@ export default function ExecutiveDashboard() {
                                 <SentimentHeatmap units={units.filter(u => !excludedScoreUnitIds.has(u.id))} surveyId={selectedSurvey ?? undefined} />
                             )}
                         </div>
+
+                        {/* 4. SHARED CATEGORIES — ranked by satisfaction across all units */}
+                        {selectedSurvey && selectedSurvey !== "all" && (
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                        <TrendingUp className="w-4 h-4 text-indigo-500" />
+                                        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Shared Categories</h2>
+                                    </div>
+                                    <p className="text-xs text-slate-400 ml-6">Categories ranked by satisfaction across all units</p>
+                                </div>
+                                <CategoryInsightPanels surveyId={selectedSurvey} hideHeader excludeUnitIds={[...npsUnitIds]} />
+                            </div>
+                        )}
 
                     </TabsContent>
 
@@ -333,16 +343,19 @@ export default function ExecutiveDashboard() {
                             <DependencyGraph surveyId={selectedSurvey || "all"} npsUnitIds={[...npsUnitIds]} />
                         </div>
                         {selectedSurvey && selectedSurvey !== "all" && (
-                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-0.5">
-                                        <Share2 className="w-4 h-4 text-slate-500" />
-                                        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Cross-Unit References</h2>
+                            <>
+                                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-0.5">
+                                            <Share2 className="w-4 h-4 text-slate-500" />
+                                            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Cross-Unit References</h2>
+                                        </div>
+                                        <p className="text-xs text-slate-400 ml-6">Which units are students mentioning when giving feedback to other units</p>
                                     </div>
-                                    <p className="text-xs text-slate-400 ml-6">Which units are students mentioning when giving feedback to other units</p>
+                                    <CrossUnitMentions surveyId={selectedSurvey} hideHeader npsUnitIds={[...npsUnitIds]} />
                                 </div>
-                                <CrossUnitMentions surveyId={selectedSurvey} hideHeader npsUnitIds={[...npsUnitIds]} />
-                            </div>
+                                <CrossUnitComments surveyId={selectedSurvey} />
+                            </>
                         )}
                     </TabsContent>
                 </Tabs>

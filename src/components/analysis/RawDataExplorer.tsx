@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, Table2, MessageSquare, BarChart2, Search, Loader2 } from "lucide-react";
+import { ChevronDown, Table2, MessageSquare, BarChart2, Search, Loader2, Lightbulb } from "lucide-react";
 
 type RawDataExplorerProps = {
     rawDataTab: "comments" | "ratings";
@@ -20,6 +20,8 @@ type RawDataExplorerProps = {
     rawDataEntries: any[];
     rawDataTotal: number;
     RAW_PAGE_SIZE: number;
+    suggestionOnly: boolean;
+    setSuggestionOnly: (v: boolean) => void;
 };
 
 export default function RawDataExplorer({
@@ -35,6 +37,8 @@ export default function RawDataExplorer({
     rawDataEntries,
     rawDataTotal,
     RAW_PAGE_SIZE,
+    suggestionOnly,
+    setSuggestionOnly,
 }: RawDataExplorerProps) {
     return (
         <Card className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm print:hidden">
@@ -42,12 +46,12 @@ export default function RawDataExplorer({
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <Table2 className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-                        <CardTitle className="text-base text-slate-800 dark:text-slate-100">Raw Data Explorer</CardTitle>
+                        <CardTitle className="text-base text-slate-800 dark:text-slate-100">Student Voices</CardTitle>
                         <Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">Verify</Badge>
                     </div>
                     <ChevronDown className={`w-4 h-4 text-slate-400 dark:text-slate-500 transition-transform ${showRawData ? 'rotate-180' : ''}`} />
                 </div>
-                <CardDescription className="dark:text-slate-500">Click to inspect actual comments and ratings</CardDescription>
+                <CardDescription className="dark:text-slate-500">Browse individual student comments and ratings</CardDescription>
             </CardHeader>
 
             {showRawData && (
@@ -61,6 +65,19 @@ export default function RawDataExplorer({
                             <BarChart2 className="w-3 h-3 inline mr-1" /> Ratings
                         </button>
                         <div className="flex-1" />
+                        {rawDataTab === "comments" && (
+                            <button
+                                onClick={() => { setSuggestionOnly(!suggestionOnly); setRawDataPage(0); }}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 mb-1 rounded-lg text-xs font-medium border transition-colors ${
+                                    suggestionOnly
+                                        ? "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700"
+                                        : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700"
+                                }`}
+                            >
+                                <Lightbulb className={`w-3.5 h-3.5 ${suggestionOnly ? "fill-current" : ""}`} />
+                                Suggestions only
+                            </button>
+                        )}
                         <div className="relative mb-1">
                             <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
                             <Input placeholder="Search..." className="h-7 pl-7 text-xs w-40 dark:bg-slate-800 dark:border-slate-700" value={rawDataSearch} onChange={e => { setRawDataSearch(e.target.value); setRawDataPage(0); }} />
@@ -73,7 +90,7 @@ export default function RawDataExplorer({
                     ) : (
                         <>
                             <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-                                <table className="w-full text-xs">
+                                <table className="w-full text-sm">
                                     <thead className="bg-slate-50 dark:bg-slate-950/50">
                                         <tr>
                                             {rawDataTab === "comments" ? (
@@ -97,7 +114,14 @@ export default function RawDataExplorer({
                                                 {rawDataTab === "comments" ? (
                                                     <>
                                                         <td className="p-2 text-slate-700 dark:text-slate-300">{entry.segment_text}</td>
-                                                        <td className="p-2"><Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">{entry.category_name}</Badge></td>
+                                                        <td className="p-2 space-y-1">
+                                                            <Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">{entry.category_name}</Badge>
+                                                            {entry.is_suggestion && (
+                                                                <span className="flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                                                                    <Lightbulb className="w-3 h-3 fill-current" /> Suggestion
+                                                                </span>
+                                                            )}
+                                                        </td>
                                                         <td className="p-2"><span className={`inline-flex items-center gap-1 text-[10px] font-medium ${entry.sentiment === 'Positive' ? 'text-green-700 dark:text-green-400' : entry.sentiment === 'Negative' ? 'text-red-700 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}><span className={`w-1.5 h-1.5 rounded-full ${entry.sentiment === 'Positive' ? 'bg-green-500' : entry.sentiment === 'Negative' ? 'bg-red-500' : 'bg-slate-400'}`} />{entry.sentiment}</span></td>
                                                     </>
                                                 ) : (
@@ -117,7 +141,7 @@ export default function RawDataExplorer({
                             </div>
 
                             {/* Pagination */}
-                            <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
+                            <div className="flex items-center justify-between mt-3 text-sm text-slate-500">
                                 <span>Showing {rawDataPage * RAW_PAGE_SIZE + 1}–{Math.min((rawDataPage + 1) * RAW_PAGE_SIZE, rawDataTotal)} of {rawDataTotal}</span>
                                 <div className="flex gap-1">
                                     <Button variant="outline" size="sm" className="h-6 text-xs" disabled={rawDataPage === 0} onClick={() => setRawDataPage(p => p - 1)}>Previous</Button>

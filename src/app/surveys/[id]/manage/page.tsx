@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, memo } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -20,7 +20,7 @@ import {
     Save, Loader2, AlertTriangle, GraduationCap,
     FileText, Calendar, Info, Users, Columns3, Plus, Trash2,
     Eye, Search, ChevronDown, ChevronRight, CheckCircle2, MapPin,
-    Calculator
+    Calculator, Layers, X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScoreAudit } from "@/components/analysis/ScoreAudit";
@@ -77,11 +77,13 @@ interface ColumnMapping {
     // Subgroup membership (null = column is its own implicit single-column subgroup,
     // i.e. behaves like today's flat per-respondent macro).
     subgroup_name?: string | null;
+    display_group?: string | null;
     // Editable fields (tracked for dirty detection)
     newUnitId?: number;
     newType?: DataType;
     newRule?: ScoreRule;
     newSubgroupName?: string | null;
+    newDisplayGroup?: string | null;
     ruleChanged?: boolean;
     customMapping?: Record<string, number | null>;
     // The resolved type at load time (source of truth for dirty detection)
@@ -96,6 +98,284 @@ interface ProdiEnrollmentEntry {
     student_count: number;
     actual_respondents: number;
 }
+
+// ── Memoised column row ──────────────────────────────────────────────────────
+// Extracted so React.memo can skip re-rendering rows whose props haven't changed.
+// Without this every keystroke / dropdown change re-renders ALL 50+ rows.
+interface ColumnRowProps {
+    col: ColumnMapping;
+    units: OrganizationUnit[];
+    displayGroups: string[];
+    isExpanded: boolean;
+    uniqueVals: string[];
+    loadingUniqueValues: boolean;
+    onToggleExpand: (col: string) => void;
+    onUpdateColumn: (col: string, field: keyof ColumnMapping, value: any) => void;
+    onUpdateCustomMapping: (col: string, valueStr: string, score: number | null) => void;
+    onPreview: (col: string) => void;
+}
+
+const ColumnRow = memo(function ColumnRow({
+    col, units, displayGroups, isExpanded, uniqueVals,
+    loadingUniqueValues, onToggleExpand, onUpdateColumn, onUpdateCustomMapping, onPreview,
+}: ColumnRowProps) {
+    const isDirty = col.newUnitId !== col.target_unit_id || col.newType !== col._initialType || col.ruleChanged;
+    const currentType = col.newType || col._initialType || "CATEGORY";
+    const hasUniqueVals = uniqueVals.length > 0;
+
+    return (
+        <div
+            className={cn(
+                "border rounded-xl overflow-hidden transition-all duration-200",
+                isDirty
+                    ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-950/10"
+                    : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950",
+                currentType === "IGNORE" && "opacity-50"
+            )}
+        >
+            {/* Collapsed Header Row */}
+            <div
+                className={cn(
+                    "p-4 cursor-pointer transition-colors",
+                    isExpanded ? "bg-slate-50 dark:bg-slate-900/50" : "hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
+                )}
+                onClick={() => onToggleExpand(col.source_column)}
+            >
+                {/* Row 1: Chevron + Full Column Name + Badges */}
+                <div className="flex items-start gap-3 mb-3">
+                    <div className="mt-0.5 shrink-0">
+                        {isExpanded
+                            ? <ChevronDown className="w-4 h-4 text-slate-500" />
+                            : <ChevronRight className="w-4 h-4 text-slate-400" />
+                        }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-slate-800 dark:text-slate-200 leading-snug">
+                            {col.source_column}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        {isDirty && <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 text-[10px] px-1.5">edited</Badge>}
+                        {col.has_segments > 0 && (
+                            <Badge variant="outline" className="text-[10px] text-green-600 border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800">
+                                {col.has_segments} segs
+                            </Badge>
+                        )}
+                        {hasUniqueVals && uniqueVals.length <= 15 && (
+                            <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800">
+                                {uniqueVals.length} unique
+                            </Badge>
+                        )}
+                        <span className="text-xs text-slate-400 tabular-nums ml-1">
+                            {col.row_count.toLocaleString()} rows
+                        </span>
+                    </div>
+                </div>
+                {/* Row 2: Selectors (click stops propagation) */}
+                <div className="flex flex-wrap items-start gap-3 pl-7" onClick={e => e.stopPropagation()}>
+                    <div className="flex-1 min-w-[160px]">
+                        <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Unit</label>
+                        <Select
+                            value={(col.newUnitId ?? col.target_unit_id).toString()}
+                            onValueChange={val => onUpdateColumn(col.source_column, 'newUnitId', parseInt(val))}
+                        >
+                            <SelectTrigger className="h-9 bg-white dark:bg-slate-900 text-sm">
+                                <SelectValue placeholder="Select Unit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {units.map(u => (
+                                    <SelectItem key={u.id} value={u.id.toString()}>
+                                        {u.name} {u.short_name ? `(${u.short_name})` : ''}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="w-44 shrink-0">
+                        <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Type</label>
+                        <Select
+                            value={currentType}
+                            onValueChange={val => onUpdateColumn(col.source_column, 'newType', val)}
+                        >
+                            <SelectTrigger className={cn("h-9 text-sm",
+                                currentType === "SCORE" ? "text-blue-700 bg-blue-50 dark:bg-blue-950/30" :
+                                    currentType === "TEXT" ? "text-green-700 bg-green-50 dark:bg-green-950/30" :
+                                        currentType === "CATEGORY" ? "text-purple-700 bg-purple-50 dark:bg-purple-950/30" :
+                                            "bg-white dark:bg-slate-900"
+                            )}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="TEXT">Text (Analyze)</SelectItem>
+                                <SelectItem value="SCORE">Score (Number)</SelectItem>
+                                <SelectItem value="CATEGORY">Category (Filter)</SelectItem>
+                                <SelectItem value="IGNORE">Ignore</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    {currentType === "SCORE" && (
+                        <div className="w-40 shrink-0">
+                            <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Transform</label>
+                            <Select
+                                value={col.newRule || "NUMBER"}
+                                onValueChange={val => onUpdateColumn(col.source_column, 'newRule', val)}
+                            >
+                                <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="LIKERT">Likert (4=Puas)</SelectItem>
+                                    <SelectItem value="BOOLEAN">Yes/No (1/0)</SelectItem>
+                                    <SelectItem value="TEXT_SCALE">Scale (Sering=4)</SelectItem>
+                                    <SelectItem value="NUMBER">Raw Number</SelectItem>
+                                    <SelectItem value="CUSTOM_MAPPING">Custom Mapping</SelectItem>
+                                    <SelectItem value="NPS_0_10">NPS (0–10)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+                    {currentType === "SCORE" && col.newRule !== "NPS_0_10" && (() => {
+                        const targetUnit = units.find(u => u.id === (col.newUnitId ?? col.target_unit_id));
+                        const subgroups = targetUnit?.score_subgroups || [];
+                        if (subgroups.length === 0) return null;
+                        return (
+                            <div className="w-44 shrink-0">
+                                <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Subgroup</label>
+                                <Select
+                                    value={col.newSubgroupName ?? "__INDIVIDUAL__"}
+                                    onValueChange={val => onUpdateColumn(col.source_column, 'newSubgroupName', val === "__INDIVIDUAL__" ? null : val)}
+                                >
+                                    <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__INDIVIDUAL__">(Individual)</SelectItem>
+                                        {subgroups.map(sg => (
+                                            <SelectItem key={sg} value={sg}>{sg}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        );
+                    })()}
+                    {currentType === "SCORE" && displayGroups.length > 0 && (
+                        <div className="min-w-36 max-w-xs shrink-0">
+                            <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Group</label>
+                            <Select
+                                value={col.newDisplayGroup ?? "__NONE__"}
+                                onValueChange={val => onUpdateColumn(col.source_column, 'newDisplayGroup', val === "__NONE__" ? null : val)}
+                            >
+                                <SelectTrigger className={cn(
+                                    "!h-auto min-h-9 py-1.5 !whitespace-normal text-xs border-slate-200 dark:border-slate-800",
+                                    "*:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:whitespace-normal *:data-[slot=select-value]:break-words *:data-[slot=select-value]:text-left",
+                                    col.newDisplayGroup ? "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300" : "bg-white dark:bg-slate-900"
+                                )}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__NONE__">No group</SelectItem>
+                                    {displayGroups.map(g => (
+                                        <SelectItem key={g} value={g}>{g}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Expanded Section: Unique Values + Custom Mapping */}
+            {isExpanded && (
+                <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-4 bg-slate-50/50 dark:bg-slate-900/30">
+                    <div className="pl-7">
+                        {hasUniqueVals ? (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                        Unique Values ({uniqueVals.length}):
+                                    </div>
+                                    {currentType === "SCORE" && col.newRule !== "NPS_0_10" && (() => {
+                                        const nullCount = uniqueVals.filter(v => resolveScore(v, col.newRule || "NUMBER", col.customMapping) === null).length;
+                                        if (nullCount === 0) return null;
+                                        return (
+                                            <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-0.5">
+                                                {nullCount} value{nullCount === 1 ? "" : "s"} → NA (excluded from score)
+                                            </span>
+                                        );
+                                    })()}
+                                </div>
+
+                                {currentType === "SCORE" && col.newRule !== "NPS_0_10" ? (
+                                    <div className="grid gap-2 border border-slate-200 dark:border-slate-800 rounded-lg p-3 bg-white dark:bg-slate-950 max-h-[400px] overflow-y-auto">
+                                        {uniqueVals.map((v, i) => {
+                                            const resolved = resolveScore(v, col.newRule || "NUMBER", col.customMapping);
+                                            const isOverride = !!(col.customMapping && v in col.customMapping);
+                                            const selectValue = resolved === null ? "NA" : resolved.toString();
+                                            return (
+                                                <div key={i} className="flex items-center justify-between gap-4">
+                                                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300 break-all flex items-center gap-2">
+                                                        {v || "(empty)"}
+                                                        {isOverride && (
+                                                            <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-1.5 py-0.5 rounded">override</span>
+                                                        )}
+                                                    </span>
+                                                    <Select
+                                                        value={selectValue}
+                                                        onValueChange={val => onUpdateCustomMapping(col.source_column, v, val === "NA" ? null : parseInt(val))}
+                                                    >
+                                                        <SelectTrigger className={cn(
+                                                            "w-[120px] h-8 shrink-0",
+                                                            resolved === null ? "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-white dark:bg-slate-950"
+                                                        )}>
+                                                            <SelectValue placeholder="Map to..." />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="1">1</SelectItem>
+                                                            <SelectItem value="2">2</SelectItem>
+                                                            <SelectItem value="3">3</SelectItem>
+                                                            <SelectItem value="4">4</SelectItem>
+                                                            <SelectItem value="0">0</SelectItem>
+                                                            <SelectItem value="NA">NA (exclude)</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {uniqueVals.map((v, i) => (
+                                            <Badge key={i} variant="outline" className="text-xs py-1 px-2.5 bg-white dark:bg-slate-900 font-normal">
+                                                {v}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : loadingUniqueValues ? (
+                            <div className="flex items-center gap-2 text-sm text-slate-400 py-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Loading values...</span>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-3 py-2">
+                                <span className="text-sm text-slate-400">No unique values loaded.</span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => onPreview(col.source_column)}
+                                    className="h-7 text-xs gap-1.5"
+                                >
+                                    <Eye className="w-3 h-3" /> Load Preview
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+});
 
 export default function SurveyManagePage() {
     const params = useParams();
@@ -114,6 +394,8 @@ export default function SurveyManagePage() {
     const [savingCols, setSavingCols] = useState(false);
     const [showConfirmSave, setShowConfirmSave] = useState(false);
     const [filterText, setFilterText] = useState("");
+    const [displayGroups, setDisplayGroups] = useState<string[]>([]);
+    const [newGroupName, setNewGroupName] = useState("");
 
     // Expandable rows + eager-loaded unique values
     const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());
@@ -159,139 +441,73 @@ export default function SurveyManagePage() {
     const loadColumnMappings = useCallback(async () => {
         setLoadingCols(true);
 
-        // 1. Fetch units first (fast). Include score_subgroups so we can populate
-        // the subgroup dropdown next to each column.
-        const { data: unitsData } = await supabase
-            .from('organization_units')
-            .select('id, name, short_name, score_subgroups')
-            .order('name');
-        setUnits(unitsData || []);
-        const unitMap = new Map((unitsData || []).map(u => [u.id, u.name]));
+        // Run three fast queries in parallel: units, column cache, and aggregated column stats.
+        // The column-stats API does all the heavy raw_feedback_inputs aggregation server-side
+        // (single round-trip instead of 50+ browser→DB queries).
+        const [unitsRes, colCacheRes, statsRes] = await Promise.all([
+            supabase
+                .from('organization_units')
+                .select('id, name, short_name, score_subgroups')
+                .order('name'),
+            supabase
+                .from('survey_column_cache')
+                .select('source_column, column_type, subgroup_name, display_group')
+                .eq('survey_id', parseInt(surveyId)),
+            fetch(`/api/surveys/${surveyId}/column-stats`).then(r => r.json()),
+        ]);
 
-        // Fetch explicit column types + subgroup names from cache (source of truth after first save)
-        const { data: colTypeCache } = await supabase
-            .from('survey_column_cache')
-            .select('source_column, column_type, subgroup_name')
-            .eq('survey_id', parseInt(surveyId));
+        setUnits(unitsRes.data || []);
+        const unitMap = new Map((unitsRes.data || []).map((u: any) => [u.id, u.name]));
+
+        const colTypeCache: any[] = colCacheRes.data || [];
         const colTypeCacheMap = new Map<string, DataType>(
-            (colTypeCache || [])
-                .filter((r: any) => r.column_type)
-                .map((r: any) => [r.source_column, r.column_type as DataType])
+            colTypeCache.filter(r => r.column_type).map(r => [r.source_column, r.column_type as DataType])
         );
         const colSubgroupCacheMap = new Map<string, string | null>(
-            (colTypeCache || []).map((r: any) => [r.source_column, r.subgroup_name ?? null])
+            colTypeCache.map(r => [r.source_column, r.subgroup_name ?? null])
+        );
+        const colDisplayGroupCacheMap = new Map<string, string | null>(
+            colTypeCache.map(r => [r.source_column, r.display_group ?? null])
         );
 
-        // 2. Extract Respondent IDs with pagination
-        let respIds: number[] = [];
-        let rPage = 0;
-        while (true) {
-            const { data: rBat } = await supabase.from('respondents').select('id').eq('survey_id', surveyId).range(rPage * 1000, (rPage + 1) * 1000 - 1);
-            if (!rBat || rBat.length === 0) break;
-            respIds.push(...rBat.map((r: any) => r.id));
-            if (rBat.length < 1000) break;
-            rPage++;
-        }
-
-        let rawInputs: any[] = [];
-        if (respIds.length > 0) {
-            const CHUNK = 150;
-            const promises = [];
-            for (let i = 0; i < respIds.length; i += CHUNK) {
-                const chunk = respIds.slice(i, i + CHUNK);
-                promises.push(
-                    supabase.from('raw_feedback_inputs')
-                        .select('id, source_column, target_unit_id, is_quantitative, requires_analysis, score_rule, custom_mapping')
-                        .in('respondent_id', chunk)
-                );
-            }
-            const results = await Promise.all(promises);
-            for (const res of results) {
-                if (res.data) rawInputs.push(...res.data);
-            }
-        }
-
-        if (rawInputs.length === 0) {
+        const rawCols: any[] = statsRes.columns ?? [];
+        if (rawCols.length === 0) {
             setColumns([]);
             setLoadingCols(false);
             return;
         }
 
-        // 3. Aggregate: group by source_column (unique column names)
-        const groupMap = new Map<string, { source_column: string; target_unit_id: number; count: number; is_quantitative: boolean; requires_analysis: boolean; score_rule?: ScoreRule; custom_mapping?: Record<string, number | null>; inputIds: number[]; minId: number }>();
-        rawInputs.forEach(row => {
-            const key = row.source_column;
-            const existing = groupMap.get(key);
-            if (existing) {
-                existing.count++;
-                existing.inputIds.push(row.id);
-                if (row.id < existing.minId) existing.minId = row.id;
-                // OR-merge: if any row marks this column as text/quant, honour it
-                if (row.requires_analysis) existing.requires_analysis = true;
-                if (row.is_quantitative) existing.is_quantitative = true;
-            } else {
-                groupMap.set(key, {
-                    source_column: row.source_column,
-                    target_unit_id: row.target_unit_id,
-                    count: 1,
-                    is_quantitative: row.is_quantitative,
-                    requires_analysis: row.requires_analysis ?? false,
-                    score_rule: row.score_rule,
-                    custom_mapping: row.custom_mapping,
-                    inputIds: [row.id],
-                    minId: row.id,
-                });
-            }
-        });
-
-        // 4. Count segments per column
-        const allInputIds = rawInputs.map(r => r.id);
-        const allSegInputIds = new Set<number>();
-        const CHUNK2 = 1000;
-        for (let i = 0; i < allInputIds.length; i += CHUNK2) {
-            const chunk = allInputIds.slice(i, i + CHUNK2);
-            const { data: segs } = await supabase
-                .from('feedback_segments')
-                .select('raw_input_id')
-                .in('raw_input_id', chunk);
-            segs?.forEach(s => allSegInputIds.add(s.raw_input_id));
-        }
-
-        const segmentCounts = new Map<string, number>();
-        for (const [key, group] of groupMap) {
-            const segCount = group.inputIds.filter(id => allSegInputIds.has(id)).length;
-            segmentCounts.set(key, segCount);
-        }
-
-        const mappings: ColumnMapping[] = Array.from(groupMap.entries()).map(([key, g]) => {
-            // Use explicit column_type from cache if available (survives analysis flipping requires_analysis).
-            // Fall back to flag derivation for columns not yet explicitly saved.
+        const mappings: ColumnMapping[] = rawCols.map((g: any) => {
+            const key = g.source_column;
             let currentType: DataType = colTypeCacheMap.get(key) ?? (
                 g.is_quantitative ? "SCORE" : g.requires_analysis ? "TEXT" : "CATEGORY"
             );
-
             const subgroupName = colSubgroupCacheMap.get(key) ?? null;
+            const displayGroup = colDisplayGroupCacheMap.get(key) ?? null;
             return {
-                source_column: g.source_column,
+                source_column: key,
                 target_unit_id: g.target_unit_id,
                 unit_name: unitMap.get(g.target_unit_id) || "Unknown",
-                row_count: g.count,
+                row_count: g.row_count,
                 is_quantitative: g.is_quantitative,
                 requires_analysis: g.requires_analysis,
-                has_segments: segmentCounts.get(key) || 0,
+                has_segments: g.has_segments ?? 0,
                 subgroup_name: subgroupName,
-                // Initialize editable fields to current values
+                display_group: displayGroup,
                 newUnitId: g.target_unit_id,
                 newType: currentType,
                 _initialType: currentType,
                 newRule: g.score_rule || (currentType === "SCORE" ? "NUMBER" : undefined),
                 newSubgroupName: subgroupName,
+                newDisplayGroup: displayGroup,
                 customMapping: g.custom_mapping || {},
-                _minId: g.minId,
+                _minId: g.min_id,
             };
         });
 
-        // Sort: by assigned unit name, pushing 'Unknown' to bottom, then by original import order
+        const existingGroups = [...new Set(mappings.map(m => m.display_group).filter(Boolean))] as string[];
+        setDisplayGroups(existingGroups);
+
         mappings.sort((a, b) => {
             if (a.unit_name !== b.unit_name) {
                 if (a.unit_name === "Unknown") return 1;
@@ -560,14 +776,14 @@ export default function SurveyManagePage() {
     }, [surveyId, columns]);
 
     // Toggle expand/collapse for a column row
-    const toggleExpand = (colName: string) => {
+    const toggleExpand = useCallback((colName: string) => {
         setExpandedCols(prev => {
             const next = new Set(prev);
             if (next.has(colName)) next.delete(colName);
             else next.add(colName);
             return next;
         });
-    };
+    }, []);
 
     useEffect(() => {
         loadColumnMappings();
@@ -602,7 +818,7 @@ export default function SurveyManagePage() {
     };
 
     // --- Inline edit helpers ---
-    const updateColumn = (sourceColumn: string, field: keyof ColumnMapping, value: any) => {
+    const updateColumn = useCallback((sourceColumn: string, field: keyof ColumnMapping, value: any) => {
         setColumns(prev => prev.map(c => {
             if (c.source_column === sourceColumn) {
                 const isRuleChange = field === 'newRule';
@@ -610,9 +826,9 @@ export default function SurveyManagePage() {
             }
             return c;
         }));
-    };
+    }, []);
 
-    const handleUpdateCustomMapping = (sourceColumn: string, valueStr: string, mappedScore: number | null) => {
+    const handleUpdateCustomMapping = useCallback((sourceColumn: string, valueStr: string, mappedScore: number | null) => {
         setColumns(prev => prev.map(c => {
             if (c.source_column === sourceColumn) {
                 const currentMap = c.customMapping || {};
@@ -621,13 +837,14 @@ export default function SurveyManagePage() {
             }
             return c;
         }));
-    };
+    }, []);
 
     // Detect which columns have unsaved changes
     const dirtyColumns = useMemo(() => {
         return columns.filter(c => {
             const subgroupChanged = (c.newSubgroupName ?? null) !== (c.subgroup_name ?? null);
-            return c.newUnitId !== c.target_unit_id || c.newType !== c._initialType || c.ruleChanged || subgroupChanged;
+            const displayGroupChanged = (c.newDisplayGroup ?? null) !== (c.display_group ?? null);
+            return c.newUnitId !== c.target_unit_id || c.newType !== c._initialType || c.ruleChanged || subgroupChanged || displayGroupChanged;
         });
     }, [columns]);
 
@@ -743,6 +960,7 @@ export default function SurveyManagePage() {
                 source_column: col.source_column,
                 column_type: col.newType || 'CATEGORY',
                 subgroup_name: col.newSubgroupName ?? null,
+                display_group: col.newDisplayGroup ?? null,
             }));
             for (let i = 0; i < colTypeRows.length; i += 50) {
                 await supabase.from('survey_column_cache')
@@ -766,7 +984,7 @@ export default function SurveyManagePage() {
     };
 
     // --- Preview Column Data ---
-    const handlePreview = async (sourceColumn: string) => {
+    const handlePreview = useCallback(async (sourceColumn: string) => {
         setPreviewCol(sourceColumn);
         setLoadingPreview(true);
         setPreviewData(null);
@@ -796,7 +1014,7 @@ export default function SurveyManagePage() {
         } finally {
             setLoadingPreview(false);
         }
-    };
+    }, [surveyId]);
 
     const filteredColumns = useMemo(() =>
         columns.filter(c => c.source_column.toLowerCase().includes(filterText.toLowerCase())),
@@ -965,6 +1183,69 @@ export default function SurveyManagePage() {
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
+                                        {/* Column Groups panel */}
+                                        <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 bg-slate-50 dark:bg-slate-900/50">
+                                            <div className="flex items-center gap-2">
+                                                <Layers className="w-4 h-4 text-purple-500" />
+                                                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Column Groups</h3>
+                                                {displayGroups.length > 0 && (
+                                                    <Badge variant="outline" className="text-[10px] text-purple-600 border-purple-200 bg-purple-50 dark:bg-purple-950/30 dark:border-purple-800">{displayGroups.length} group{displayGroups.length !== 1 ? "s" : ""}</Badge>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-slate-400">Create named groups to combine related binary (Yes/No) columns into a single chart.</p>
+                                            {displayGroups.length > 0 && (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {displayGroups.map(g => (
+                                                        <div key={g} className="flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300">
+                                                            <Layers className="w-3 h-3 text-purple-400 shrink-0" />
+                                                            {g}
+                                                            <button
+                                                                onClick={() => {
+                                                                    setDisplayGroups(prev => prev.filter(x => x !== g));
+                                                                    setColumns(prev => prev.map(c => c.newDisplayGroup === g ? { ...c, newDisplayGroup: null } : c));
+                                                                }}
+                                                                className="ml-1 text-slate-400 hover:text-red-500 transition-colors"
+                                                            >
+                                                                <X className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    placeholder="New group name (e.g. M-Flex Learning Activities)"
+                                                    value={newGroupName}
+                                                    onChange={e => setNewGroupName(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === "Enter") {
+                                                            const name = newGroupName.trim();
+                                                            if (name && !displayGroups.includes(name)) {
+                                                                setDisplayGroups(prev => [...prev, name]);
+                                                                setNewGroupName("");
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="h-8 text-sm bg-white dark:bg-slate-900"
+                                                />
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-8 gap-1.5 shrink-0"
+                                                    disabled={!newGroupName.trim() || displayGroups.includes(newGroupName.trim())}
+                                                    onClick={() => {
+                                                        const name = newGroupName.trim();
+                                                        if (name && !displayGroups.includes(name)) {
+                                                            setDisplayGroups(prev => [...prev, name]);
+                                                            setNewGroupName("");
+                                                        }
+                                                    }}
+                                                >
+                                                    <Plus className="w-3.5 h-3.5" /> Add Group
+                                                </Button>
+                                            </div>
+                                        </div>
+
                                         {/* Search filter */}
                                         <div className="relative">
                                             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -1000,251 +1281,21 @@ export default function SurveyManagePage() {
 
                                         {/* Expandable Column Cards */}
                                         <div className="space-y-2">
-                                            {filteredColumns.map(col => {
-                                                const isDirty = col.newUnitId !== col.target_unit_id || col.newType !== col._initialType || col.ruleChanged;
-                                                const currentType = col.newType || col._initialType || "CATEGORY";
-                                                const isExpanded = expandedCols.has(col.source_column);
-                                                const uniqueVals = colUniqueValues.get(col.source_column) || [];
-                                                const hasUniqueVals = uniqueVals.length > 0;
-
-                                                return (
-                                                    <div
-                                                        key={col.source_column}
-                                                        className={cn(
-                                                            "border rounded-xl overflow-hidden transition-all duration-200",
-                                                            isDirty
-                                                                ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-950/10"
-                                                                : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950",
-                                                            currentType === "IGNORE" && "opacity-50"
-                                                        )}
-                                                    >
-                                                        {/* Collapsed Header Row */}
-                                                        <div
-                                                            className={cn(
-                                                                "p-4 cursor-pointer transition-colors",
-                                                                isExpanded ? "bg-slate-50 dark:bg-slate-900/50" : "hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
-                                                            )}
-                                                            onClick={() => toggleExpand(col.source_column)}
-                                                        >
-                                                            {/* Row 1: Chevron + Full Column Name + Badges */}
-                                                            <div className="flex items-start gap-3 mb-3">
-                                                                <div className="mt-0.5 shrink-0">
-                                                                    {isExpanded
-                                                                        ? <ChevronDown className="w-4 h-4 text-slate-500" />
-                                                                        : <ChevronRight className="w-4 h-4 text-slate-400" />
-                                                                    }
-                                                                </div>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <span className="text-sm font-medium text-slate-800 dark:text-slate-200 leading-snug">
-                                                                        {col.source_column}
-                                                                    </span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                                    {isDirty && <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 text-[10px] px-1.5">edited</Badge>}
-                                                                    {col.has_segments > 0 && (
-                                                                        <Badge variant="outline" className="text-[10px] text-green-600 border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800">
-                                                                            {col.has_segments} segs
-                                                                        </Badge>
-                                                                    )}
-                                                                    {hasUniqueVals && uniqueVals.length <= 15 && (
-                                                                        <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800">
-                                                                            {uniqueVals.length} unique
-                                                                        </Badge>
-                                                                    )}
-                                                                    <span className="text-xs text-slate-400 tabular-nums ml-1">
-                                                                        {col.row_count.toLocaleString()} rows
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                            {/* Row 2: Selectors (click stops propagation) */}
-                                                            <div className="flex items-center gap-3 pl-7" onClick={e => e.stopPropagation()}>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Unit</label>
-                                                                    <Select
-                                                                        value={(col.newUnitId ?? col.target_unit_id).toString()}
-                                                                        onValueChange={val => updateColumn(col.source_column, 'newUnitId', parseInt(val))}
-                                                                    >
-                                                                        <SelectTrigger className="h-9 bg-white dark:bg-slate-900 text-sm">
-                                                                            <SelectValue placeholder="Select Unit" />
-                                                                        </SelectTrigger>
-                                                                        <SelectContent>
-                                                                            {units.map(u => (
-                                                                                <SelectItem key={u.id} value={u.id.toString()}>
-                                                                                    {u.name} {u.short_name ? `(${u.short_name})` : ''}
-                                                                                </SelectItem>
-                                                                            ))}
-                                                                        </SelectContent>
-                                                                    </Select>
-                                                                </div>
-                                                                <div className="w-44 shrink-0">
-                                                                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Type</label>
-                                                                    <Select
-                                                                        value={currentType}
-                                                                        onValueChange={val => updateColumn(col.source_column, 'newType', val)}
-                                                                    >
-                                                                        <SelectTrigger className={cn("h-9 text-sm",
-                                                                            currentType === "SCORE" ? "text-blue-700 bg-blue-50 dark:bg-blue-950/30" :
-                                                                                currentType === "TEXT" ? "text-green-700 bg-green-50 dark:bg-green-950/30" :
-                                                                                    currentType === "CATEGORY" ? "text-purple-700 bg-purple-50 dark:bg-purple-950/30" :
-                                                                                        "bg-white dark:bg-slate-900"
-                                                                        )}>
-                                                                            <SelectValue />
-                                                                        </SelectTrigger>
-                                                                        <SelectContent>
-                                                                            <SelectItem value="TEXT">Text (Analyze)</SelectItem>
-                                                                            <SelectItem value="SCORE">Score (Number)</SelectItem>
-                                                                            <SelectItem value="CATEGORY">Category (Filter)</SelectItem>
-                                                                            <SelectItem value="IGNORE">Ignore</SelectItem>
-                                                                        </SelectContent>
-                                                                    </Select>
-                                                                </div>
-                                                                {currentType === "SCORE" && (
-                                                                    <div className="w-40 shrink-0">
-                                                                        <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Transform</label>
-                                                                        <Select
-                                                                            value={col.newRule || "NUMBER"}
-                                                                            onValueChange={val => updateColumn(col.source_column, 'newRule', val)}
-                                                                        >
-                                                                            <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                                                                                <SelectValue />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                <SelectItem value="LIKERT">Likert (4=Puas)</SelectItem>
-                                                                                <SelectItem value="BOOLEAN">Yes/No (1/0)</SelectItem>
-                                                                                <SelectItem value="TEXT_SCALE">Scale (Sering=4)</SelectItem>
-                                                                                <SelectItem value="NUMBER">Raw Number</SelectItem>
-                                                                                <SelectItem value="CUSTOM_MAPPING">Custom Mapping</SelectItem>
-                                                                                <SelectItem value="NPS_0_10">NPS (0–10)</SelectItem>
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    </div>
-                                                                )}
-                                                                {/* Subgroup dropdown — only meaningful for SCORE columns whose
-                                                                    target unit has defined score_subgroups. Lets the user roll
-                                                                    multiple columns into one named bucket (e.g. IT's "Mobile App"). */}
-                                                                {currentType === "SCORE" && col.newRule !== "NPS_0_10" && (() => {
-                                                                    const targetUnit = units.find(u => u.id === (col.newUnitId ?? col.target_unit_id));
-                                                                    const subgroups = targetUnit?.score_subgroups || [];
-                                                                    if (subgroups.length === 0) return null;
-                                                                    return (
-                                                                        <div className="w-44 shrink-0">
-                                                                            <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1 block">Subgroup</label>
-                                                                            <Select
-                                                                                value={col.newSubgroupName ?? "__INDIVIDUAL__"}
-                                                                                onValueChange={val => updateColumn(col.source_column, 'newSubgroupName', val === "__INDIVIDUAL__" ? null : val)}
-                                                                            >
-                                                                                <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                                                                                    <SelectValue />
-                                                                                </SelectTrigger>
-                                                                                <SelectContent>
-                                                                                    <SelectItem value="__INDIVIDUAL__">(Individual)</SelectItem>
-                                                                                    {subgroups.map(sg => (
-                                                                                        <SelectItem key={sg} value={sg}>{sg}</SelectItem>
-                                                                                    ))}
-                                                                                </SelectContent>
-                                                                            </Select>
-                                                                        </div>
-                                                                    );
-                                                                })()}
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Expanded Section: Unique Values + Custom Mapping */}
-                                                        {isExpanded && (
-                                                            <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-4 bg-slate-50/50 dark:bg-slate-900/30">
-                                                                <div className="pl-7">
-                                                                    {/* Show unique values */}
-                                                                    {hasUniqueVals ? (
-                                                                        <div className="space-y-3">
-                                                                            <div className="flex items-center justify-between">
-                                                                                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                                                                                    Unique Values ({uniqueVals.length}):
-                                                                                </div>
-                                                                                {currentType === "SCORE" && col.newRule !== "NPS_0_10" && (() => {
-                                                                                    const nullCount = uniqueVals.filter(v => resolveScore(v, col.newRule || "NUMBER", col.customMapping) === null).length;
-                                                                                    if (nullCount === 0) return null;
-                                                                                    return (
-                                                                                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-0.5">
-                                                                                            {nullCount} value{nullCount === 1 ? "" : "s"} → NA (excluded from score)
-                                                                                        </span>
-                                                                                    );
-                                                                                })()}
-                                                                            </div>
-
-                                                                            {/* Editable mapping grid — visible for every SCORE rule except NPS_0_10
-                                                                                so users can verify and override per-value mappings post-import. */}
-                                                                            {currentType === "SCORE" && col.newRule !== "NPS_0_10" ? (
-                                                                                <div className="grid gap-2 border border-slate-200 dark:border-slate-800 rounded-lg p-3 bg-white dark:bg-slate-950 max-h-[400px] overflow-y-auto">
-                                                                                    {uniqueVals.map((v, i) => {
-                                                                                        const resolved = resolveScore(v, col.newRule || "NUMBER", col.customMapping);
-                                                                                        const isOverride = !!(col.customMapping && v in col.customMapping);
-                                                                                        const selectValue = resolved === null ? "NA" : resolved.toString();
-                                                                                        return (
-                                                                                            <div key={i} className="flex items-center justify-between gap-4">
-                                                                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 break-all flex items-center gap-2">
-                                                                                                    {v || "(empty)"}
-                                                                                                    {isOverride && (
-                                                                                                        <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-1.5 py-0.5 rounded">override</span>
-                                                                                                    )}
-                                                                                                </span>
-                                                                                                <Select
-                                                                                                    value={selectValue}
-                                                                                                    onValueChange={val => handleUpdateCustomMapping(col.source_column, v, val === "NA" ? null : parseInt(val))}
-                                                                                                >
-                                                                                                    <SelectTrigger className={cn(
-                                                                                                        "w-[120px] h-8 shrink-0",
-                                                                                                        resolved === null ? "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-white dark:bg-slate-950"
-                                                                                                    )}>
-                                                                                                        <SelectValue placeholder="Map to..." />
-                                                                                                    </SelectTrigger>
-                                                                                                    <SelectContent>
-                                                                                                        <SelectItem value="1">1</SelectItem>
-                                                                                                        <SelectItem value="2">2</SelectItem>
-                                                                                                        <SelectItem value="3">3</SelectItem>
-                                                                                                        <SelectItem value="4">4</SelectItem>
-                                                                                                        <SelectItem value="0">0</SelectItem>
-                                                                                                        <SelectItem value="NA">NA / Ignore</SelectItem>
-                                                                                                    </SelectContent>
-                                                                                                </Select>
-                                                                                            </div>
-                                                                                        );
-                                                                                    })}
-                                                                                </div>
-                                                                            ) : (
-                                                                                /* Non-SCORE or NPS: just show raw values as badges */
-                                                                                <div className="flex flex-wrap gap-1.5">
-                                                                                    {uniqueVals.map((v, i) => (
-                                                                                        <Badge key={i} variant="outline" className="text-xs py-1 px-2.5 bg-white dark:bg-slate-900 font-normal">
-                                                                                            {v}
-                                                                                        </Badge>
-                                                                                    ))}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    ) : loadingUniqueValues ? (
-                                                                        <div className="flex items-center gap-2 text-sm text-slate-400 py-2">
-                                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                                            <span>Loading values...</span>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="flex items-center gap-3 py-2">
-                                                                            <span className="text-sm text-slate-400">No unique values loaded.</span>
-                                                                            <Button
-                                                                                variant="outline"
-                                                                                size="sm"
-                                                                                onClick={() => handlePreview(col.source_column)}
-                                                                                className="h-7 text-xs gap-1.5"
-                                                                            >
-                                                                                <Eye className="w-3 h-3" /> Load Preview
-                                                                            </Button>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
+                                            {filteredColumns.map(col => (
+                                                <ColumnRow
+                                                    key={col.source_column}
+                                                    col={col}
+                                                    units={units}
+                                                    displayGroups={displayGroups}
+                                                    isExpanded={expandedCols.has(col.source_column)}
+                                                    uniqueVals={colUniqueValues.get(col.source_column) || []}
+                                                    loadingUniqueValues={loadingUniqueValues}
+                                                    onToggleExpand={toggleExpand}
+                                                    onUpdateColumn={updateColumn}
+                                                    onUpdateCustomMapping={handleUpdateCustomMapping}
+                                                    onPreview={handlePreview}
+                                                />
+                                            ))}
                                         </div>
                                     </div>
                                 )}

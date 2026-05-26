@@ -12,7 +12,9 @@ export const maxDuration = 120;
 
 const PAGE = 1000;
 // Each respondent has ~20 questions — keep input chunks small so each .in() returns < 1000 rows
-const INPUT_CHUNK = 40;
+// 20 respondents × ~25 inputs ≈ 500 rows/chunk — safely under Supabase's 1000-row default.
+// .range(0, 9999) is also added on each inner query as a belt-and-suspenders override.
+const INPUT_CHUNK = 20;
 // Each input has ~1-2 segments — 400 input IDs per query is safe
 const SEG_CHUNK = 400;
 const MAX_CONCURRENT = 5;
@@ -55,7 +57,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ── 0. Cache check ──────────────────────────────────────────────────────
-    const cacheKey = `faculty_detail_${facultyId}`;
+    const cacheKey = `faculty_detail_v7_${facultyId}`;
     const { data: cached, error: cacheErr } = await supabase
         .from("survey_misc_cache")
         .select("data")
@@ -68,14 +70,18 @@ export async function GET(req: NextRequest) {
     }
 
     // ── 1. Parallel lookups ─────────────────────────────────────────────────
-    const [facultyResult, unitsResult, enrollResult, categoriesResult, npsSettingRes] = await Promise.all([
+    const [facultyResult, unitsResult, enrollResult, categoriesResult, npsSettingRes, studyProgSettingRes] = await Promise.all([
         supabase.from("faculties").select("id, name, short_name, description").eq("id", facultyId).single(),
         supabase.from("organization_units").select("id, name, short_name"),
         supabase.from("prodi_enrollment").select("study_program, student_count").eq("survey_id", surveyId),
         supabase.from("analysis_categories").select("id, name, unit_id"),
         supabase.from("platform_settings").select("value").eq("key", "nps_unit_ids").maybeSingle(),
+        supabase.from("platform_settings").select("value").eq("key", "study_program_unit_id").maybeSingle(),
     ]);
     const npsUnitIds: number[] = parseSettingArray<number>(npsSettingRes.data?.value);
+    const studyProgramUnitIdSetting = studyProgSettingRes.data?.value != null
+        ? parseInt(studyProgSettingRes.data.value)
+        : null;
 
     if (!facultyResult.data) {
         return NextResponse.json({ error: "Faculty not found" }, { status: 404 });
@@ -83,10 +89,13 @@ export async function GET(req: NextRequest) {
     const faculty = facultyResult.data;
 
     const allUnits = unitsResult.data || [];
-    const studyProgramUnit = allUnits.find(u => u.name === "Study Program") ?? null;
+    // Prefer the configurable setting; fall back to finding by exact name "Study Program"
+    const studyProgramUnit = studyProgramUnitIdSetting != null
+        ? (allUnits.find(u => u.id === studyProgramUnitIdSetting) ?? null)
+        : (allUnits.find(u => u.name === "Study Program") ?? null);
     const studyProgramUnitId = studyProgramUnit?.id ?? null;
     const serviceUnitMap = new Map(
-        allUnits.filter(u => u.name !== "Study Program").map(u => [u.id, u])
+        allUnits.filter(u => u.id !== studyProgramUnitId && !npsUnitIds.includes(u.id)).map(u => [u.id, u])
     );
 
     const catMap = new Map((categoriesResult.data || []).map(c => [c.id, c]));
@@ -165,10 +174,20 @@ export async function GET(req: NextRequest) {
     // INPUT_CHUNK=40 and SEG_CHUNK=400 still apply; we paginate the score fetch separately.
     type InputRow = { id: number; respondent_id: number; target_unit_id: number | null; is_quantitative: boolean; numerical_score: number | null; score_rule: string | null; source_column: string };
     const allInputs = await batchFetch<InputRow>(allRespIds, INPUT_CHUNK, async (chunk) => {
-        const { data } = await supabase.from("raw_feedback_inputs")
-            .select("id, respondent_id, target_unit_id, is_quantitative, numerical_score, score_rule, source_column")
-            .in("respondent_id", chunk);
-        return (data || []) as InputRow[];
+        const rows: InputRow[] = [];
+        let from = 0;
+        while (true) {
+            const { data } = await supabase.from("raw_feedback_inputs")
+                .select("id, respondent_id, target_unit_id, is_quantitative, numerical_score, score_rule, source_column")
+                .in("respondent_id", chunk)
+                .order("id")
+                .range(from, from + 999);
+            if (!data?.length) break;
+            rows.push(...(data as InputRow[]));
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return rows;
     });
 
     // Map input → unit + study_program for the segments-walk below.
@@ -208,15 +227,28 @@ export async function GET(req: NextRequest) {
     const meanOf = (arr: number[] | undefined) => arr && arr.length > 0 ? mean(arr) : null;
 
     // ── 4. Batch-fetch feedback_segments (chunk by 400 input IDs) ───────────
-    // SEG_CHUNK=400: each input has ~1-2 segments → ~400-800 rows per query, safely under 1000
-    const allInputIds = allInputs.map(i => i.id);
+    // Only qualitative (text) inputs have meaningful sentiment segments.
+    // Quantitative inputs (rating scales) may have auto-generated segments
+    // derived from numerical scores, which would skew sentiment counts.
+    // Student Voices also filters to is_quantitative=false, so this keeps both in sync.
+    const allInputIds = allInputs.filter(i => !i.is_quantitative).map(i => i.id);
 
-    type SegRow = { raw_input_id: number; sentiment: string; category_id: number | null };
+    type SegRow = { id: number; raw_input_id: number; sentiment: string; category_id: number | null };
     const allSegs = await batchFetch<SegRow>(allInputIds, SEG_CHUNK, async (chunk) => {
-        const { data } = await supabase.from("feedback_segments")
-            .select("raw_input_id, sentiment, category_id")
-            .in("raw_input_id", chunk);
-        return (data || []) as SegRow[];
+        const rows: SegRow[] = [];
+        let from = 0;
+        while (true) {
+            const { data } = await supabase.from("feedback_segments")
+                .select("id, raw_input_id, sentiment, category_id")
+                .in("raw_input_id", chunk)
+                .order("id")
+                .range(from, from + 999);
+            if (!data?.length) break;
+            rows.push(...(data as SegRow[]));
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return rows;
     });
 
     const progSentimentMap = new Map<string, ReturnType<typeof emptySentiment>>();
@@ -230,7 +262,12 @@ export async function GET(req: NextRequest) {
         const unitId = inputUnitMap.get(seg.raw_input_id);
         const studyProg = inputStudyProgramMap.get(seg.raw_input_id) || "Unknown";
 
-        if (unitId === studyProgramUnitId && studyProgramUnitId !== null) {
+        // Study-program-related: Prodi unit OR NPS unit (NPS follow-up text explains
+        // why students would/wouldn't recommend their program — program sentiment, not campus).
+        const isStudyProgramSeg = (unitId === studyProgramUnitId && studyProgramUnitId !== null)
+            || (unitId != null && npsUnitIds.includes(unitId));
+
+        if (isStudyProgramSeg) {
             if (!progSentimentMap.has(studyProg)) progSentimentMap.set(studyProg, emptySentiment());
             const s = progSentimentMap.get(studyProg)!;
             s.total++;
@@ -375,6 +412,7 @@ export async function GET(req: NextRequest) {
 
     const responsePayload = {
         faculty,
+        npsUnitIds,
         totalRespondents,
         totalEnrolled,
         responseRate: totalEnrolled > 0 ? parseFloat((totalRespondents / totalEnrolled * 100).toFixed(1)) : null,
