@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -291,14 +293,25 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                                     {campuses.map(c => (
                                         <th key={c} className="text-center py-3 px-3 font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">{shortCampus(c)}</th>
                                     ))}
-                                    <th className="text-center py-3 px-4 font-bold text-slate-800 dark:text-slate-200">Average</th>
+                                    <th className="text-center py-3 px-4 font-bold text-slate-800 dark:text-slate-200">
+                                        <span className="inline-flex items-center gap-1">
+                                            Average
+                                            <InfoHint side="top" iconClassName="w-3 h-3">
+                                                <p className="font-semibold mb-1">Satisfaction Index (1–4 scale)</p>
+                                                <p>4 = Excellent · 3 = Good · 2 = Fair · 1 = Poor</p>
+                                                <p className="mt-1 text-slate-400">Benchmark: ≥ 3.20 strong · 3.00–3.19 fair · &lt; 3.00 needs attention</p>
+                                            </InfoHint>
+                                        </span>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {sortedUnits.map(unit => (
                                     <tr key={unit.unit_id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
                                         <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">
-                                            {unit.unit_name}
+                                            <Link href={`/unit-insights/${unit.unit_id}`} className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">
+                                                {unit.unit_name}
+                                            </Link>
                                             {unit.short_name && <span className="text-slate-400 ml-1 text-xs">({unit.short_name})</span>}
                                         </td>
                                         {unit.campus_scores.map(cs => (

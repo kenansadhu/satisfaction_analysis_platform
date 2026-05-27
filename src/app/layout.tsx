@@ -25,6 +25,7 @@ import { SurveyProvider } from "@/context/SurveyContext";
 import { AuthProvider } from "@/context/AuthContext";
 
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default function RootLayout({
   children,
@@ -42,17 +43,19 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AuthProvider>
-            <SurveyProvider>
-              <AnalysisProgressProvider>
-                <AnalysisProvider>
-                  <AppShell>
-                    {children}
-                  </AppShell>
-                </AnalysisProvider>
-              </AnalysisProgressProvider>
-            </SurveyProvider>
-          </AuthProvider>
+          <TooltipProvider delayDuration={150}>
+            <AuthProvider>
+              <SurveyProvider>
+                <AnalysisProgressProvider>
+                  <AnalysisProvider>
+                    <AppShell>
+                      {children}
+                    </AppShell>
+                  </AnalysisProvider>
+                </AnalysisProgressProvider>
+              </SurveyProvider>
+            </AuthProvider>
+          </TooltipProvider>
         </ThemeProvider>
         <Toaster richColors position="top-right" closeButton toastOptions={{ className: 'print:hidden' }} />
       </body>

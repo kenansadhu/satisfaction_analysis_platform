@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InfoHint } from "@/components/ui/info-hint";
 import {
     FileText, Target, Users, MessageSquare, ThumbsUp,
     Sparkles, TrendingUp, AlertTriangle, Lightbulb, Info,
-    ArrowUpDown,
+    ArrowUpDown, ArrowRight,
 } from "lucide-react";
 
 // ─── Data types ──────────────────────────────────────────────────────────────
@@ -192,6 +194,10 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                         <div>
                             <p className="text-xs font-semibold text-blue-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                 <FileText className="w-3.5 h-3.5" /> SSI Score
+                                <InfoHint side="bottom" iconClassName="text-blue-300/60 hover:text-blue-200">
+                                    <strong>Satisfaction Index (SSI)</strong> — the institution-wide average of every rated Likert question (1–4) across all evaluated units. Computed by averaging per-unit SSI, weighted by the number of responses.
+                                    <br /><br />Benchmarks: ≥3.20 strong · 3.00–3.19 fair · &lt;3.00 needs attention.
+                                </InfoHint>
                             </p>
                             <div className={`text-5xl md:text-6xl font-black tracking-tight ${ssiTextColor(globalSatisfactionIndex)}`}>
                                 {globalSatisfactionIndex?.toFixed(2) ?? "N/A"}
@@ -201,6 +207,10 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                         <div>
                             <p className="text-xs font-semibold text-blue-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                 <ThumbsUp className="w-3.5 h-3.5" /> Sentiment Score
+                                <InfoHint side="bottom" iconClassName="text-blue-300/60 hover:text-blue-200">
+                                    <strong>Sentiment Score (0–100)</strong> — derived from AI analysis of open-ended student comments. Each comment is split into segments, then each segment is classified positive (1 pt), neutral (0.5 pt), or negative (0 pt). The score is the weighted average, scaled to 0–100.
+                                    <br /><br />Benchmarks: ≥60 healthy · 40–59 mixed · &lt;40 critical.
+                                </InfoHint>
                             </p>
                             <div className={`text-5xl md:text-6xl font-black tracking-tight ${globalSentiment !== null ? sentimentTextColor(globalSentiment) : "text-slate-500"}`}>
                                 {globalSentiment !== null ? globalSentiment : "—"}
@@ -210,6 +220,10 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                         <div>
                             <p className="text-xs font-semibold text-blue-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                 <Target className="w-3.5 h-3.5" /> NPS
+                                <InfoHint side="bottom" iconClassName="text-blue-300/60 hover:text-blue-200">
+                                    <strong>Net Promoter Score (−100 to +100)</strong> — from "how likely would you recommend…" questions on a 0–10 scale. Promoters (9–10) minus Detractors (0–6) as a percentage of total responses.
+                                    <br /><br />Benchmarks: &gt;50 excellent · 0–49 healthy · &lt;0 needs intervention.
+                                </InfoHint>
                             </p>
                             {npsData && npsData.total > 0 && npsData.nps_score !== null ? (
                                 <>
@@ -228,6 +242,9 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                         <div>
                             <p className="text-xs font-semibold text-blue-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                 <Users className="w-3.5 h-3.5" /> Respondents
+                                <InfoHint side="bottom" iconClassName="text-blue-300/60 hover:text-blue-200">
+                                    Unique students who submitted at least one answer in this survey. Each respondent can produce many feedback comments and rate multiple service units.
+                                </InfoHint>
                             </p>
                             <div className="text-5xl md:text-6xl font-black tracking-tight text-white">
                                 {totalRespondents.toLocaleString()}
@@ -327,7 +344,12 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                         const sentBarPct = sentScore !== null ? sentScore : 0;
 
                         return (
-                            <div key={unit.unit_id} className="grid grid-cols-[2rem_minmax(8rem,1fr)_minmax(16rem,2fr)_minmax(16rem,2fr)] gap-x-6 items-center px-6 py-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
+                            <Link
+                                key={unit.unit_id}
+                                href={`/unit-insights/${unit.unit_id}`}
+                                className="grid grid-cols-[2rem_minmax(8rem,1fr)_minmax(16rem,2fr)_minmax(16rem,2fr)] gap-x-6 items-center px-6 py-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors group"
+                                title={`Open ${unit.short_name || unit.unit_name}`}
+                            >
 
                                 {/* Rank */}
                                 <span className="text-sm font-bold text-slate-400 tabular-nums">{i + 1}</span>
@@ -390,6 +412,7 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                                 <span className={`text-sm font-bold tabular-nums w-9 text-right shrink-0 ${sentimentTextColorLight(sentScore)}`}>
                                                     {sentScore}
                                                 </span>
+                                                <ArrowRight className="w-3.5 h-3.5 shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-indigo-500 group-hover:translate-x-0.5 opacity-0 group-hover:opacity-100 transition-all" />
                                             </div>
                                             <p className="text-[10px] text-slate-400 pr-[2.5rem]">
                                                 {unit.qualitative!.positive_pct.toFixed(0)}% positive · {unit.qualitative!.negative_pct.toFixed(0)}% negative
@@ -397,11 +420,14 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                             </p>
                                         </>
                                     ) : (
-                                        <span className="text-sm text-slate-400">No comment data</span>
+                                        <div className="flex items-center gap-2.5">
+                                            <span className="text-sm text-slate-400 flex-1">No comment data</span>
+                                            <ArrowRight className="w-3.5 h-3.5 shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-indigo-500 group-hover:translate-x-0.5 opacity-0 group-hover:opacity-100 transition-all" />
+                                        </div>
                                     )}
                                 </div>
 
-                            </div>
+                            </Link>
                         );
                     })}
                 </div>

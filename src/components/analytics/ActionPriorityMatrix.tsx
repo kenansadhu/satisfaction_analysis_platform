@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
     ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -170,7 +171,9 @@ export function ActionPriorityMatrix({ units }: { units: UnitPerformance[] }) {
                                         <div key={u.id} className="flex items-center justify-between p-2.5 bg-red-50 dark:bg-red-950/20 rounded-xl border border-red-100 dark:border-red-900/40">
                                             <div className="flex items-center gap-2 min-w-0">
                                                 <span className="w-5 h-5 rounded-full bg-red-200 dark:bg-red-800 text-red-700 dark:text-red-300 text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                                                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">{u.name}</span>
+                                                <Link href={`/unit-insights/${u.id}`} className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">
+                                                    {u.name}
+                                                </Link>
                                             </div>
                                             <span className="text-xs font-bold text-red-600 dark:text-red-400 shrink-0 ml-2">{u.negPct.toFixed(0)}%</span>
                                         </div>

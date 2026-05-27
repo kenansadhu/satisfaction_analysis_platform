@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, TrendingDown, Minus, GitCompareArrows, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -49,12 +50,13 @@ function SourceBreakdownPanel({ breakdown }: { breakdown: SourceUnitBreakdown[] 
                 const barWidth = (src.total / maxTotal) * 100;
                 return (
                     <div key={src.source_unit_id} className="flex items-center gap-2 px-1 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-                        <span
-                            className="w-24 shrink-0 text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate"
+                        <Link
+                            href={`/unit-insights/${src.source_unit_id}`}
+                            className="w-24 shrink-0 text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
                             title={src.source_unit_name}
                         >
                             {src.source_unit_short_name}
-                        </span>
+                        </Link>
                         <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                             <div className="h-full flex" style={{ width: `${barWidth}%` }}>
                                 <div className="h-full bg-emerald-500" style={{ width: `${posPct}%` }} />
@@ -190,9 +192,14 @@ export default function CrossUnitMentions({ surveyId, hideHeader, npsUnitIds = [
 
                             {/* Unit name */}
                             <div className="w-24 shrink-0 min-w-0">
-                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate" title={m.unit_name}>
+                                <Link
+                                    href={`/unit-insights/${m.unit_id}`}
+                                    className="text-xs font-semibold text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors truncate block"
+                                    title={m.unit_name}
+                                    onClick={e => e.stopPropagation()}
+                                >
                                     {m.unit_short_name}
-                                </p>
+                                </Link>
                             </div>
 
                             {/* Stacked bar — width proportional to max */}

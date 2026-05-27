@@ -7,6 +7,7 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Building2, ArrowRight, Search, PieChart, TrendingUp, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { useActiveSurvey } from "@/context/SurveyContext";
@@ -186,7 +187,13 @@ export default function UnitInsightsPage() {
 
                             {/* Left: Avg Score */}
                             <div className="flex flex-col items-center justify-center px-10 py-8 lg:w-56 shrink-0 gap-1">
-                                <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-1">Overall Score</div>
+                                <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-1 flex items-center gap-1.5">
+                                    Overall Score
+                                    <InfoHint side="bottom" iconClassName="text-indigo-300/60 hover:text-indigo-100">
+                                        <strong>Average Sentiment Score (0–100)</strong> across all analyzed units. Each unit's score is derived from its student comments: positive segments = 1 pt, neutral = 0.5, negative = 0.
+                                        <br /><br />Benchmarks: ≥70 healthy · 50–69 fair · &lt;50 needs attention.
+                                    </InfoHint>
+                                </div>
                                 <div className={`text-5xl font-black tabular-nums leading-none ${
                                     avgScore !== null && avgScore >= 70 ? "text-emerald-400" :
                                     avgScore !== null && avgScore >= 50 ? "text-amber-400" : "text-red-400"
@@ -200,7 +207,12 @@ export default function UnitInsightsPage() {
 
                             {/* Center: Score Distribution */}
                             <div className="flex-1 px-8 py-8 flex flex-col justify-center gap-4">
-                                <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-1">Score Distribution</div>
+                                <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-1 flex items-center gap-1.5">
+                                    Score Distribution
+                                    <InfoHint side="bottom" iconClassName="text-indigo-300/60 hover:text-indigo-100">
+                                        How the analyzed units split across performance tiers based on their sentiment score (0–100). Use this to spot whether the institution has a healthy core, a long tail of weak performers, or polarised results.
+                                    </InfoHint>
+                                </div>
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-3">
                                         <div className="w-3 h-3 rounded-full bg-emerald-400 shrink-0" />
@@ -250,7 +262,12 @@ export default function UnitInsightsPage() {
                             {/* Right: Top Performer + Total Segments */}
                             <div className="flex flex-col justify-center gap-6 px-8 py-8 lg:w-64 shrink-0">
                                 <div>
-                                    <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-2">Top Performer</div>
+                                    <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-2 flex items-center gap-1.5">
+                                        Top Performer
+                                        <InfoHint side="left" iconClassName="text-indigo-300/60 hover:text-indigo-100">
+                                            The unit with the highest sentiment score across its student comments. Click any row in the list below to drill into a unit.
+                                        </InfoHint>
+                                    </div>
                                     {topUnit ? (
                                         <div className="flex items-start gap-2.5">
                                             <div className="p-2 bg-emerald-500/20 rounded-lg shrink-0 mt-0.5">
@@ -264,7 +281,12 @@ export default function UnitInsightsPage() {
                                     ) : <span className="text-white/30 text-sm">—</span>}
                                 </div>
                                 <div>
-                                    <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-1">Total Comments</div>
+                                    <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-1 flex items-center gap-1.5">
+                                        Total Comments
+                                        <InfoHint side="left" iconClassName="text-indigo-300/60 hover:text-indigo-100">
+                                            Total number of feedback segments analyzed across all units. One open-ended comment can be split into multiple segments (one per idea), which is why segments exceed respondent count.
+                                        </InfoHint>
+                                    </div>
                                     <div className="flex items-baseline gap-1.5">
                                         <MessageSquare className="w-4 h-4 text-indigo-400 shrink-0 self-center" />
                                         <span className="text-xl font-black text-white tabular-nums">{totalSegments.toLocaleString()}</span>

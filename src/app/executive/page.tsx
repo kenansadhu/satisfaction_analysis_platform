@@ -57,6 +57,11 @@ export default function ExecutiveDashboard() {
 
     // Survey loading is now handled by SurveyContext
 
+    // ── Feature flags (final-polish pass) ────────────────────────────────────
+    // INACTIVE: the Insights-tab hero strip duplicates the Summary tab hero.
+    // Flip back to `true` (or delete the flag entirely) to restore. See INACTIVE.md.
+    const SHOW_INSIGHTS_HERO_STRIP: boolean = false;
+
     // 2. Fetch metrics whenever selected survey changes
     useEffect(() => {
         const fetchMetrics = async () => {
@@ -188,7 +193,14 @@ export default function ExecutiveDashboard() {
 
                     <TabsContent value="insights" className="space-y-6 mt-0 focus-visible:ring-0">
 
-                        {/* 1. OVERVIEW — dark hero strip */}
+                        {/* ─────────────────────────────────────────────────────────────────────
+                            ▼ INACTIVE — Insights-tab hero strip
+                            Reason: duplicates the Summary tab hero (Overall Score, Feedback, NPS,
+                            Active Units) which is the single canonical home for headline numbers.
+                            Hidden via SHOW_INSIGHTS_HERO_STRIP flag near the top of this file.
+                            If the Summary tab feels sufficient after a second pass, delete this block.
+                            ───────────────────────────────────────────────────────────────────── */}
+                        {SHOW_INSIGHTS_HERO_STRIP && (
                         <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-7 shadow-lg">
                             <div className="absolute -top-10 -right-10 w-56 h-56 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
                             <div className="absolute -bottom-8 left-1/3 w-40 h-40 bg-violet-500/15 rounded-full blur-3xl pointer-events-none" />
@@ -275,8 +287,10 @@ export default function ExecutiveDashboard() {
                                 </div>
                             </div>
                         </div>
+                        )}
+                        {/* ▲ END INACTIVE block */}
 
-                        {/* 2. CATEGORY INTELLIGENCE — what topics are driving praise or problems */}
+                        {/* CATEGORY INTELLIGENCE — what topics are driving praise or problems */}
                         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5">
                             <div>
                                 <div className="flex items-center gap-2 mb-0.5">

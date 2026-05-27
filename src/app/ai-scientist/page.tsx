@@ -10,25 +10,42 @@ import { supabase } from "@/lib/supabase";
 import { Database, Sparkles, Save } from "lucide-react";
 
 export default function AIScientistPage() {
-    const { activeSurveyId, activeSurvey } = useActiveSurvey();
+    const { activeSurveyId, activeSurvey, loading: surveysLoading } = useActiveSurvey();
     const surveyId = activeSurveyId === "all" ? undefined : activeSurveyId;
 
     const [macroData, setMacroData] = useState<any[]>([]);
+    const [cacheLoading, setCacheLoading] = useState(false);
+
+    // True while the surveys context is still loading OR while we're fetching the cache
+    const dataLoading = surveysLoading || cacheLoading;
 
     useEffect(() => {
-        if (!surveyId) { setMacroData([]); return; }
-        supabase
-            .from('surveys')
-            .select('ai_dataset_cache')
-            .eq('id', parseInt(surveyId))
-            .single()
-            .then(({ data }) => {
+        // Surveys not yet resolved by context — wait
+        if (surveysLoading || !activeSurveyId) return;
+
+        if (!surveyId) {
+            setMacroData([]);
+            return;
+        }
+
+        setCacheLoading(true);
+        (async () => {
+            try {
+                const { data } = await supabase
+                    .from('surveys')
+                    .select('ai_dataset_cache')
+                    .eq('id', parseInt(surveyId))
+                    .single();
                 const cache = (data as any)?.ai_dataset_cache;
-                if (!cache) return;
-                const units = Array.isArray(cache) ? cache : (cache.units || []);
-                setMacroData(units);
-            });
-    }, [surveyId]);
+                if (cache) {
+                    const units = Array.isArray(cache) ? cache : (cache.units || []);
+                    setMacroData(units);
+                }
+            } catch { /* ignore */ } finally {
+                setCacheLoading(false);
+            }
+        })();
+    }, [surveyId, activeSurveyId, surveysLoading]);
 
     return (
         <div className="min-h-full bg-slate-50 dark:bg-slate-950 pb-20 transition-colors">
@@ -61,6 +78,7 @@ export default function AIScientistPage() {
                         <AIAnalystChat
                             surveyId={surveyId}
                             macroData={macroData}
+                            dataLoading={dataLoading}
                             onChartSaved={() => {}}
                         />
                     </TabsContent>

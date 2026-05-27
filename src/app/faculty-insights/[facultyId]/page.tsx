@@ -2,16 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { InfoHint } from "@/components/ui/info-hint";
 import { useActiveSurvey } from "@/context/SurveyContext";
 import {
     GraduationCap, Users, Target, CheckCircle2, AlertTriangle,
     BookOpen, Building2, AlertCircle, ThumbsUp, ThumbsDown, Sparkles,
-    LayoutDashboard, TrendingUp,
+    LayoutDashboard, TrendingUp, ArrowRight,
 } from "lucide-react";
 import { NpsCard } from "@/components/nps/NpsCard";
 import { emptyNpsCounts, NpsCounts } from "@/lib/nps";
@@ -312,6 +314,10 @@ export default function FacultyDetailPage() {
                                                         <div className="flex items-center gap-1.5 mb-1">
                                                             <BookOpen className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
                                                             <span className="text-xs font-bold text-violet-700 dark:text-violet-400 uppercase tracking-wide">Program Quality</span>
+                                                            <InfoHint side="top">
+                                                                <strong>Program Quality SSI (1–4)</strong> — average Likert score from this faculty's own students rating teaching, curriculum, advising, and the academic experience.
+                                                                <br /><br />Benchmarks: ≥3.20 strong · 3.00–3.19 fair · &lt;3.00 needs attention.
+                                                            </InfoHint>
                                                         </div>
                                                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">Academic feedback from students about their own study program</p>
                                                         <div className="mb-3">
@@ -342,6 +348,10 @@ export default function FacultyDetailPage() {
                                                             <div className="flex items-center gap-1.5 mb-1">
                                                                 <TrendingUp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                                                                 <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Study Program NPS</span>
+                                                                <InfoHint side="top">
+                                                                    <strong>Study Program NPS (−100 to +100)</strong> — from "how likely to recommend your study program" (0–10 scale). Promoters (9–10) minus Detractors (0–6) as % of total responses.
+                                                                    <br /><br />Benchmarks: &gt;50 excellent · 0–49 healthy · &lt;0 urgent.
+                                                                </InfoHint>
                                                             </div>
                                                             <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">Likelihood to recommend their study program to others</p>
                                                             <div className="mb-3">
@@ -370,6 +380,10 @@ export default function FacultyDetailPage() {
                                                         <div className="flex items-center gap-1.5 mb-1">
                                                             <Building2 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
                                                             <span className="text-xs font-bold text-cyan-700 dark:text-cyan-400 uppercase tracking-wide">Campus Experience</span>
+                                                            <InfoHint side="top">
+                                                                <strong>Campus Experience SSI (1–4)</strong> — average Likert score from this faculty's students rating shared campus services (Library, IT, Student Affairs, Finance, Facilities, etc.).
+                                                                <br /><br />Same benchmarks as Program Quality (≥3.20 strong · &lt;3.00 needs attention).
+                                                            </InfoHint>
                                                         </div>
                                                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">How students rate shared campus services and facilities</p>
                                                         <div className="mb-3">
@@ -711,12 +725,20 @@ export default function FacultyDetailPage() {
                                                             <span className="text-right">Responses</span>
                                                         </div>
                                                         {campusExperience.units.map((unit, i) => (
-                                                            <div key={unit.unit_id} className="grid grid-cols-[minmax(0,1fr)_10rem_9rem_5rem] gap-3 items-center px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
+                                                            <Link
+                                                                key={unit.unit_id}
+                                                                href={`/unit-insights/${unit.unit_id}`}
+                                                                className="grid grid-cols-[minmax(0,1fr)_10rem_9rem_5rem] gap-3 items-center px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors group cursor-pointer"
+                                                                title={`Open ${unit.short_name || unit.unit_name}`}
+                                                            >
                                                                 {/* Name */}
                                                                 <div className="flex items-center gap-3 min-w-0">
                                                                     <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-5 shrink-0 tabular-nums">{i + 1}</span>
                                                                     <div className="min-w-0">
-                                                                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{unit.unit_name}</div>
+                                                                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate group-hover:text-teal-700 dark:group-hover:text-teal-400 transition-colors flex items-center gap-1.5">
+                                                                            {unit.unit_name}
+                                                                            <ArrowRight className="w-3 h-3 shrink-0 text-teal-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                                                                        </div>
                                                                         {unit.short_name && <div className="text-[10px] text-slate-400">{unit.short_name}</div>}
                                                                     </div>
                                                                 </div>
@@ -762,7 +784,7 @@ export default function FacultyDetailPage() {
                                                                         {unit.score_count > 0 ? unit.score_count.toLocaleString() : unit.sentiment.total.toLocaleString()}
                                                                     </span>
                                                                 </div>
-                                                            </div>
+                                                            </Link>
                                                         ))}
                                                     </div>
                                                 )}

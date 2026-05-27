@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { useAuth, canAccessAdminPages } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -312,7 +313,13 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
 
                     {/* Unit + Category */}
                     <div className="w-48 shrink-0 min-w-0">
-                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{theme.unit.short_name || theme.unit.name}</div>
+                        <Link
+                            href={`/unit-insights/${theme.unit.id}`}
+                            className="text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors truncate block"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            {theme.unit.short_name || theme.unit.name}
+                        </Link>
                         <div className="text-xs text-slate-500 truncate">{theme.category}</div>
                     </div>
 

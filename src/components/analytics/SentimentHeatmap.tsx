@@ -47,7 +47,8 @@ export function SentimentHeatmap({ units, surveyId }: { units: UnitPerformance[]
                             <span className="w-14 text-center shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Neu</span>
                             <span className="w-14 text-center shrink-0 text-[10px] font-semibold text-red-500 dark:text-red-400 uppercase tracking-wider">Neg</span>
                             <span className="w-16 text-right shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Score</span>
-                            {surveyId && surveyId !== "all" && <span className="w-7 shrink-0" />}
+                            <span className="w-3.5 shrink-0" />
+                            {/* drill-in arrow alignment */}
                         </div>
 
                         {sortedUnits.map((unit, i) => {
@@ -62,7 +63,12 @@ export function SentimentHeatmap({ units, surveyId }: { units: UnitPerformance[]
                             const indicatorColor = unit.score >= 70 ? "bg-emerald-500" : unit.score >= 40 ? "bg-amber-500" : "bg-red-500";
 
                             return (
-                                <div key={unit.id} className="flex items-center gap-4 px-4 py-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                <Link
+                                    key={unit.id}
+                                    href={`/unit-insights/${unit.id}`}
+                                    className="flex items-center gap-4 px-4 py-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group cursor-pointer"
+                                    title={`Open ${unit.name}`}
+                                >
                                     {/* Rank */}
                                     <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-5 shrink-0 text-right tabular-nums">{i + 1}</span>
 
@@ -71,7 +77,7 @@ export function SentimentHeatmap({ units, surveyId }: { units: UnitPerformance[]
 
                                     {/* Name + count */}
                                     <div className="w-44 shrink-0 min-w-0">
-                                        <div className="font-semibold text-slate-800 dark:text-slate-100 text-sm truncate leading-tight" title={unit.name}>{unit.name}</div>
+                                        <div className="font-semibold text-slate-800 dark:text-slate-100 text-sm truncate leading-tight group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">{unit.name}</div>
                                         <div className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">{unit.total.toLocaleString()} comments</div>
                                     </div>
 
@@ -93,15 +99,9 @@ export function SentimentHeatmap({ units, surveyId }: { units: UnitPerformance[]
                                         <span className="text-xs text-slate-400">/100</span>
                                     </div>
 
-                                    {/* Link */}
-                                    {surveyId && surveyId !== "all" && (
-                                        <Link href={`/surveys/${surveyId}/unit/${unit.id}`}>
-                                            <div className="w-7 p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100">
-                                                <ArrowRight className="w-3.5 h-3.5" />
-                                            </div>
-                                        </Link>
-                                    )}
-                                </div>
+                                    {/* Drill-in arrow — appears on hover */}
+                                    <ArrowRight className="w-3.5 h-3.5 shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:translate-x-0.5 opacity-0 group-hover:opacity-100 transition-all" />
+                                </Link>
                             );
                         })}
                     </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { NpsCard } from "@/components/nps/NpsCard";
 import { NpsBucketBar } from "@/components/nps/NpsBucketBar";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -761,8 +762,24 @@ function PerFacultyTable({ rows }: { rows: NpsFacultyRow[] }) {
                                 <thead>
                                     <tr className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase tracking-wider text-slate-400">
                                         <th className="text-left font-semibold py-2 pr-3">Faculty</th>
-                                        <th className="text-right font-semibold py-2 px-2 w-20">NPS</th>
-                                        <th className="text-left font-semibold py-2 px-2 w-64">Distribution</th>
+                                        <th className="text-right font-semibold py-2 px-2 w-20">
+                                            <span className="inline-flex items-center gap-1 justify-end">
+                                                NPS
+                                                <InfoHint side="top" iconClassName="w-3 h-3">
+                                                    <p className="font-semibold mb-1">Net Promoter Score (−100 to +100)</p>
+                                                    <p>Promoters (9–10) minus Detractors (0–6) as % of total respondents.</p>
+                                                    <p className="mt-1 text-slate-400">Benchmark: &gt; 50 excellent · &gt; 0 healthy · &lt; 0 urgent</p>
+                                                </InfoHint>
+                                            </span>
+                                        </th>
+                                        <th className="text-left font-semibold py-2 px-2 w-64">
+                                            <span className="inline-flex items-center gap-1">
+                                                Distribution
+                                                <InfoHint side="top" iconClassName="w-3 h-3">
+                                                    <p>Proportion of detractors (red), passives (amber), and promoters (green) within each faculty.</p>
+                                                </InfoHint>
+                                            </span>
+                                        </th>
                                         <th className="text-right font-semibold py-2 pl-2 w-16">n</th>
                                     </tr>
                                 </thead>

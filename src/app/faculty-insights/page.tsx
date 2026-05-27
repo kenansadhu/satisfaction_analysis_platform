@@ -6,6 +6,7 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InfoHint } from "@/components/ui/info-hint";
 import {
     GraduationCap, ArrowRight, Search, Users, BookOpen,
     Building2, CheckCircle2, AlertTriangle, XCircle, Target
@@ -199,6 +200,10 @@ export default function FacultyInsightsPage() {
                             <div className="flex flex-col items-center justify-center px-10 py-8 lg:w-60 shrink-0 gap-1">
                                 <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
                                     <BookOpen className="w-3 h-3" /> Program Quality
+                                    <InfoHint side="bottom" iconClassName="text-teal-300/60 hover:text-teal-100">
+                                        <strong>Program Quality SSI (1–4)</strong> — how students rate their own study program (teaching, curriculum, advising). Average Likert score across each faculty's study-program questions.
+                                        <br /><br />Benchmarks: ≥3.20 strong · 3.00–3.19 fair · &lt;3.00 needs attention.
+                                    </InfoHint>
                                 </div>
                                 <div className={`text-5xl font-black tabular-nums leading-none ${
                                     avgPQ !== null && parseFloat(avgPQ) >= 3.20 ? "text-emerald-400" :
@@ -215,6 +220,10 @@ export default function FacultyInsightsPage() {
                             <div className="flex flex-col items-center justify-center px-10 py-8 lg:w-60 shrink-0 gap-1">
                                 <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
                                     <Building2 className="w-3 h-3" /> Campus Experience
+                                    <InfoHint side="bottom" iconClassName="text-teal-300/60 hover:text-teal-100">
+                                        <strong>Campus Experience SSI (1–4)</strong> — how students rate shared campus services (Library, IT, Student Affairs, Finance, Facilities, etc.). Average across each faculty's ratings of those service units.
+                                        <br /><br />Same benchmarks as Program Quality.
+                                    </InfoHint>
                                 </div>
                                 <div className={`text-5xl font-black tabular-nums leading-none ${
                                     avgCE !== null && parseFloat(avgCE) >= 3.20 ? "text-emerald-400" :
@@ -251,13 +260,23 @@ export default function FacultyInsightsPage() {
 
                                 <div className="flex items-center gap-8">
                                     <div>
-                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1">Overall NPS</div>
+                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
+                                            Overall NPS
+                                            <InfoHint side="left" iconClassName="text-teal-300/60 hover:text-teal-100">
+                                                <strong>Net Promoter Score (−100 to +100)</strong> aggregated across all NPS questions in the survey, summed over every faculty. Promoters (9–10) minus Detractors (0–6) as a percentage of total responses.
+                                            </InfoHint>
+                                        </div>
                                         <div className={`text-xl font-black tabular-nums leading-none ${overallNpsScore === null ? "text-white/30" : overallNpsScore >= 50 ? "text-emerald-400" : overallNpsScore >= 0 ? "text-amber-400" : "text-red-400"}`}>
                                             {overallNpsScore !== null ? (overallNpsScore > 0 ? `+${overallNpsScore}` : overallNpsScore) : "—"}
                                         </div>
                                     </div>
                                     <div>
-                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1">Respondents</div>
+                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
+                                            Respondents
+                                            <InfoHint side="left" iconClassName="text-teal-300/60 hover:text-teal-100">
+                                                Total students who responded across all faculties. Response rate (shown on Campus Experience) is computed against enrolled headcount where available.
+                                            </InfoHint>
+                                        </div>
                                         <div className="flex items-baseline gap-1.5">
                                             <Users className="w-3.5 h-3.5 text-teal-400 shrink-0 self-center" />
                                             <span className="text-xl font-black text-white tabular-nums">{totalRespondents.toLocaleString()}</span>

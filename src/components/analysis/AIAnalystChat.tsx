@@ -33,6 +33,7 @@ type ChartConfig = {
     fullExplanation?: string;
     dataFilter?: Record<string, string>;
     yLabelMap?: Record<string, string>;
+    units?: string[]; // short names to include; omit or [] = all units
 };
 
 interface ChatMessage {
@@ -45,6 +46,7 @@ interface ChatMessage {
 interface AIAnalystChatProps {
     surveyId?: string;
     macroData: any[];
+    dataLoading?: boolean;
     existingChart?: ChartConfig; // For "Refine" mode
     onChartSaved?: () => void;
 }
@@ -115,7 +117,7 @@ const ANALYSIS_TILES = [
     },
 ];
 
-export default function AIAnalystChat({ surveyId, macroData, existingChart, onChartSaved }: AIAnalystChatProps) {
+export default function AIAnalystChat({ surveyId, macroData, dataLoading = false, existingChart, onChartSaved }: AIAnalystChatProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -263,8 +265,20 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
     // --- Data Transformation ---
     // Use liveData (from API response) as primary, macroData (from page) as fallback
     const prepareChartData = (config: ChartConfig) => {
-        const dataSource = liveData.length > 0 ? liveData : macroData;
-        if (!dataSource || dataSource.length === 0) return [];
+        const rawSource = liveData.length > 0 ? liveData : macroData;
+        if (!rawSource || rawSource.length === 0) return [];
+
+        // Apply unit filter when the chart targets specific units
+        const dataSource = config.units && config.units.length > 0
+            ? (() => {
+                const unitSet = new Set(config.units.map(u => u.toLowerCase()));
+                return rawSource.filter(r => {
+                    const sn = (r.unit_short_name || '').toLowerCase();
+                    const fn = (r.unit_name || '').toLowerCase();
+                    return unitSet.has(sn) || unitSet.has(fn);
+                });
+            })()
+            : rawSource;
 
         if (config.type === "SCATTER") {
             return dataSource
@@ -706,7 +720,25 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                 <>
                     <div className="flex-1 overflow-y-auto px-4 py-4 bg-slate-50/50 dark:bg-slate-950/50">
                         <div className="flex flex-col items-center justify-center h-full gap-8 py-6">
-                            {macroData.length === 0 && liveData.length === 0 ? (
+                            {dataLoading ? (
+                                /* Survey cache is still being fetched */
+                                <div className="flex flex-col items-center justify-center h-full gap-5">
+                                    <div className="relative">
+                                        <div className="absolute inset-0 bg-purple-400 blur-2xl opacity-15 rounded-full scale-150" />
+                                        <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500/50 to-indigo-600/50 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                                            <Sparkles className="w-7 h-7 text-white/60" />
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col items-center gap-2.5">
+                                        <div className="h-4 w-44 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
+                                        <div className="h-3 w-60 bg-slate-100 dark:bg-slate-800 rounded-lg animate-pulse" />
+                                    </div>
+                                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 animate-pulse">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        Loading dataset…
+                                    </span>
+                                </div>
+                            ) : macroData.length === 0 && liveData.length === 0 ? (
                                 <div className="flex flex-col items-center gap-4 text-center max-w-sm">
                                     <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/50 flex items-center justify-center">
                                         <AlertTriangle className="w-7 h-7 text-amber-500" />

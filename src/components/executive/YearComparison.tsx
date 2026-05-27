@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -244,7 +245,7 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
             for (const unit of survey.metrics.unitScores) {
                 if (unit.total === 0) continue;
                 if (!unitMap.has(unit.unit_name))
-                    unitMap.set(unit.unit_name, { unit_name: unit.unit_name });
+                    unitMap.set(unit.unit_name, { unit_name: unit.unit_name, unit_id: unit.unit_id });
                 unitMap.get(unit.unit_name)![label] = unit.score;
             }
         });
@@ -259,11 +260,11 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
         const first = data.surveys[0];
         const last = data.surveys[data.surveys.length - 1];
         const firstMap = new Map(first.metrics.unitScores.filter(u => u.total > 0).map(u => [u.unit_name, u.score]));
-        const lastMap = new Map(last.metrics.unitScores.filter(u => u.total > 0).map(u => [u.unit_name, u.score]));
-        const results: { unit_name: string; scoreFirst: number; scoreLast: number; delta: number }[] = [];
-        for (const [name, scoreLast] of lastMap) {
+        const lastMap = new Map(last.metrics.unitScores.filter(u => u.total > 0).map(u => [u.unit_name, { score: u.score, unit_id: u.unit_id }]));
+        const results: { unit_name: string; unit_id: number; scoreFirst: number; scoreLast: number; delta: number }[] = [];
+        for (const [name, { score: scoreLast, unit_id }] of lastMap) {
             const scoreFirst = firstMap.get(name);
-            if (scoreFirst !== undefined) results.push({ unit_name: name, scoreFirst, scoreLast, delta: scoreLast - scoreFirst });
+            if (scoreFirst !== undefined) results.push({ unit_name: name, unit_id, scoreFirst, scoreLast, delta: scoreLast - scoreFirst });
         }
         return results.sort((a, b) => b.delta - a.delta);
     }, [data]);
@@ -409,16 +410,16 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
                                         <div className="text-xs text-slate-300 mt-0.5">Units declined</div>
                                     </div>
                                     {topImproved[0] && (
-                                        <div className="bg-white/10 rounded-xl p-3">
+                                        <Link href={`/unit-insights/${topImproved[0].unit_id}`} className="bg-white/10 rounded-xl p-3 block hover:bg-white/20 transition-colors">
                                             <div className="text-sm font-bold text-emerald-300 truncate">▲ {topImproved[0].unit_name}</div>
                                             <div className="text-xs text-slate-300 mt-0.5">Biggest gain (+{topImproved[0].delta.toFixed(0)} pts)</div>
-                                        </div>
+                                        </Link>
                                     )}
                                     {topDeclined[0] && (
-                                        <div className="bg-white/10 rounded-xl p-3">
+                                        <Link href={`/unit-insights/${topDeclined[0].unit_id}`} className="bg-white/10 rounded-xl p-3 block hover:bg-white/20 transition-colors">
                                             <div className="text-sm font-bold text-red-300 truncate">▼ {topDeclined[0].unit_name}</div>
                                             <div className="text-xs text-slate-300 mt-0.5">Biggest drop ({topDeclined[0].delta.toFixed(0)} pts)</div>
-                                        </div>
+                                        </Link>
                                     )}
                                 </div>
                             </div>
@@ -457,7 +458,7 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
                                                         <div key={u.unit_name} className="flex items-center justify-between p-2.5 bg-emerald-50 dark:bg-emerald-950/20 rounded-xl">
                                                             <div className="flex items-center gap-2.5 min-w-0">
                                                                 <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{u.unit_name}</span>
+                                                                <Link href={`/unit-insights/${u.unit_id}`} className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">{u.unit_name}</Link>
                                                             </div>
                                                             <div className="flex items-center gap-2 shrink-0 ml-2">
                                                                 <span className="text-xs text-slate-400">{u.scoreFirst}→{u.scoreLast}</span>
@@ -480,7 +481,7 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
                                                         <div key={u.unit_name} className="flex items-center justify-between p-2.5 bg-red-50 dark:bg-red-950/20 rounded-xl">
                                                             <div className="flex items-center gap-2.5 min-w-0">
                                                                 <span className="w-5 h-5 rounded-full bg-red-200 text-red-700 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{u.unit_name}</span>
+                                                                <Link href={`/unit-insights/${u.unit_id}`} className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">{u.unit_name}</Link>
                                                             </div>
                                                             <div className="flex items-center gap-2 shrink-0 ml-2">
                                                                 <span className="text-xs text-slate-400">{u.scoreFirst}→{u.scoreLast}</span>
@@ -579,7 +580,9 @@ export default function YearComparison({ surveys }: { surveys: Survey[] }) {
                                                     const lastScore: number | null = unit[yearLabels[yearLabels.length - 1]] ?? null;
                                                     return (
                                                         <tr key={unit.unit_name} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
-                                                            <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">{unit.unit_name}</td>
+                                                            <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">
+                                                                <Link href={`/unit-insights/${unit.unit_id}`} className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">{unit.unit_name}</Link>
+                                                            </td>
                                                             {yearLabels.map(label => {
                                                                 const score: number | null = unit[label] ?? null;
                                                                 return (
