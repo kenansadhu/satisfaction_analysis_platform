@@ -1,4 +1,5 @@
-import { callGemini, handleAIError, getAgentSettings } from "@/lib/ai";
+import { handleAIError, getAgentSettings } from "@/lib/ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 
@@ -239,7 +240,8 @@ ${conversationHistory}
 USER: ${prompt}
 
 ━━ FORMATTING RULES ━━
-1. No filler or roleplay preambles — direct professional insights only.
+1. OPENING: On the very first message (empty conversation history), open with a short impressive greeting — one confident sentence that signals you have this faculty's data loaded and you're ready to dig in. On all subsequent messages, skip the greeting and go straight to the insight.
+1a. RESPONSE LENGTH & LANGUAGE: Read the conversation. Match your depth and length to what the question actually needs — a simple lookup deserves a short answer, a deep-dive deserves a full one. Respond in whatever language the user writes in.
 2. Wrap every thematic finding in <box title="Title">content</box>.
 3. When citing numbers, use the validated data above — never invent or recalculate.
 4. For faculty vs institution comparisons: name the specific units where this faculty differs most (▲ or ▼).
@@ -249,12 +251,40 @@ USER: ${prompt}
 
 Response:`;
 
-        const reply = await callGemini(
-            systemPrompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : ""),
-            { jsonMode: false, model: modelId, functionId: "chat-unit" }
-        ) as string;
+        const finalPrompt = systemPrompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : "");
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY not configured." }, { status: 500 });
 
-        return NextResponse.json({ reply });
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const geminiModel = genAI.getGenerativeModel({ model: modelId });
+        const streamResult = await geminiModel.generateContentStream({
+            contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+        });
+
+        const enc = new TextEncoder();
+        const readable = new ReadableStream<Uint8Array>({
+            async start(controller) {
+                try {
+                    for await (const chunk of streamResult.stream) {
+                        const text = chunk.text();
+                        controller.enqueue(enc.encode(`data: ${JSON.stringify({ text })}\n\n`));
+                    }
+                    controller.enqueue(enc.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+                } catch (e: any) {
+                    controller.enqueue(enc.encode(`data: ${JSON.stringify({ error: e.message || 'Stream error' })}\n\n`));
+                } finally {
+                    controller.close();
+                }
+            }
+        });
+
+        return new Response(readable, {
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+            }
+        });
 
     } catch (error) {
         return handleAIError(error);

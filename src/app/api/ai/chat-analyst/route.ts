@@ -1,4 +1,5 @@
-import { callGemini, handleAIError, wrapUserData, getAgentSettings } from "@/lib/ai";
+import { handleAIError, wrapUserData, getAgentSettings } from "@/lib/ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
 
@@ -78,10 +79,24 @@ export async function POST(req: Request) {
             suggestions         = raw.suggestions           || [];
         }
 
+        // ── Pre-compute derived fields so the AI can chart calculations ────────────
+        globalDataset = globalDataset.map((u: any) => {
+            const pos = u.positive ?? 0;
+            const neg = u.negative ?? 0;
+            const total = u.total_segments ?? (pos + neg + (u.neutral ?? 0));
+            const positive_pct   = total > 0 ? Math.round(pos / total * 100) : null;
+            const negative_pct   = total > 0 ? Math.round(neg / total * 100) : null;
+            const sentiment_score = positive_pct;
+            const norm_score     = u.score != null ? Math.round((u.score - 1) / 3 * 100) : null;
+            const disparity_gap  = norm_score != null && sentiment_score != null ? norm_score - sentiment_score : null;
+            return { ...u, positive_pct, negative_pct, sentiment_score, norm_score, disparity_gap };
+        });
+
         if (globalDataset.length > 0) {
             Object.keys(globalDataset[0]).forEach(k => {
                 if (k.startsWith('category_') || k.startsWith('likert_') || k.startsWith('binary_')) availableKeys.add(k);
             });
+            ['positive_pct', 'negative_pct', 'sentiment_score', 'norm_score', 'disparity_gap'].forEach(k => availableKeys.add(k));
         }
 
         console.log(`[chat-analyst] v${raw?.v || 1} | ${globalDataset.length} units | cols: ${columnSchema.length} | facs: ${facultiesSummary.length} | themes: ${Object.keys(topThemesPerUnit).length}`);
@@ -98,9 +113,9 @@ export async function POST(req: Request) {
         const surveyContextBlock = surveyContext ? (() => {
             const demo = surveyContext.respondent_demographics;
             const demoLines = demo ? [
-                demo.by_faculty  && Object.keys(demo.by_faculty).length  ? `  By Faculty:   ${Object.entries(demo.by_faculty).sort(([,a],[,b])=>b-a).slice(0,8).map(([k,v])=>`${k} (${v})`).join(' | ')}` : '',
-                demo.by_location && Object.keys(demo.by_location).length ? `  By Location:  ${Object.entries(demo.by_location).sort(([,a],[,b])=>b-a).slice(0,6).map(([k,v])=>`${k} (${v})`).join(' | ')}` : '',
-                demo.by_program  && Object.keys(demo.by_program).length  ? `  By Program:   ${Object.entries(demo.by_program).sort(([,a],[,b])=>b-a).slice(0,8).map(([k,v])=>`${k} (${v})`).join(' | ')}` : '',
+                demo.by_faculty  && Object.keys(demo.by_faculty).length  ? `  By Faculty:   ${Object.entries(demo.by_faculty).sort(([,a],[,b])=>(b as number)-(a as number)).slice(0,8).map(([k,v])=>`${k} (${v})`).join(' | ')}` : '',
+                demo.by_location && Object.keys(demo.by_location).length ? `  By Location:  ${Object.entries(demo.by_location).sort(([,a],[,b])=>(b as number)-(a as number)).slice(0,6).map(([k,v])=>`${k} (${v})`).join(' | ')}` : '',
+                demo.by_program  && Object.keys(demo.by_program).length  ? `  By Program:   ${Object.entries(demo.by_program).sort(([,a],[,b])=>(b as number)-(a as number)).slice(0,8).map(([k,v])=>`${k} (${v})`).join(' | ')}` : '',
             ].filter(Boolean).join('\n') : '';
             return `
 SURVEY: ${surveyContext.survey_name}
@@ -208,6 +223,14 @@ KEY ENTITIES:
 ━━ DATASET (${globalDataset.length} units, chart keys available) ━━
 Available keys: ${JSON.stringify(Array.from(availableKeys))}
 Note: Each unit also has score_distributions[] (histogram per column) and respondent_reach inside LIVE UNIT DATA.
+
+PRE-COMPUTED DERIVED KEYS (use these directly in chart yKey/yKeys — do NOT invent other key names):
+• positive_pct       = % of segments that are positive (0–100). Use as qualitative sentiment proxy.
+• negative_pct       = % of segments that are negative (0–100).
+• sentiment_score    = same as positive_pct — the headline sentiment quality score.
+• norm_score         = Likert avg mapped to 0–100 scale: ((score−1)/3)×100. Comparable with sentiment_score.
+• disparity_gap      = norm_score − sentiment_score. POSITIVE = quant inflated vs qual. NEGATIVE = underrated.
+  → Use disparity_gap for "iceberg" / gap analysis charts.
 ${surveyContextBlock}
 ${columnDictBlock}
 ${npsBlock}
@@ -243,7 +266,8 @@ Chart types: BAR/HORIZONTAL_BAR=side-by-side comparisons | STACKED_BAR=compositi
 LINE=ordered trends | SCATTER=two-metric correlation | PIE=proportional split
 
 ━━ FORMATTING RULES ━━
-1. NO PREAMBLES. No greetings. Direct insights only. Never say "Gemini".
+1. OPENING: On the very first message (empty conversation history), open with a short impressive greeting — one confident sentence that signals you have the data loaded and you're ready. On all subsequent messages, skip the greeting entirely and go straight to the insight. Never say "Gemini".
+1a. RESPONSE LENGTH & LANGUAGE: Read the conversation. Match your depth and length to what the question actually needs — a simple lookup deserves a short answer, a deep-dive deserves a full one. Respond in whatever language the user writes in.
 2. BOX STRUCTURE: <box title="Title">content</box> for every thematic point. 1–2 line summary BEFORE boxes.
 3. TYPOGRAPHY: quotes as blockquotes > | column keys as \`inline_code\` | faculties as **Bold** | units as *Italics* | scores as **3.42**
 4. EVIDENCE: cite exact numbers. Use score_distributions to describe polarisation patterns.
@@ -257,36 +281,64 @@ ${conversationHistory}
 
 Respond as the ASSISTANT.`;
 
-        // ── 5. Call AI ────────────────────────────────────────────────────────────
+        // ── 5. Stream AI response via SSE ────────────────────────────────────────
         const finalPrompt = systemPrompt + (addendum ? `\n\n---\nOWNER INSTRUCTIONS:\n${addendum}` : "");
-        const rawResponse = await callGemini(finalPrompt, {
-            jsonMode: false,
-            model: modelId,
-            functionId: "chat-analyst",
-        }) as string;
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY not configured." }, { status: 500 });
 
-        // ── 6. Parse charts from response ─────────────────────────────────────────
-        let reply  = rawResponse;
-        let charts: any[] = [];
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const geminiModel = genAI.getGenerativeModel({ model: modelId });
+        const streamResult = await geminiModel.generateContentStream({
+            contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+        });
 
-        const chartRegex = /<charts_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/charts_config>/gi;
-        let match;
-        while ((match = chartRegex.exec(rawResponse)) !== null) {
-            try {
-                const parsed = JSON.parse(match[1].trim());
-                if (Array.isArray(parsed)) charts.push(...parsed);
-                else charts.push(parsed);
-            } catch { console.warn("Failed to parse a charts_config block"); }
-        }
-        reply = reply.replace(/<charts_config>[\s\S]*?<\/charts_config>/gi, '').trim();
+        const enc = new TextEncoder();
+        let fullText = '';
 
-        const legacyRegex = /<chart_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/chart_config>/gi;
-        while ((match = legacyRegex.exec(rawResponse)) !== null) {
-            try { charts.push(JSON.parse(match[1].trim())); } catch { /* ignore */ }
-        }
-        reply = reply.replace(/<chart_config>[\s\S]*?<\/chart_config>/gi, '').trim();
+        const readable = new ReadableStream<Uint8Array>({
+            async start(controller) {
+                try {
+                    for await (const chunk of streamResult.stream) {
+                        const text = chunk.text();
+                        fullText += text;
+                        controller.enqueue(enc.encode(`data: ${JSON.stringify({ text })}\n\n`));
+                    }
 
-        return NextResponse.json({ reply, charts, dataset: globalDataset });
+                    // Extract charts from the full accumulated text
+                    const charts: any[] = [];
+                    const chartRegex = /<charts_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/charts_config>/gi;
+                    const legacyRegex = /<chart_config>\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<\/chart_config>/gi;
+                    let m;
+                    while ((m = chartRegex.exec(fullText)) !== null) {
+                        try {
+                            const p = JSON.parse(m[1].trim());
+                            if (Array.isArray(p)) charts.push(...p); else charts.push(p);
+                        } catch { /* ignore */ }
+                    }
+                    while ((m = legacyRegex.exec(fullText)) !== null) {
+                        try { charts.push(JSON.parse(m[1].trim())); } catch { /* ignore */ }
+                    }
+
+                    controller.enqueue(enc.encode(
+                        `data: ${JSON.stringify({ done: true, charts, dataset: globalDataset })}\n\n`
+                    ));
+                } catch (e: any) {
+                    controller.enqueue(enc.encode(
+                        `data: ${JSON.stringify({ error: e.message || 'Stream error' })}\n\n`
+                    ));
+                } finally {
+                    controller.close();
+                }
+            }
+        });
+
+        return new Response(readable, {
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+            }
+        });
 
     } catch (error) {
         return handleAIError(error);

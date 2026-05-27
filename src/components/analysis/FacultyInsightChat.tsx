@@ -81,7 +81,7 @@ export default function FacultyInsightChat({
     }, [messages, isLoading]);
 
     const handleSend = async () => {
-        if (!input.trim()) return;
+        if (!input.trim() || isLoading) return;
         const userMsg: Message = { id: Date.now().toString(), role: "user", content: input };
         const newMessages = [...messages, userMsg];
         setMessages(newMessages);
@@ -95,13 +95,40 @@ export default function FacultyInsightChat({
                 body: JSON.stringify({ facultyId, surveyId, history: messages, prompt: userMsg.content }),
             });
             if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Failed"); }
-            const data = await res.json();
-            const assistantMsg: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: data.reply };
-            const finalMessages = [...newMessages, assistantMsg];
-            setMessages(finalMessages);
+
+            const assistantId = (Date.now() + 1).toString();
+            setMessages([...newMessages, { id: assistantId, role: "assistant", content: "" }]);
+            setIsLoading(false);
+
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let streamedContent = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop() ?? '';
+                for (const part of parts) {
+                    if (!part.startsWith('data: ')) continue;
+                    const data = JSON.parse(part.slice(6));
+                    if (data.error) throw new Error(data.error);
+                    if (data.text) {
+                        streamedContent += data.text;
+                        setMessages(prev => {
+                            const updated = [...prev];
+                            updated[updated.length - 1] = { ...updated[updated.length - 1], content: streamedContent };
+                            return updated;
+                        });
+                    }
+                }
+            }
 
             // Save chat history server-side
             if (surveyId) {
+                const finalMessages = [...newMessages, { id: assistantId, role: "assistant" as const, content: streamedContent }];
                 fetch("/api/ai/faculty-specialist", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },

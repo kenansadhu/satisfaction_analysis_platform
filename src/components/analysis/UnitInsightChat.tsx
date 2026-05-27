@@ -88,7 +88,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
     }, [messages, isLoading]);
 
     const handleSend = async () => {
-        if (!input.trim()) return;
+        if (!input.trim() || isLoading) return;
 
         const userMsg: Message = { id: Date.now().toString(), role: "user", content: input };
         const newMessages = [...messages, userMsg];
@@ -113,17 +113,38 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
                 throw new Error(errData.error || "Failed to fetch response");
             }
 
-            const data = await res.json();
-            const assistantMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "assistant",
-                content: data.reply
-            };
+            const assistantId = (Date.now() + 1).toString();
+            setMessages([...newMessages, { id: assistantId, role: "assistant", content: "" }]);
+            setIsLoading(false);
 
-            const finalMessages = [...newMessages, assistantMsg];
-            setMessages(finalMessages);
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let streamedContent = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop() ?? '';
+                for (const part of parts) {
+                    if (!part.startsWith('data: ')) continue;
+                    const data = JSON.parse(part.slice(6));
+                    if (data.error) throw new Error(data.error);
+                    if (data.text) {
+                        streamedContent += data.text;
+                        setMessages(prev => {
+                            const updated = [...prev];
+                            updated[updated.length - 1] = { ...updated[updated.length - 1], content: streamedContent };
+                            return updated;
+                        });
+                    }
+                }
+            }
 
             // Save History to DB
+            const finalMessages = [...newMessages, { id: assistantId, role: "assistant" as const, content: streamedContent }];
             const chatReportType = surveyId ? `chat_history_${surveyId}` : 'chat_history';
             await supabase.from('unit_ai_reports').upsert({
                 unit_id: unitId,

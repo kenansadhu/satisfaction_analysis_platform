@@ -147,14 +147,12 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
         const text = messageText || input.trim();
         if (!text || isLoading) return;
 
-        const userMsg: ChatMessage = {
-            role: "user",
-            content: text,
-            timestamp: new Date(),
-        };
-
+        const userMsg: ChatMessage = { role: "user", content: text, timestamp: new Date() };
         const newMessages = [...messages, userMsg];
-        setMessages(newMessages);
+
+        // Optimistic placeholder for the assistant reply
+        const placeholderMsg: ChatMessage = { role: "assistant", content: "", timestamp: new Date() };
+        setMessages([...newMessages, placeholderMsg]);
         setInput("");
         setIsLoading(true);
 
@@ -163,43 +161,76 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    messages: newMessages.map(m => ({
-                        role: m.role,
-                        content: m.content,
-                        charts: m.charts,
-                    })),
+                    messages: newMessages.map(m => ({ role: m.role, content: m.content, charts: m.charts })),
                     surveyId,
                     existingChart: existingChart || undefined,
                 }),
             });
 
             if (!res.ok) {
-                const err = await res.json();
+                const err = await res.json().catch(() => ({ error: `API returned ${res.status}` }));
                 throw new Error(err.error || `API returned ${res.status}`);
             }
 
-            const data = await res.json();
+            // Read the SSE stream
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let streamedContent = '';
 
-            // Update live dataset from API response (same data the AI analyzed)
-            if (data.dataset && data.dataset.length > 0) {
-                setLiveData(data.dataset);
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop() ?? '';
+
+                for (const part of parts) {
+                    if (!part.startsWith('data: ')) continue;
+                    try {
+                        const data = JSON.parse(part.slice(6));
+                        if (data.error) throw new Error(data.error);
+
+                        if (data.done) {
+                            // Stream complete — strip chart tags, set charts + dataset
+                            const cleanContent = streamedContent
+                                .replace(/<charts_config>[\s\S]*?<\/charts_config>/gi, '')
+                                .replace(/<chart_config>[\s\S]*?<\/chart_config>/gi, '')
+                                .trim();
+                            if (data.dataset?.length > 0) setLiveData(data.dataset);
+                            setMessages(prev => {
+                                const msgs = [...prev];
+                                msgs[msgs.length - 1] = {
+                                    ...msgs[msgs.length - 1],
+                                    content: cleanContent || "Here are the insights you requested:",
+                                    charts: data.charts?.length > 0 ? data.charts : undefined,
+                                };
+                                return msgs;
+                            });
+                        } else if (data.text) {
+                            streamedContent += data.text;
+                            setMessages(prev => {
+                                const msgs = [...prev];
+                                msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content: streamedContent };
+                                return msgs;
+                            });
+                        }
+                    } catch (parseErr: any) {
+                        if (parseErr.message !== 'Unexpected end of JSON input') throw parseErr;
+                    }
+                }
             }
-
-            const assistantMsg: ChatMessage = {
-                role: "assistant",
-                content: data.reply || (data.charts?.length > 0 ? "Here are the insights you requested:" : "I couldn't generate a response. Please try again."),
-                charts: data.charts?.length > 0 ? data.charts : undefined,
-                timestamp: new Date(),
-            };
-
-            setMessages([...newMessages, assistantMsg]);
         } catch (e: any) {
             toast.error("AI Error: " + e.message);
-            setMessages([...newMessages, {
-                role: "assistant",
-                content: `⚠️ Error: ${e.message}. Please try again.`,
-                timestamp: new Date(),
-            }]);
+            setMessages(prev => {
+                const msgs = [...prev];
+                msgs[msgs.length - 1] = {
+                    ...msgs[msgs.length - 1],
+                    content: `⚠️ Error: ${e.message}. Please try again.`,
+                };
+                return msgs;
+            });
         } finally {
             setIsLoading(false);
             inputRef.current?.focus();
@@ -645,33 +676,12 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
         );
     };
 
-    const inputArea = (
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-            <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2">
-                <Input
-                    ref={inputRef}
-                    placeholder="Ask about your data, request a chart, explore correlations..."
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    disabled={isLoading}
-                    className="h-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 focus-visible:ring-purple-500 text-sm"
-                />
-                <Button
-                    type="submit"
-                    disabled={isLoading || !input.trim()}
-                    className="h-10 px-4 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 shrink-0"
-                >
-                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </Button>
-            </form>
-        </div>
-    );
 
     // --- Render ---
     return (
-        <div className="flex flex-col h-[calc(100vh-280px)] min-h-[600px]">
+        <div className="flex flex-col h-[calc(100vh-140px)] min-h-[640px]">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-slate-900 dark:to-slate-900 rounded-t-xl shrink-0">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-slate-900 dark:to-slate-900 rounded-t-xl shrink-0">
                 <div className="flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-purple-500" />
                     <h3 className="font-bold text-slate-800 dark:text-slate-100">AI Analyst</h3>
@@ -763,41 +773,64 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                             )}
                         </div>
                     </div>
-                    {inputArea}
+                    {/* Input area for empty state */}
+                    <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+                        <div className="max-w-5xl mx-auto">
+                            <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2">
+                                <Input
+                                    ref={inputRef}
+                                    placeholder="Ask about your data, request a chart, explore correlations..."
+                                    value={input}
+                                    onChange={e => setInput(e.target.value)}
+                                    disabled={isLoading}
+                                    className="h-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 focus-visible:ring-purple-500 text-sm"
+                                />
+                                <Button
+                                    type="submit"
+                                    disabled={isLoading || !input.trim()}
+                                    className="h-10 px-4 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 shrink-0"
+                                >
+                                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                </Button>
+                            </form>
+                        </div>
+                    </div>
                 </>
             ) : (
-                /* ── ACTIVE: split pane (chat left | chart canvas right) ── */
-                <div className="flex flex-1 overflow-hidden">
-                    {/* LEFT: Chat thread */}
-                    <div className="flex flex-col w-[44%] border-r border-slate-200 dark:border-slate-800 overflow-hidden shrink-0">
-                        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 bg-slate-50/50 dark:bg-slate-950/50">
+                /* ── ACTIVE: single continuous chat ── */
+                <div className="flex flex-col flex-1 overflow-hidden">
+                    <div className="flex-1 overflow-y-auto px-4 py-6 bg-slate-50/50 dark:bg-slate-950/50">
+                        <div className="max-w-5xl mx-auto space-y-8">
                             {messages.map((msg, i) => (
-                                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                                    <div className={`max-w-[90%] ${msg.role === "user"
-                                        ? "bg-purple-600 text-white rounded-2xl rounded-br-md px-3.5 py-2.5"
-                                        : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl rounded-bl-md px-3.5 py-2.5 shadow-sm"
-                                    }`}>
-                                        {msg.role === "assistant" && (
-                                            <div className="flex items-center gap-1.5 mb-1.5">
-                                                <Sparkles className="w-3 h-3 text-purple-500" />
-                                                <span className="text-[10px] font-semibold text-purple-500 uppercase tracking-wide">AI Analyst</span>
+                                msg.role === "user" ? (
+                                    /* User bubble — right-aligned */
+                                    <div key={i} className="flex justify-end">
+                                        <div className="max-w-[72%] bg-purple-600 text-white rounded-2xl rounded-br-sm px-4 py-3 text-sm leading-relaxed shadow-sm">
+                                            {msg.content}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* AI response — full-width with inline charts */
+                                    <div key={i} className="space-y-4">
+                                        <div className="flex items-center gap-1.5">
+                                            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shrink-0">
+                                                <Sparkles className="w-3 h-3 text-white" />
                                             </div>
-                                        )}
-                                        <div className={`text-sm leading-relaxed ${msg.role === "user" ? "" : "text-slate-700 dark:text-slate-300"}`}>
-                                            {msg.role === "assistant" ? <BoxedMessageRenderer content={msg.content} /> : msg.content}
+                                            <span className="text-[10px] font-semibold text-purple-500 uppercase tracking-wide">AI Analyst</span>
+                                        </div>
+                                        <div className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 pl-1">
+                                            <BoxedMessageRenderer content={msg.content} />
                                         </div>
                                         {msg.charts && msg.charts.length > 0 && (
-                                            <div className="mt-2 flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 dark:bg-purple-950/30 rounded-lg border border-purple-100 dark:border-purple-900/30 w-fit">
-                                                <BarChart2 className="w-3 h-3 text-purple-500" />
-                                                <span className="text-[11px] text-purple-600 dark:text-purple-400 font-medium">
-                                                    {msg.charts.length} chart{msg.charts.length > 1 ? 's' : ''} → right panel
-                                                </span>
+                                            <div className="space-y-4 pl-1">
+                                                {msg.charts.map((chart, ci) => renderInlineChart(chart, i * 100 + ci, msg.content))}
                                             </div>
                                         )}
                                     </div>
-                                </div>
+                                )
                             ))}
-                            {/* Follow-up suggestion chips — shown after the last AI response */}
+
+                            {/* Follow-up suggestion chips */}
                             {!isLoading && messages.length > 0 && messages[messages.length - 1].role === "assistant" && (() => {
                                 const lastMsg = messages[messages.length - 1];
                                 const hasCharts = lastMsg.charts && lastMsg.charts.length > 0;
@@ -811,14 +844,14 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                     "What is causing the biggest gap?",
                                 ];
                                 return (
-                                    <div className="flex flex-col gap-1.5 pl-1 pt-1">
+                                    <div className="flex flex-col gap-1.5 pl-1">
                                         <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Suggested follow-ups</p>
                                         <div className="flex flex-wrap gap-1.5">
-                                            {chips.map((chip, i) => (
+                                            {chips.map((chip, ci) => (
                                                 <button
-                                                    key={i}
+                                                    key={ci}
                                                     onClick={() => sendMessage(chip)}
-                                                    className="text-[11px] px-2.5 py-1 rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-purple-950/20 text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/40 transition-all hover:border-purple-400 font-medium shadow-sm"
+                                                    className="text-[11px] px-3 py-1.5 rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-purple-950/20 text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/40 transition-all hover:border-purple-400 font-medium shadow-sm"
                                                 >
                                                     {chip}
                                                 </button>
@@ -827,53 +860,46 @@ export default function AIAnalystChat({ surveyId, macroData, existingChart, onCh
                                     </div>
                                 );
                             })()}
+
+                            {/* Loading indicator */}
                             {isLoading && (
-                                <div className="flex justify-start">
-                                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-3 shadow-sm">
-                                        <div className="flex gap-2 items-center">
-                                            <Sparkles className="w-4 h-4 text-purple-500 animate-pulse" />
-                                            <div className="flex gap-1">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" />
-                                                <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce delay-75" />
-                                                <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce delay-150" />
-                                            </div>
-                                            <p className="text-xs text-slate-500 animate-pulse">Synthesizing...</p>
-                                        </div>
+                                <div className="flex items-center gap-3 pl-1">
+                                    <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shrink-0">
+                                        <Sparkles className="w-3 h-3 text-white animate-pulse" />
+                                    </div>
+                                    <div className="flex gap-1.5 items-center">
+                                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" />
+                                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce delay-75" />
+                                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce delay-150" />
+                                        <span className="text-xs text-slate-400 ml-1 animate-pulse">Synthesizing...</span>
                                     </div>
                                 </div>
                             )}
+
                             <div ref={messagesEndRef} />
                         </div>
-                        {inputArea}
                     </div>
 
-                    {/* RIGHT: Chart canvas */}
-                    <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950/80 flex flex-col">
-                        <div className="px-4 pt-3 pb-1 flex items-center justify-between border-b border-slate-100 dark:border-slate-800/60 shrink-0">
-                            <div className="flex items-center gap-1.5">
-                                <BarChart2 className="w-3.5 h-3.5 text-purple-400" />
-                                <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Chart Canvas</p>
-                            </div>
-                            {conversationCharts.length > 0 && (
-                                <span className="text-[11px] text-slate-400">{conversationCharts.length} generated</span>
-                            )}
-                        </div>
-                        <div className="flex-1 p-4 space-y-4">
-                            {conversationCharts.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
-                                    <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                                        <BarChart2 className="w-7 h-7 text-slate-300 dark:text-slate-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Charts will appear here</p>
-                                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-[200px] leading-relaxed">Generated charts display in this panel as you analyze your data</p>
-                                    </div>
-                                </div>
-                            ) : (
-                                conversationCharts.map(({ chart, explanation }, idx) =>
-                                    renderInlineChart(chart, idx, explanation)
-                                )
-                            )}
+                    {/* Input area */}
+                    <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+                        <div className="max-w-5xl mx-auto">
+                            <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2">
+                                <Input
+                                    ref={inputRef}
+                                    placeholder="Ask about your data, request a chart, explore correlations..."
+                                    value={input}
+                                    onChange={e => setInput(e.target.value)}
+                                    disabled={isLoading}
+                                    className="h-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 focus-visible:ring-purple-500 text-sm"
+                                />
+                                <Button
+                                    type="submit"
+                                    disabled={isLoading || !input.trim()}
+                                    className="h-10 px-4 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 shrink-0"
+                                >
+                                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                </Button>
+                            </form>
                         </div>
                     </div>
                 </div>

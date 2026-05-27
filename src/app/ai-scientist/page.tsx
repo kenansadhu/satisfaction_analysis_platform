@@ -1,15 +1,34 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/layout/PageShell";
 import AIAnalystChat from "@/components/analysis/AIAnalystChat";
 import SavedChartsTab from "@/components/executive/SavedChartsTab";
 import { useActiveSurvey } from "@/context/SurveyContext";
+import { supabase } from "@/lib/supabase";
 import { Database, Sparkles, Save } from "lucide-react";
 
 export default function AIScientistPage() {
     const { activeSurveyId, activeSurvey } = useActiveSurvey();
     const surveyId = activeSurveyId === "all" ? undefined : activeSurveyId;
+
+    const [macroData, setMacroData] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (!surveyId) { setMacroData([]); return; }
+        supabase
+            .from('surveys')
+            .select('ai_dataset_cache')
+            .eq('id', parseInt(surveyId))
+            .single()
+            .then(({ data }) => {
+                const cache = (data as any)?.ai_dataset_cache;
+                if (!cache) return;
+                const units = Array.isArray(cache) ? cache : (cache.units || []);
+                setMacroData(units);
+            });
+    }, [surveyId]);
 
     return (
         <div className="min-h-full bg-slate-50 dark:bg-slate-950 pb-20 transition-colors">
@@ -41,7 +60,7 @@ export default function AIScientistPage() {
                     <TabsContent value="analyst" className="focus-visible:ring-0">
                         <AIAnalystChat
                             surveyId={surveyId}
-                            macroData={[]}
+                            macroData={macroData}
                             onChartSaved={() => {}}
                         />
                     </TabsContent>
