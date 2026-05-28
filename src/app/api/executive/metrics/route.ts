@@ -32,8 +32,11 @@ export async function GET(request: Request) {
                 .eq('id', parseInt(surveyId))
                 .single();
             const cache = (cacheRow as any)?.ai_dataset_cache;
-            if (cache?.v === 2 && Array.isArray(cache.units)) {
-                const cachedById = new Map<number, any>(cache.units.map((u: any) => [u.unit_id, u]));
+            const cacheUnits = cache?.v === 2 && Array.isArray(cache.units) ? cache.units
+                : Array.isArray(cache) ? cache
+                : null;
+            if (cacheUnits) {
+                const cachedById = new Map<number, any>(cacheUnits.map((u: any) => [u.unit_id, u]));
                 const stats = orgUnits.map(unit => {
                     const cu = cachedById.get(unit.id);
                     if (cu && (cu.total_segments || 0) > 0) {
@@ -69,7 +72,10 @@ export async function GET(request: Request) {
 
         if (qualErr) {
             console.error("Qual RPC Error after retries:", qualErr);
-            return NextResponse.json({ error: "Failed to fetch aggregated metrics" }, { status: 500 });
+            // Return empty stats (200) instead of 500 so the page renders without an error toast.
+            // Root cause: ai_dataset_cache not yet built for this survey — rebuild from Settings.
+            const emptyStats = orgUnits.map(unit => ({ id: unit.id, name: unit.name, total: 0, positive: 0, neutral: 0, negative: 0, score: 0 }));
+            return NextResponse.json({ stats: emptyStats, noCache: true });
         }
 
         // 3. Aggregate qual data to per-unit totals

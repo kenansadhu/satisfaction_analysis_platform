@@ -34,13 +34,14 @@ export async function POST(req: Request) {
       if (pageData.length < PAGE_SIZE) break;
     }
 
-    // Fetch raw inputs in chunks to avoid huge IN clauses
+    // Fetch raw inputs in chunks — qualitative only to exclude Likert score rows
     const rawInputs: any[] = [];
     for (let i = 0; i < surveyRespIds.length; i += CHUNK) {
       const { data } = await supabase
         .from('raw_feedback_inputs')
         .select('id, raw_text, source_column, respondent_id')
         .eq('target_unit_id', unitId)
+        .eq('is_quantitative', false)
         .in('respondent_id', surveyRespIds.slice(i, i + CHUNK));
       if (data) rawInputs.push(...data);
     }
@@ -61,13 +62,18 @@ export async function POST(req: Request) {
 
     let finalQualitativeData = segmentsView;
 
-    // FALLBACK: If no analyzed segments, get raw qualitative feedback (verbatim)
+    // FALLBACK: If no analyzed segments, get raw qualitative feedback (verbatim).
+    // Exclude rows whose raw_text looks like a Likert answer option ("N = Label")
+    // since those are quantitative scale labels, not student-written comments.
+    const likertLabelPattern = /^\d+\s*=\s*.+$/;
     if (finalQualitativeData.length === 0) {
-      finalQualitativeData = (rawInputs || []).filter(ri => ri.raw_text && ri.raw_text.length > 5).map(f => ({
-        segment_text: f.raw_text as string,
-        sentiment: "Neutral",
-        category_name: f.source_column
-      })).slice(0, 100);
+      finalQualitativeData = (rawInputs || [])
+        .filter(ri => ri.raw_text && ri.raw_text.length > 10 && !likertLabelPattern.test(ri.raw_text.trim()))
+        .map(f => ({
+          segment_text: f.raw_text as string,
+          sentiment: "Neutral",
+          category_name: f.source_column
+        })).slice(0, 100);
     }
 
     // aggregation
@@ -147,57 +153,94 @@ Qualitative Data: ${finalQualitativeData.length} items provided. Sentiment Distr
 
     const categoryPrompt = Object.entries(categories).map(([name, count]) => `${name} (${count})`).join(', ');
 
-    // 4. Cross-unit signals
-    // Outgoing: segments from this unit's respondents that tag other units
-    const outgoingSegs: any[] = [];
-    for (let i = 0; i < inputIds.length; i += CHUNK) {
-      const { data } = await supabase
-        .from('feedback_segments')
-        .select('related_unit_ids, sentiment')
-        .in('raw_input_id', inputIds.slice(i, i + CHUNK))
-        .not('related_unit_ids', 'is', null);
-      if (data) outgoingSegs.push(...data);
-    }
-
-    const outgoingUnitCounts = new Map<number, { total: number; positive: number; negative: number; neutral: number }>();
-    for (const seg of outgoingSegs) {
-      if (!Array.isArray(seg.related_unit_ids)) continue;
-      for (const rid of seg.related_unit_ids) {
-        if (rid === parseInt(unitId)) continue;
-        if (!outgoingUnitCounts.has(rid)) outgoingUnitCounts.set(rid, { total: 0, positive: 0, negative: 0, neutral: 0 });
-        const e = outgoingUnitCounts.get(rid)!;
-        e.total++;
-        if (seg.sentiment === 'Positive') e.positive++;
-        else if (seg.sentiment === 'Negative') e.negative++;
-        else e.neutral++;
-      }
-    }
-
+    // 4. Cross-unit signals — prefer rich unit_cross_signals_cache, fall back to live computation
     let outgoingPrompt = "None detected.";
-    if (outgoingUnitCounts.size > 0) {
-      const unitIds = [...outgoingUnitCounts.keys()];
-      const { data: outNames } = await supabase.from('organization_units').select('id, name').in('id', unitIds);
-      const outNameMap = new Map((outNames || []).map((u: any) => [u.id, u.name]));
-      outgoingPrompt = [...outgoingUnitCounts.entries()]
-        .sort((a, b) => b[1].total - a[1].total)
-        .map(([id, c]) => `• ${outNameMap.get(id) || `Unit ${id}`}: ${c.total} mentions (${c.positive} positive, ${c.negative} negative, ${c.neutral} neutral)`)
-        .join('\n');
-    }
+    let incomingPrompt = "Not yet computed — rebuild cache to populate.";
 
-    // Incoming: read from cache (instant if previously computed; skip if not)
-    let incomingPrompt = "Not yet computed — run the unit insights page first to populate.";
-    const { data: cachedIncoming } = await supabase
-      .from('survey_cross_mentions_cache')
-      .select('total_mentions, source_unit_count, positive_count, negative_count, neutral_count, source_units_breakdown')
+    const { data: crossCache } = await supabase
+      .from('unit_cross_signals_cache')
+      .select('outgoing_segments, incoming_segments, outgoing_by_target, incoming_by_source')
       .eq('survey_id', surveyId)
-      .eq('mentioned_unit_id', unitId)
+      .eq('unit_id', unitId)
       .maybeSingle();
 
-    if (cachedIncoming && cachedIncoming.total_mentions > 0) {
-      const topSources = ((cachedIncoming.source_units_breakdown as any[]) || []).slice(0, 5)
-        .map((s: any) => `• ${s.source_unit_name}: ${s.total} mentions (${s.positive} positive, ${s.negative} negative)`)
-        .join('\n');
-      incomingPrompt = `${cachedIncoming.total_mentions} total mentions from ${cachedIncoming.source_unit_count} other units (${cachedIncoming.positive_count} positive, ${cachedIncoming.negative_count} negative, ${cachedIncoming.neutral_count} neutral).\nTop sources:\n${topSources}`;
+    if (crossCache) {
+      const outByTarget = (crossCache.outgoing_by_target as any[]) || [];
+      const inBySource  = (crossCache.incoming_by_source  as any[]) || [];
+      const outSegs     = (crossCache.outgoing_segments    as any[]) || [];
+      const inSegs      = (crossCache.incoming_segments    as any[]) || [];
+
+      if (outByTarget.length > 0) {
+        const breakdown = outByTarget.slice(0, 8)
+          .map((u: any) => `• ${u.unit_name}: ${u.total} mentions (${u.positive} pos, ${u.negative} neg, ${u.neutral} neu)`)
+          .join('\n');
+        const samples = outSegs.slice(0, 8)
+          .map((s: any) => `  [${s.sentiment}] → ${s.tagged_units}: "${s.segment_text}"`)
+          .join('\n');
+        outgoingPrompt = `${breakdown}\nSample comments:\n${samples}`;
+      }
+
+      if (inBySource.length > 0) {
+        const breakdown = inBySource.slice(0, 8)
+          .map((u: any) => `• ${u.unit_name}: ${u.total} mentions (${u.positive} pos, ${u.negative} neg, ${u.neutral} neu)`)
+          .join('\n');
+        const samples = inSegs.slice(0, 8)
+          .map((s: any) => `  [${s.sentiment}] from ${s.source_unit_name}: "${s.segment_text}"`)
+          .join('\n');
+        incomingPrompt = `${breakdown}\nSample comments:\n${samples}`;
+      } else {
+        incomingPrompt = "No incoming signals detected from other units.";
+      }
+    } else {
+      // Fall back to live computation for outgoing
+      const outgoingSegs: any[] = [];
+      for (let i = 0; i < inputIds.length; i += CHUNK) {
+        const { data } = await supabase
+          .from('feedback_segments')
+          .select('related_unit_ids, sentiment')
+          .in('raw_input_id', inputIds.slice(i, i + CHUNK))
+          .not('related_unit_ids', 'is', null);
+        if (data) outgoingSegs.push(...data);
+      }
+
+      const outgoingUnitCounts = new Map<number, { total: number; positive: number; negative: number; neutral: number }>();
+      for (const seg of outgoingSegs) {
+        if (!Array.isArray(seg.related_unit_ids)) continue;
+        for (const rid of seg.related_unit_ids) {
+          if (rid === parseInt(unitId)) continue;
+          if (!outgoingUnitCounts.has(rid)) outgoingUnitCounts.set(rid, { total: 0, positive: 0, negative: 0, neutral: 0 });
+          const e = outgoingUnitCounts.get(rid)!;
+          e.total++;
+          if (seg.sentiment === 'Positive') e.positive++;
+          else if (seg.sentiment === 'Negative') e.negative++;
+          else e.neutral++;
+        }
+      }
+
+      if (outgoingUnitCounts.size > 0) {
+        const unitIds = [...outgoingUnitCounts.keys()];
+        const { data: outNames } = await supabase.from('organization_units').select('id, name').in('id', unitIds);
+        const outNameMap = new Map((outNames || []).map((u: any) => [u.id, u.name]));
+        outgoingPrompt = [...outgoingUnitCounts.entries()]
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(([id, c]) => `• ${outNameMap.get(id) || `Unit ${id}`}: ${c.total} mentions (${c.positive} pos, ${c.negative} neg, ${c.neutral} neu)`)
+          .join('\n');
+      }
+
+      // Incoming from older aggregate cache
+      const { data: cachedIncoming } = await supabase
+        .from('survey_cross_mentions_cache')
+        .select('total_mentions, source_unit_count, positive_count, negative_count, neutral_count, source_units_breakdown')
+        .eq('survey_id', surveyId)
+        .eq('mentioned_unit_id', unitId)
+        .maybeSingle();
+
+      if (cachedIncoming && cachedIncoming.total_mentions > 0) {
+        const topSources = ((cachedIncoming.source_units_breakdown as any[]) || []).slice(0, 5)
+          .map((s: any) => `• ${s.source_unit_name}: ${s.total} mentions (${s.positive} positive, ${s.negative} negative)`)
+          .join('\n');
+        incomingPrompt = `${cachedIncoming.total_mentions} total mentions from ${cachedIncoming.source_unit_count} other units (${cachedIncoming.positive_count} positive, ${cachedIncoming.negative_count} negative, ${cachedIncoming.neutral_count} neutral).\nTop sources:\n${topSources}`;
+      }
     }
 
     // 4. RESTORE OBJECTIVE DATA INTELLIGENCE ENGINE PROMPT WITH ENHANCED CONTEXT & WEIGHTING
@@ -232,7 +275,8 @@ IMPORTANT INTERPRETATION RULES:
    - "Likert (1-4)": 2.5 is average, 3.5+ is excellent.
    - "Binary/Percentage (0-1)": 0.8 is 80% positivity, 0.2 is 20%.
    - "NPS 0–10": NPS ranges from −100 to +100. ≥50 is excellent, 0–49 is good, below 0 is a concern. Treat NPS as a standalone loyalty metric — never average it with Likert scores.
-3. "Evidence": You MUST provide verbatim quotes for every strength and concern. If the text is short, use it as is. NEVER return "N/A" for evidence if text is provided in the EVIDENCE SAMPLES.
+3. "Evidence": You MUST provide verbatim quotes for every strength and concern. Quotes must be actual student-written sentences from EVIDENCE SAMPLES. NEVER return "N/A" for evidence if text is provided. NEVER use Likert answer labels (e.g., "4 = Sangat Setuju", "3 = Setuju") as evidence — those are scale labels, not student comments.
+4. "Comment Count ≠ Utilization": The number of qualitative comments (${finalQualitativeData.length}) reflects how many students wrote open-ended text — NOT how many students used this unit. Do NOT interpret a low comment count as low service utilization. Use UTILIZATION RATE (${((unitRespondentCount || 0) / (totalSurveyPopulation || 1) * 100).toFixed(1)}%) for reach/access conclusions instead.
 
 YOUR TASK:
 Produce a boardroom-quality JSON report.

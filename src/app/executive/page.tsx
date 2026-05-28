@@ -33,6 +33,7 @@ type UnitPerformance = {
 };
 
 export default function ExecutiveDashboard() {
+    useEffect(() => { document.title = "Executive Insights | Satisfaction Voice"; }, []);
     const { activeSurveyId, activeSurvey, surveys } = useActiveSurvey();
     const selectedSurvey = activeSurveyId; // alias for compatibility
 

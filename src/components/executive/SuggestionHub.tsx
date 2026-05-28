@@ -67,6 +67,7 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
     const [priorityFilter, setPriorityFilter] = useState<"ALL" | "High" | "Medium" | "Low">("ALL");
     const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
+    const SHOW_THEMES_TAB: boolean = false; // deactivated 2026-05-28 — user request
     const [viewMode, setViewMode] = useState<"summary" | "themes" | "patterns">("summary");
     const [sortBy, setSortBy] = useState<"weighted" | "priority" | "count" | "negative">("weighted");
     const [groupBy, setGroupBy] = useState<"none" | "unit" | "category">("none");
@@ -315,7 +316,7 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                     <div className="w-48 shrink-0 min-w-0">
                         <Link
                             href={`/unit-insights/${theme.unit.id}`}
-                            className="text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors truncate block"
+                            className="text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 transition-colors truncate block"
                             onClick={e => e.stopPropagation()}
                         >
                             {theme.unit.short_name || theme.unit.name}
@@ -429,7 +430,10 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                     { key: "summary",  label: "AI Summary",         icon: Sparkles },
                     { key: "themes",   label: "Themes",             icon: Layers },
                     { key: "patterns", label: "Hidden Connections", icon: GitMerge },
-                ] as const).map(({ key, label, icon: Icon }) => (
+                ] as const).map(({ key, label, icon: Icon }) => {
+                    // Deactivated 2026-05-28: Themes subtab hidden; restore by setting SHOW_THEMES_TAB = true
+                    if (!SHOW_THEMES_TAB && key === "themes") return null;
+                    return (
                     <button
                         key={key}
                         onClick={() => setViewMode(key)}
@@ -446,7 +450,8 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
                             <span className="ml-1 w-1.5 h-1.5 rounded-full bg-violet-500 inline-block" />
                         )}
                     </button>
-                ))}
+                    );
+                })}
             </div>
 
             {viewMode === "summary" && (() => {
@@ -590,7 +595,8 @@ export default function SuggestionHub({ surveyId }: { surveyId?: string }) {
             })()}
 
 
-            {viewMode === "themes" ? (
+            {/* Deactivated 2026-05-28: Themes subtab — set SHOW_THEMES_TAB = true to restore */}
+            {SHOW_THEMES_TAB && viewMode === "themes" ? (
                 <>
                     {/* Filter bar */}
                     <div className="flex flex-wrap items-center gap-2">

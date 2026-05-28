@@ -27,9 +27,11 @@ type DashboardQualViewProps = {
     allUnits: { id: number; name: string }[];
     unitId: string;
     surveyId?: string;
+    /** "chart" = only Sentiment by Category, "cross" = only Cross-Unit Mentions, omit = both */
+    section?: "chart" | "cross";
 };
 
-export default function DashboardQualView({ catCounts, handleQualDrillDown, crossUnitSegments, allUnits, unitId, surveyId }: DashboardQualViewProps) {
+export default function DashboardQualView({ catCounts, handleQualDrillDown, crossUnitSegments, allUnits, unitId, surveyId, section }: DashboardQualViewProps) {
     const { theme, systemTheme } = useTheme();
     const isDark = theme === "dark" || (theme === "system" && systemTheme === "dark");
     const [crossPage, setCrossPage] = useState(0);
@@ -89,7 +91,7 @@ export default function DashboardQualView({ catCounts, handleQualDrillDown, cros
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
             {/* --- SENTIMENT BY CATEGORY (FULL WIDTH) --- */}
-            <Card className="shadow-sm border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 print:break-inside-avoid">
+            {(!section || section === "chart") && <Card className="shadow-sm border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 print:break-inside-avoid">
                 <CardHeader className="pb-2">
                     <div className="flex items-center gap-2">
                         <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -111,10 +113,10 @@ export default function DashboardQualView({ catCounts, handleQualDrillDown, cros
                         </BarChart>
                     </ResponsiveContainer>
                 </CardContent>
-            </Card>
+            </Card>}
 
             {/* --- CROSS-UNIT MENTIONS TABLE --- */}
-            {localSegments.length > 0 && (
+            {(!section || section === "cross") && localSegments.length > 0 && (
                 <Card className="border-amber-200 dark:border-amber-900/40 bg-amber-50/30 dark:bg-amber-950/10 shadow-sm print:hidden">
                     <CardHeader className="py-4 border-b border-amber-100 dark:border-amber-900/30 bg-amber-50/60 dark:bg-amber-950/20">
                         <div className="flex items-center justify-between">

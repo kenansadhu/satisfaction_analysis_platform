@@ -62,6 +62,7 @@ function SentimentBar({ positive = 0, neutral = 0, negative = 0 }: { positive?: 
 }
 
 export default function UnitInsightsPage() {
+    useEffect(() => { document.title = "Unit Insights | Satisfaction Voice"; }, []);
     const { activeSurveyId, activeSurvey } = useActiveSurvey();
     const [units, setUnits] = useState<UnitRow[]>([]);
     const [loading, setLoading] = useState(true);

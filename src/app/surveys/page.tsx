@@ -16,6 +16,7 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Survey } from "@/types";
 
 export default function SurveysPage() {
+  useEffect(() => { document.title = "Surveys | Satisfaction Voice"; }, []);
   const { role, loading: authLoading, profileLoading } = useAuth();
   const router = useRouter();
   const [surveys, setSurveys] = useState<Survey[]>([]);

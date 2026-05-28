@@ -99,6 +99,7 @@ const PLATFORM_CAPABILITIES = [
 ];
 
 export default function HomePage() {
+    useEffect(() => { document.title = "Home | Satisfaction Voice"; }, []);
     const { role, loading: authLoading, profileLoading } = useAuth();
     const isAdmin = canAccessAdminPages(role);
     const [surveys, setSurveys] = useState<any[]>([]);

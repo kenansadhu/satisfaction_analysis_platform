@@ -309,7 +309,7 @@ export default function SSIReport({ surveyId }: SSIReportProps) {
                                 {sortedUnits.map(unit => (
                                     <tr key={unit.unit_id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
                                         <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">
-                                            <Link href={`/unit-insights/${unit.unit_id}`} className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">
+                                            <Link href={`/unit-insights/${unit.unit_id}`} className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
                                                 {unit.unit_name}
                                             </Link>
                                             {unit.short_name && <span className="text-slate-400 ml-1 text-xs">({unit.short_name})</span>}

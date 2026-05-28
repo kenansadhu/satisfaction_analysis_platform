@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export default function SettingsPage() {
+    useEffect(() => { document.title = "Settings | Satisfaction Voice"; }, []);
     const { surveys, activeSurveyId, setActiveSurveyId, activeSurvey, loading } = useActiveSurvey();
 
     const [confirmSurvey, setConfirmSurvey] = useState<SurveyInfo | null>(null);
@@ -28,7 +29,7 @@ export default function SettingsPage() {
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Rebuild cache state
-    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_faculty_detail' | 'done' | 'error';
+    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_cross_signals' | 'warm_faculty_detail' | 'done' | 'error';
     const [rebuildStep, setRebuildStep] = useState<RebuildStep>('idle');
     const [rebuildElapsed, setRebuildElapsed] = useState(0);
     const [rebuildError, setRebuildError] = useState<string | null>(null);
@@ -113,6 +114,7 @@ export default function SettingsPage() {
         { key: 'warm_faculty_list',      label: 'Warming faculty list cache' },
         { key: 'warm_cross_mentions',    label: 'Warming cross-unit mentions cache' },
         { key: 'warm_dependency_graph',  label: 'Warming dependency graph cache' },
+        { key: 'warm_cross_signals',     label: 'Building cross-unit signals cache' },
         { key: 'warm_faculty_detail',    label: 'Warming faculty detail caches' },
         { key: 'done',                   label: 'Complete' },
     ];
@@ -121,7 +123,7 @@ export default function SettingsPage() {
         clearing: 5, phase1: 20, phase2: 37,
         warm_report: 48, warm_nps: 57, warm_radar: 63,
         warm_qual: 69, warm_faculty_list: 74,
-        warm_cross_mentions: 79, warm_dependency_graph: 83, warm_faculty_detail: 91,
+        warm_cross_mentions: 79, warm_dependency_graph: 83, warm_cross_signals: 87, warm_faculty_detail: 93,
     };
 
     const formatElapsed = (secs: number) => {
@@ -211,6 +213,13 @@ export default function SettingsPage() {
 
             setRebuildStep('warm_dependency_graph');
             await fetch(`/api/analytics/dependency-graph?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_cross_signals');
+            await fetch('/api/unit-insights/warm-cross-unit-signals', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ surveyId: activeSurveyId }),
+            }).catch(() => {});
 
             setRebuildStep('warm_faculty_detail');
             const { supabase: sb } = await import("@/lib/supabase");

@@ -789,7 +789,7 @@ export default function AIAnalystChat({ surveyId, macroData, dataLoading = false
                                                     <button
                                                         key={tile.label}
                                                         onClick={() => sendMessage(tile.prompt)}
-                                                        className={`group text-left p-3.5 rounded-xl border bg-white dark:bg-slate-900 ${tile.border} transition-all duration-150 hover:shadow-md`}
+                                                        className={`group text-left p-3.5 rounded-xl border bg-white dark:bg-slate-900 cursor-pointer ${tile.border} transition-all duration-150 hover:shadow-md`}
                                                     >
                                                         <div className={`inline-flex p-1.5 rounded-lg ${tile.bg} mb-2.5`}>
                                                             <Icon className={`w-3.5 h-3.5 ${tile.iconColor}`} />
@@ -883,7 +883,7 @@ export default function AIAnalystChat({ surveyId, macroData, dataLoading = false
                                                 <button
                                                     key={ci}
                                                     onClick={() => sendMessage(chip)}
-                                                    className="text-[11px] px-3 py-1.5 rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-purple-950/20 text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/40 transition-all hover:border-purple-400 font-medium shadow-sm"
+                                                    className="text-[11px] px-3 py-1.5 rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-purple-950/20 text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/40 transition-all hover:border-purple-400 font-medium shadow-sm cursor-pointer"
                                                 >
                                                     {chip}
                                                 </button>

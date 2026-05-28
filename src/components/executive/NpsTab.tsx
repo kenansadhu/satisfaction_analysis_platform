@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { NpsCard } from "@/components/nps/NpsCard";
 import { NpsBucketBar } from "@/components/nps/NpsBucketBar";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -754,9 +755,14 @@ function PerFacultyTable({ rows }: { rows: NpsFacultyRow[] }) {
             <CardContent className="space-y-6">
                 {Array.from(groups.values()).map(g => (
                     <div key={`${g.unit_id}::${g.column}`} className="space-y-2">
-                        {groups.size > 1 && (
-                            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider break-words">{g.column}</p>
-                        )}
+                        <div className="flex items-center gap-2">
+                            <Link href={`/unit-insights/${g.unit_id}`} className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors">
+                                {g.unit_name}
+                            </Link>
+                            {groups.size > 1 && (
+                                <span className="text-xs text-slate-400 dark:text-slate-500">· {g.column}</span>
+                            )}
+                        </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>

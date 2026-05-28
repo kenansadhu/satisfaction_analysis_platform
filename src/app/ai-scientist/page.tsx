@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { Database, Sparkles, Save } from "lucide-react";
 
 export default function AIScientistPage() {
+    useEffect(() => { document.title = "AI Data Scientist | Satisfaction Voice"; }, []);
     const { activeSurveyId, activeSurvey, loading: surveysLoading } = useActiveSurvey();
     const surveyId = activeSurveyId === "all" ? undefined : activeSurveyId;
 

@@ -78,9 +78,9 @@ function ssiTextColor(score: number | null): string {
 }
 function ssiBgColor(score: number | null): string {
     if (score === null) return "bg-slate-300 dark:bg-slate-600";
-    if (score >= 3.20) return "bg-emerald-400";
-    if (score >= 3.00) return "bg-amber-400";
-    return "bg-red-400";
+    if (score >= 3.20) return "bg-emerald-500";
+    if (score >= 3.00) return "bg-amber-500";
+    return "bg-red-500";
 }
 function ssiTextColorLight(score: number | null): string {
     if (score === null) return "text-slate-400";
@@ -325,7 +325,7 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">#</span>
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Unit</span>
                     <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">SSI Score</span>
                         <span className="text-[10px] text-slate-400 font-normal">1–4 scale</span>
                     </div>
@@ -405,7 +405,7 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                             <div className="flex items-center gap-2.5">
                                                 <div className="flex-1 h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                                     <div
-                                                        className={`h-full rounded-full ${sentScore >= 65 ? "bg-emerald-400" : sentScore >= 45 ? "bg-amber-400" : "bg-red-400"}`}
+                                                        className={`h-full rounded-full ${sentScore >= 65 ? "bg-emerald-500" : sentScore >= 45 ? "bg-amber-500" : "bg-red-500"}`}
                                                         style={{ width: `${sentBarPct}%` }}
                                                     />
                                                 </div>

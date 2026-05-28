@@ -22,6 +22,13 @@ type RawDataExplorerProps = {
     RAW_PAGE_SIZE: number;
     suggestionOnly: boolean;
     setSuggestionOnly: (v: boolean) => void;
+    hideRatings?: boolean;
+    // Category chips (Feedback Themes)
+    categories?: { id: number; name: string }[];
+    catCounts?: Record<string, { positive: number; negative: number; neutral: number; total: number }>;
+    activeCategories?: string[];
+    onCategoryToggle?: (catName: string) => void;
+    onCategoryClear?: () => void;
 };
 
 export default function RawDataExplorer({
@@ -39,6 +46,12 @@ export default function RawDataExplorer({
     RAW_PAGE_SIZE,
     suggestionOnly,
     setSuggestionOnly,
+    hideRatings = false,
+    categories,
+    catCounts,
+    activeCategories,
+    onCategoryToggle,
+    onCategoryClear,
 }: RawDataExplorerProps) {
     return (
         <Card className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm print:hidden">
@@ -61,9 +74,11 @@ export default function RawDataExplorer({
                         <button onClick={() => { setRawDataTab("comments"); setRawDataPage(0); }} className={`pb-2 text-sm font-medium border-b-2 transition-colors ${rawDataTab === "comments" ? "border-indigo-500 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200"}`}>
                             <MessageSquare className="w-3 h-3 inline mr-1" /> Comments
                         </button>
+                        {!hideRatings && (
                         <button onClick={() => { setRawDataTab("ratings"); setRawDataPage(0); }} className={`pb-2 text-sm font-medium border-b-2 transition-colors ${rawDataTab === "ratings" ? "border-indigo-500 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200"}`}>
                             <BarChart2 className="w-3 h-3 inline mr-1" /> Ratings
                         </button>
+                        )}
                         <div className="flex-1" />
                         {rawDataTab === "comments" && (
                             <button
@@ -83,6 +98,55 @@ export default function RawDataExplorer({
                             <Input placeholder="Search..." className="h-7 pl-7 text-xs w-40 dark:bg-slate-800 dark:border-slate-700" value={rawDataSearch} onChange={e => { setRawDataSearch(e.target.value); setRawDataPage(0); }} />
                         </div>
                     </div>
+
+                    {/* Feedback Themes chips */}
+                    {rawDataTab === "comments" && categories && categories.length > 0 && (
+                        <div className="space-y-2 mb-4">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Feedback Themes</span>
+                                {activeCategories && activeCategories.length > 0 && onCategoryClear && (
+                                    <button
+                                        onClick={onCategoryClear}
+                                        className="text-[11px] text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
+                                    >
+                                        Clear
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {categories.map(cat => {
+                                    const cc = catCounts?.[cat.name];
+                                    const posPct = cc ? Math.round((cc.positive / cc.total) * 100) : 0;
+                                    const negPct = cc ? Math.round((cc.negative / cc.total) * 100) : 0;
+                                    const active = activeCategories?.includes(cat.name) ?? false;
+                                    return (
+                                        <button
+                                            key={cat.id}
+                                            onClick={() => onCategoryToggle?.(cat.name)}
+                                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150 shrink-0 cursor-pointer
+                                                ${active
+                                                    ? "bg-indigo-50 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700 shadow-sm ring-1 ring-indigo-200 dark:ring-indigo-800"
+                                                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:shadow-sm"
+                                                }`}
+                                        >
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${negPct >= 40 ? "bg-red-400" : posPct >= 60 ? "bg-emerald-400" : "bg-amber-400"}`} />
+                                            <span className={active ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-700 dark:text-slate-200"}>
+                                                {cat.name}
+                                            </span>
+                                            {cc && <span className={`font-black tabular-nums ${active ? "text-indigo-600 dark:text-indigo-400" : negPct >= 40 ? "text-red-500 dark:text-red-400" : posPct >= 60 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500 dark:text-amber-400"}`}>{cc.total}</span>}
+                                            {cc && (
+                                                <div className="flex w-10 h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
+                                                    {posPct > 0 && <div style={{ width: `${posPct}%` }} className="bg-emerald-400" />}
+                                                    {(100 - posPct - negPct) > 0 && <div style={{ width: `${100 - posPct - negPct}%` }} className="bg-slate-300 dark:bg-slate-500" />}
+                                                    {negPct > 0 && <div style={{ width: `${negPct}%` }} className="bg-red-400" />}
+                                                </div>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Table */}
                     {rawDataLoading ? (

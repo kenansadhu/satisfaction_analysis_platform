@@ -192,14 +192,12 @@ export default function CrossUnitMentions({ surveyId, hideHeader, npsUnitIds = [
 
                             {/* Unit name */}
                             <div className="w-24 shrink-0 min-w-0">
-                                <Link
-                                    href={`/unit-insights/${m.unit_id}`}
-                                    className="text-xs font-semibold text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors truncate block"
+                                <span
+                                    className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate block"
                                     title={m.unit_name}
-                                    onClick={e => e.stopPropagation()}
                                 >
                                     {m.unit_short_name}
-                                </Link>
+                                </span>
                             </div>
 
                             {/* Stacked bar — width proportional to max */}

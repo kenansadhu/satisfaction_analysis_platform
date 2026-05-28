@@ -122,6 +122,7 @@ function ColumnSelector({
 }
 
 export default function ImportPage() {
+  useEffect(() => { document.title = "Import Data | Satisfaction Voice"; }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState(1);
   const [headers, setHeaders] = useState<string[]>([]);

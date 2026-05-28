@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquareQuote, ArrowRight, X, ChevronDown, Loader2 } from "lucide-react";
+import { MessageSquareQuote, ArrowRight, X, Loader2, ChevronLeft, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -101,23 +101,21 @@ export function CrossUnitComments({
 }: {
     surveyId: string;
 }) {
+    const PAGE_SIZE = 20;
     const [comments, setComments] = useState<Comment[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(0);
     const [loading, setLoading] = useState(false);
-    const [loadingMore, setLoadingMore] = useState(false);
     const [sourceFilter, setSourceFilter] = useState<string>("all");
     const [targetFilter, setTargetFilter] = useState<string>("all");
     const [availableUnits, setAvailableUnits] = useState<UnitOption[]>([]);
 
-    // Fetch comments whenever filters or survey change
     useEffect(() => {
         if (!surveyId || surveyId === "all") return;
-        setPage(0);
-        setComments([]);
         setLoading(true);
+        setComments([]);
 
-        const params = new URLSearchParams({ surveyId, page: "0" });
+        const params = new URLSearchParams({ surveyId, page: String(page) });
         if (sourceFilter !== "all") params.set("sourceUnitId", sourceFilter);
         if (targetFilter !== "all") params.set("targetUnitId", targetFilter);
 
@@ -130,32 +128,15 @@ export function CrossUnitComments({
             })
             .catch(() => setComments([]))
             .finally(() => setLoading(false));
-    }, [surveyId, sourceFilter, targetFilter]);
+    }, [surveyId, sourceFilter, targetFilter, page]);
 
-    const loadMore = () => {
-        const nextPage = page + 1;
-        setLoadingMore(true);
-
-        const params = new URLSearchParams({ surveyId, page: String(nextPage) });
-        if (sourceFilter !== "all") params.set("sourceUnitId", sourceFilter);
-        if (targetFilter !== "all") params.set("targetUnitId", targetFilter);
-
-        fetch(`/api/executive/cross-unit-comments?${params}`)
-            .then(r => r.json())
-            .then(d => {
-                setComments(prev => [...prev, ...(d.comments || [])]);
-                setPage(nextPage);
-            })
-            .catch(() => { })
-            .finally(() => setLoadingMore(false));
-    };
-
-    const hasMore = comments.length < total;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     const isFiltered = sourceFilter !== "all" || targetFilter !== "all";
 
     const clearFilters = () => {
         setSourceFilter("all");
         setTargetFilter("all");
+        setPage(0);
     };
 
     if (!surveyId || surveyId === "all") return null;
@@ -186,7 +167,7 @@ export function CrossUnitComments({
             <div className="flex items-center flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Filter:</span>
 
-                <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <Select value={sourceFilter} onValueChange={v => { setSourceFilter(v); setPage(0); }}>
                     <SelectTrigger className="h-8 w-44 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700">
                         <SelectValue placeholder="From any unit" />
                     </SelectTrigger>
@@ -202,7 +183,7 @@ export function CrossUnitComments({
 
                 <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
 
-                <Select value={targetFilter} onValueChange={setTargetFilter}>
+                <Select value={targetFilter} onValueChange={v => { setTargetFilter(v); setPage(0); }}>
                     <SelectTrigger className="h-8 w-44 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700">
                         <SelectValue placeholder="Mentioning any unit" />
                     </SelectTrigger>
@@ -243,22 +224,31 @@ export function CrossUnitComments({
                 <div className="space-y-2.5">
                     {comments.map(c => <CommentCard key={c.id} comment={c} />)}
 
-                    {hasMore && (
-                        <button
-                            onClick={loadMore}
-                            disabled={loadingMore}
-                            className="w-full mt-1 flex items-center justify-center gap-2 py-2.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 rounded-xl transition-colors disabled:opacity-50"
-                        >
-                            {loadingMore
-                                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading...</>
-                                : <><ChevronDown className="w-3.5 h-3.5" /> Show more ({total - comments.length} remaining)</>
-                            }
-                        </button>
-                    )}
-
-                    <p className="text-center text-[11px] text-slate-400 pt-1">
-                        Showing {comments.length} of {total} comments
-                    </p>
+                    {/* Pagination controls */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <p className="text-[11px] text-slate-400">
+                            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total} comments
+                        </p>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setPage(p => p - 1)}
+                                disabled={page === 0}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-200 dark:hover:border-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                            </button>
+                            <span className="px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                                {page + 1} / {totalPages}
+                            </span>
+                            <button
+                                onClick={() => setPage(p => p + 1)}
+                                disabled={page >= totalPages - 1}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-200 dark:hover:border-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Next <ChevronRightIcon className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

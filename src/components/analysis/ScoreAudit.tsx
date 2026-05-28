@@ -7,7 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calculator, Loader2, Search, ChevronDown, ChevronRight, AlertCircle, Download, RefreshCw } from "lucide-react";
+import { Calculator, Loader2, Search, ChevronDown, ChevronRight, AlertCircle, Download, RefreshCw, Play } from "lucide-react";
+
+interface GlobalResult {
+    macro_units: number | null;
+    micro_resp: number | null;
+    macro_cols: number | null;
+    unitCount: number;
+    totalRespondents: number;
+    totalCols: number;
+    computedAt: string;
+}
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -76,8 +86,13 @@ export function ScoreAudit({ surveyId }: { surveyId: string }) {
     const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
     const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
     const [search, setSearch] = useState("");
-    const [decimals, setDecimals] = useState(2);
+    const [decimals, setDecimals] = useState(4);
     const [rebuilding, setRebuilding] = useState(false);
+
+    // Global comparison — loaded independently so it doesn't block the per-unit table.
+    const [globalResult, setGlobalResult] = useState<GlobalResult | null>(null);
+    const [globalLoading, setGlobalLoading] = useState(false);
+    const [globalInitialLoading, setGlobalInitialLoading] = useState(true);
 
     const loadAudit = async () => {
         setLoading(true);
@@ -97,8 +112,37 @@ export function ScoreAudit({ surveyId }: { surveyId: string }) {
         }
     };
 
+    const loadGlobalResult = async () => {
+        setGlobalInitialLoading(true);
+        try {
+            const res = await fetch(`/api/surveys/${surveyId}/score-audit-global`);
+            if (res.ok) {
+                const json = await res.json();
+                if (json.cached) setGlobalResult(json.cached);
+            }
+        } finally {
+            setGlobalInitialLoading(false);
+        }
+    };
+
+    const calculateGlobal = async () => {
+        setGlobalLoading(true);
+        try {
+            const res = await fetch(`/api/surveys/${surveyId}/score-audit-global`, { method: "POST" });
+            if (!res.ok) throw new Error(`Calculation failed: ${res.status}`);
+            const json = await res.json();
+            setGlobalResult(json);
+            toast.success("Global SSI comparison calculated and saved.");
+        } catch (e: any) {
+            toast.error("Calculation failed: " + e.message);
+        } finally {
+            setGlobalLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadAudit();
+        loadGlobalResult();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [surveyId]);
 
@@ -215,6 +259,97 @@ export function ScoreAudit({ surveyId }: { surveyId: string }) {
 
     return (
         <div className="space-y-6">
+            {/* Global SSI Index Comparison — independent from per-unit audit load */}
+            <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
+                <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <CardTitle className="text-base">Global SSI Index — Aggregation Comparison</CardTitle>
+                            <CardDescription>
+                                Three ways to roll up unit scores into one university-wide number. Compare against the QA team's figure to identify which method they use.
+                            </CardDescription>
+                        </div>
+                        <Button
+                            onClick={calculateGlobal}
+                            disabled={globalLoading}
+                            className="gap-2 shrink-0"
+                            variant={globalResult ? "outline" : "default"}
+                        >
+                            {globalLoading
+                                ? <><Loader2 className="w-4 h-4 animate-spin" /> Calculating…</>
+                                : <><Play className="w-4 h-4" /> {globalResult ? "Recalculate" : "Calculate"}</>
+                            }
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {globalInitialLoading ? (
+                        <Skeleton className="h-24 w-full rounded-lg" />
+                    ) : globalResult ? (
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
+                                            <th className="text-left py-2 pr-4">Method</th>
+                                            <th className="text-right py-2 px-3">Score</th>
+                                            <th className="text-left py-2 pl-4 text-slate-400 font-normal normal-case text-[11px]">Formula</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr className="border-b border-slate-100 dark:border-slate-800/50 bg-indigo-50/40 dark:bg-indigo-950/20">
+                                            <td className="py-3 pr-4">
+                                                <div className="font-semibold text-indigo-800 dark:text-indigo-300">Macroaverage across units</div>
+                                                <div className="text-[11px] text-slate-500 mt-0.5">Each unit contributes equally — current Executive page value</div>
+                                            </td>
+                                            <td className="py-3 px-3 text-right font-mono font-bold text-lg text-indigo-700 dark:text-indigo-300">
+                                                {globalResult.macro_units != null ? globalResult.macro_units.toFixed(decimals) : "—"}
+                                            </td>
+                                            <td className="py-3 pl-4 text-[11px] text-slate-500 font-mono">
+                                                avg(unit_ssi) over {globalResult.unitCount} units
+                                            </td>
+                                        </tr>
+                                        <tr className="border-b border-slate-100 dark:border-slate-800/50 bg-blue-50/40 dark:bg-blue-950/20">
+                                            <td className="py-3 pr-4">
+                                                <div className="font-semibold text-blue-800 dark:text-blue-300">Microaverage (respondent-weighted)</div>
+                                                <div className="text-[11px] text-slate-500 mt-0.5">Units with more students have proportionally more weight</div>
+                                            </td>
+                                            <td className="py-3 px-3 text-right font-mono font-bold text-lg text-blue-700 dark:text-blue-300">
+                                                {globalResult.micro_resp != null ? globalResult.micro_resp.toFixed(decimals) : "—"}
+                                            </td>
+                                            <td className="py-3 pl-4 text-[11px] text-slate-500 font-mono">
+                                                Σ(unit_ssi × n) / Σn &nbsp;({globalResult.totalRespondents} respondents)
+                                            </td>
+                                        </tr>
+                                        <tr className="bg-purple-50/40 dark:bg-purple-950/20">
+                                            <td className="py-3 pr-4">
+                                                <div className="font-semibold text-purple-800 dark:text-purple-300">Macroaverage across Likert columns</div>
+                                                <div className="text-[11px] text-slate-500 mt-0.5">Each column contributes equally — units with more questions have no extra weight</div>
+                                            </td>
+                                            <td className="py-3 px-3 text-right font-mono font-bold text-lg text-purple-700 dark:text-purple-300">
+                                                {globalResult.macro_cols != null ? globalResult.macro_cols.toFixed(decimals) : "—"}
+                                            </td>
+                                            <td className="py-3 pl-4 text-[11px] text-slate-500 font-mono">
+                                                avg(col_avg) over {globalResult.totalCols} columns across all units
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-3">
+                                All three use <strong>live raw data</strong>. Last computed: {new Date(globalResult.computedAt).toLocaleString()}.
+                            </p>
+                        </>
+                    ) : (
+                        <div className="py-8 text-center text-slate-400 text-sm">
+                            Click <strong>Calculate</strong> to compute the three global SSI aggregations from raw data.
+                            The result will be saved and loaded instantly on future visits.
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
             {/* Header card with explainer */}
             <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
                 <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-500" />

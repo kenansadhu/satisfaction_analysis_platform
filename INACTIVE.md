@@ -22,6 +22,17 @@ Each entry below lists: **file → line range → what it was → why it's inact
 
 ---
 
+## 2. Executive Insights — Suggestions tab — "Themes" subtab
+
+- **File:** [src/components/executive/SuggestionHub.tsx](src/components/executive/SuggestionHub.tsx)
+- **Flag:** `SHOW_THEMES_TAB` (set to `false` inside the component, ~line 71)
+- **What it was:** A full subtab inside the Suggestions section showing all AI-detected suggestion themes with filters (unit, priority, search), a "Summarize Themes" AI button, and grouped theme rows.
+- **Why deactivated:** User requested removal on 2026-05-28 during final-polish pass before a boss demo.
+- **Restore:** Set `SHOW_THEMES_TAB = true` in `SuggestionHub.tsx` — the tab button and content block are both gated on this flag.
+- **Permanent removal:** Delete the flag, the `if (!SHOW_THEMES_TAB && key === "themes") return null;` guard in the tab bar map, and the `{SHOW_THEMES_TAB && viewMode === "themes" ? (...) :` content block (replacing it with just the patterns ternary).
+
+---
+
 ## Conventions
 
 Future deactivations should follow the same pattern:

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "next-themes";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertTriangle, BarChart2, MessageSquare, Target, CheckCircle2, GitCompareArrows, Sparkles } from "lucide-react";
+import { Loader2, AlertTriangle, BarChart2, MessageSquare, Target, CheckCircle2, Sparkles } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import { toast } from "sonner";
 import { useAnalysis } from "@/context/AnalysisContext";
@@ -47,12 +47,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     const [crossUnitSegments, setCrossUnitSegments] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
 
-    // Incoming cross-unit mentions (other units referencing this one)
-    const [incomingMentions, setIncomingMentions] = useState<any>(null);
-    const [incomingLoading, setIncomingLoading] = useState(false);
     const [unitName, setUnitName] = useState("");
     const [verifiedCount, setVerifiedCount] = useState(0);
     const [totalSegmentCount, setTotalSegmentCount] = useState(0);
+    const [fastInputCount, setFastInputCount] = useState<number | null>(null);
+    const insightsInitialized = useRef(false);
 
     // Aggregated Metrics from RPC
     const [dashboardMetrics, setDashboardMetrics] = useState<{
@@ -75,7 +74,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     const [activeFilters, setActiveFilters] = useState<{ sentiment: string[], location: string[], faculty: string[], program: string[], category: string[] }>({
         sentiment: [], location: [], faculty: [], program: [], category: []
     });
-    const [isFilterOpen, setIsFilterOpen] = useState(false);
+    const [isFilterOpen, setIsFilterOpen] = useState(true);
 
     // Drill-Down States
     const [activeQualDrillDown, setActiveQualDrillDown] = useState<ActiveQualDrillDown | null>(null);
@@ -93,10 +92,25 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
 
     useEffect(() => {
         if (isCurrentlyAnalyzing) return;
-        fetchRawData();
+        insightsInitialized.current = false;
+        if (view === "insights") {
+            fetchInsightsMetrics();
+        } else {
+            fetchRawData();
+        }
     }, [unitId, surveyId, isCurrentlyAnalyzing]);
 
+    // Insights: re-fetch from server API when filters change
     useEffect(() => {
+        if (view !== "insights" || !insightsInitialized.current) return;
+        const timer = setTimeout(() => fetchInsightsMetrics(true), 60);
+        return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeFilters]);
+
+    // Voices: re-aggregate client-side when filters change
+    useEffect(() => {
+        if (view === "insights") return;
         if (!baseRawInputs.length && !baseScores.length && !baseCatScores.length) return;
         setIsFiltering(true);
         const timer = setTimeout(() => {
@@ -106,19 +120,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
         }, 30);
         return () => clearTimeout(timer);
     }, [activeFilters, baseRawInputs, baseScores, baseCatScores, subgroupByColumn]);
-
-    useEffect(() => {
-        if (!unitId || !surveyId || isCurrentlyAnalyzing) { setIncomingMentions(null); return; }
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-        setIncomingLoading(true);
-        fetch(`/api/executive/incoming-mentions?unitId=${unitId}&surveyId=${surveyId}`, { signal: controller.signal })
-            .then(r => r.json())
-            .then(data => setIncomingMentions(data))
-            .catch(() => setIncomingMentions(null))
-            .finally(() => { clearTimeout(timeout); setIncomingLoading(false); });
-        return () => { controller.abort(); clearTimeout(timeout); };
-    }, [unitId, surveyId, isCurrentlyAnalyzing]);
 
     // --- DATA LOADING ---
 
@@ -305,6 +306,61 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
             toast.error("Failed to load full dataset. Metrics may be truncated.");
         } finally {
             setLoading(false);
+        }
+    }
+
+    // ── Fast insights path: one server-side API call instead of chunked client fetches ──
+    async function fetchInsightsMetrics(skipFullLoader = false) {
+        if (skipFullLoader) setIsFiltering(true);
+        else setLoading(true);
+        setFastInputCount(null);
+        try {
+            const params = new URLSearchParams({ unitId, surveyId: surveyId! });
+            activeFilters.location.forEach(v => params.append("location", v));
+            activeFilters.faculty.forEach(v => params.append("faculty", v));
+            activeFilters.program.forEach(v => params.append("program", v));
+            activeFilters.sentiment.forEach(v => params.append("sentiment", v));
+            activeFilters.category.forEach(v => params.append("category", v));
+
+            const [unitRes, catRes, orgRes, json] = await Promise.all([
+                supabase.from("organization_units").select("name").eq("id", unitId).single(),
+                supabase.from("analysis_categories").select("id, name").eq("unit_id", unitId),
+                supabase.from("organization_units").select("id, name"),
+                fetch(`/api/unit-insights/agg-metrics?${params}`).then(r => r.json()),
+            ]);
+
+            if (unitRes.data) setUnitName(unitRes.data.name);
+            setCategories(catRes.data || []);
+            setAllUnits(orgRes.data || []);
+
+            setDashboardMetrics({
+                total_segments: json.total_segments,
+                sentiment_counts: json.sentiment_counts,
+                category_counts: json.category_counts,
+                faculty_counts: json.faculty_counts,
+            });
+            setQuantGroups(json.quant_groups || []);
+            setGlobalAvgScore(json.global_avg_score ?? "N/A");
+            setTotalSegmentCount(json.total_segments);
+            setFastInputCount(json.total_text_inputs);
+
+            const displayGroupMap = new Map<string, string | null>(
+                (json.col_type_cache || []).map((r: any) => [r.source_column, r.display_group ?? null])
+            );
+            setDisplayGroupByColumn(displayGroupMap);
+            const subgroupMapNew = new Map<string, string | null>(
+                (json.col_type_cache || []).map((r: any) => [r.source_column, r.subgroup_name ?? null])
+            );
+            setSubgroupByColumn(subgroupMapNew);
+
+            setFilterOptions(json.filter_options || { locations: [], faculties: [], programs: [] });
+
+            insightsInitialized.current = true;
+        } catch (e) {
+            console.error("fetchInsightsMetrics error:", e);
+        } finally {
+            setLoading(false);
+            setIsFiltering(false);
         }
     }
 
@@ -550,6 +606,35 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
         });
     }
 
+    // Pick up to 4 representative student quotes for the voices summary card.
+    // Aims for variety: one per top category, balanced across sentiments.
+    const summaryQuotes: any[] = [];
+    if (allSegments.length > 0) {
+        const topCats = Object.values(catCounts)
+            .filter((c: any) => c.total > 0)
+            .sort((a: any, b: any) => b.total - a.total)
+            .slice(0, 8)
+            .map((c: any) => c.name);
+        const addedCats = new Set<string>();
+        const sentBudget: Record<string, number> = { Positive: 0, Negative: 0, Neutral: 0 };
+        for (const catName of topCats) {
+            if (summaryQuotes.length >= 4) break;
+            if (addedCats.has(catName)) continue;
+            const catSegs = allSegments.filter(s =>
+                s.category_name === catName &&
+                typeof s.segment_text === 'string' &&
+                s.segment_text.length > 40 &&
+                s.segment_text.length < 320
+            );
+            if (catSegs.length === 0) continue;
+            const neededSent = Object.entries(sentBudget).sort(([, a], [, b]) => a - b)[0][0];
+            const picked = catSegs.find(s => s.sentiment === neededSent) || catSegs[0];
+            summaryQuotes.push(picked);
+            addedCats.add(catName);
+            sentBudget[picked.sentiment]++;
+        }
+    }
+
     const pieData = [
         { name: 'Positive', value: sentimentCounts.Positive, color: '#22c55e' },
         { name: 'Neutral',  value: sentimentCounts.Neutral,  color: '#94a3b8' },
@@ -634,21 +719,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                 </div>
             )}
 
-            {/* Filter bar — shown on both views */}
-            <DashboardFilters
-                isFilterOpen={isFilterOpen}
-                setIsFilterOpen={setIsFilterOpen}
-                activeFilters={activeFilters}
-                setActiveFilters={setActiveFilters}
-                filterOptions={filterOptions}
-                categories={categories}
-            />
-
             {/* ─── INSIGHTS VIEW ─── */}
             {view === "insights" && (
                 <div className="space-y-5">
 
-                    {/* Hero strip */}
+                    {/* Hero strip — above filter */}
                     <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-7 shadow-lg">
                         <div className="absolute -top-10 -right-10 w-56 h-56 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
                         <div className="absolute -bottom-8 left-1/3 w-40 h-40 bg-violet-500/15 rounded-full blur-3xl pointer-events-none" />
@@ -686,7 +761,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                     <MessageSquare className="w-4 h-4 text-violet-400 shrink-0" />
                                     <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Comments</p>
                                 </div>
-                                <p className="text-4xl font-black text-white mt-3 tabular-nums">{baseRawInputs.length.toLocaleString()}</p>
+                                <p className="text-4xl font-black text-white mt-3 tabular-nums">{(fastInputCount ?? baseRawInputs.length).toLocaleString()}</p>
                                 <div className="mt-2 space-y-0.5">
                                     <p className="text-xs text-slate-500">
                                         {totalSegmentCount.toLocaleString()} segments analyzed
@@ -708,6 +783,16 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                             </div>
                         </div>
                     </div>
+
+                    {/* Filter bar — below hero */}
+                    <DashboardFilters
+                        isFilterOpen={isFilterOpen}
+                        setIsFilterOpen={setIsFilterOpen}
+                        activeFilters={activeFilters}
+                        setActiveFilters={setActiveFilters}
+                        filterOptions={filterOptions}
+                        categories={categories}
+                    />
 
                     {/* Sentiment Analysis band */}
                     <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl p-5 space-y-5">
@@ -771,62 +856,68 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         </div>
                     )}
 
-                    {/* Incoming mentions band */}
-                    {surveyId && (incomingLoading || (incomingMentions && incomingMentions.total_mentions > 0)) && (
-                        <div className="bg-amber-50/60 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 rounded-2xl p-5 space-y-4">
-                            <div className="flex items-center gap-2">
-                                <GitCompareArrows className="w-4 h-4 text-amber-500" />
-                                <h2 className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-widest">Mentioned By Other Units</h2>
-                                {!incomingLoading && incomingMentions && (
-                                    <span className="ml-1 px-2 py-0.5 text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded-full">
-                                        {incomingMentions.total_mentions} mention{incomingMentions.total_mentions !== 1 ? "s" : ""}
-                                    </span>
-                                )}
-                            </div>
-                            {incomingLoading ? (
-                                <div className="flex items-center gap-2 text-slate-400 py-2">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    <span className="text-sm">Loading incoming mentions…</span>
-                                </div>
-                            ) : incomingMentions?.sources?.length > 0 ? (
-                                <div className="bg-white dark:bg-slate-900 rounded-xl border border-amber-100 dark:border-amber-900/30 p-4 space-y-3">
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                                        Feedback from other units' respondents that referenced {unitName}. These are issues or praises directed at this unit but captured in a different unit's analysis.
-                                    </p>
-                                    <div className="space-y-2">
-                                        {incomingMentions.sources.map((src: any) => {
-                                            const posPct = src.total > 0 ? (src.positive / src.total) * 100 : 0;
-                                            const negPct = src.total > 0 ? (src.negative / src.total) * 100 : 0;
-                                            const neuPct = src.total > 0 ? (src.neutral / src.total) * 100 : 0;
-                                            return (
-                                                <div key={src.source_unit_id} className="flex items-center gap-3 py-1">
-                                                    <span className="text-sm text-slate-700 dark:text-slate-300 w-44 shrink-0 truncate" title={src.source_unit_name}>{src.source_unit_name}</span>
-                                                    <div className="flex-1 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
-                                                        <div className="h-full bg-emerald-500" style={{ width: `${posPct}%` }} />
-                                                        <div className="h-full bg-slate-300 dark:bg-slate-600" style={{ width: `${neuPct}%` }} />
-                                                        <div className="h-full bg-red-500" style={{ width: `${negPct}%` }} />
-                                                    </div>
-                                                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 w-8 text-right tabular-nums shrink-0">{src.total}</span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="flex gap-4 pt-2 text-[11px] text-slate-400 border-t border-amber-100 dark:border-amber-900/30">
-                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />{incomingMentions.positive_count} positive</span>
-                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600 inline-block" />{incomingMentions.neutral_count} neutral</span>
-                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{incomingMentions.negative_count} negative</span>
-                                        <span className="ml-auto">{incomingMentions.source_unit_count} source unit{incomingMentions.source_unit_count !== 1 ? "s" : ""}</span>
-                                    </div>
-                                </div>
-                            ) : null}
-                        </div>
-                    )}
                 </div>
             )}
 
             {/* ─── VOICES VIEW ─── */}
             {view === "voices" && (
                 <div className="space-y-6">
+
+                    {/* Filter bar */}
+                    <DashboardFilters
+                        isFilterOpen={isFilterOpen}
+                        setIsFilterOpen={setIsFilterOpen}
+                        activeFilters={activeFilters}
+                        setActiveFilters={setActiveFilters}
+                        filterOptions={filterOptions}
+                        categories={categories}
+                    />
+
+                    {/* ── What Students Are Saying (summary card) ── */}
+                    {summaryQuotes.length > 0 && (
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                            <div className="h-1 bg-gradient-to-r from-pink-500 via-rose-400 to-fuchsia-500" />
+                            <div className="p-5 space-y-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <MessageSquare className="w-4 h-4 text-pink-500" />
+                                            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">What Students Are Saying</h2>
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-pink-50 dark:bg-pink-950/40 text-pink-600 dark:text-pink-400 border border-pink-100 dark:border-pink-900/50">
+                                                {summaryQuotes.length} samples
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 ml-6">Representative quotes from top feedback categories</p>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                                    {summaryQuotes.map((q, i) => {
+                                        const sentStyle = q.sentiment === "Positive"
+                                            ? { border: "border-l-emerald-400", bg: "bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800", badge: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800", dot: "bg-emerald-500" }
+                                            : q.sentiment === "Negative"
+                                            ? { border: "border-l-red-400", bg: "bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800", badge: "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800", dot: "bg-red-500" }
+                                            : { border: "border-l-slate-300 dark:border-l-slate-600", bg: "bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800", badge: "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700", dot: "bg-slate-400" };
+                                        const text = q.segment_text.length > 180 ? q.segment_text.slice(0, 177) + "…" : q.segment_text;
+                                        return (
+                                            <div key={i} className={`border-l-4 ${sentStyle.border} ${sentStyle.bg} rounded-r-xl px-4 py-3.5 space-y-2`}>
+                                                <div className="flex items-center flex-wrap gap-1.5">
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${sentStyle.badge}`}>
+                                                        <span className={`w-1.5 h-1.5 rounded-full ${sentStyle.dot}`} />{q.sentiment}
+                                                    </span>
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900/50">
+                                                        {q.category_name}
+                                                    </span>
+                                                </div>
+                                                <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed italic">&ldquo;{text}&rdquo;</p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Sentiment by Category — before Student Voices */}
                     <DashboardQualView
                         catCounts={catCounts}
                         handleQualDrillDown={handleQualDrillDown}
@@ -834,7 +925,10 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         allUnits={allUnits}
                         unitId={unitId}
                         surveyId={surveyId}
+                        section="chart"
                     />
+
+                    {/* Student Voices */}
                     <RawDataExplorer
                         rawDataTab={rawDataTab}
                         setRawDataTab={setRawDataTab}
@@ -850,7 +944,19 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         RAW_PAGE_SIZE={RAW_PAGE_SIZE}
                         suggestionOnly={rawDataSuggestionOnly}
                         setSuggestionOnly={setRawDataSuggestionOnly}
+                        hideRatings={true}
+                        categories={categories}
+                        catCounts={catCounts}
+                        activeCategories={activeFilters.category}
+                        onCategoryToggle={catName => setActiveFilters(p => ({
+                            ...p,
+                            category: p.category.includes(catName)
+                                ? p.category.filter(x => x !== catName)
+                                : [...p.category, catName]
+                        }))}
+                        onCategoryClear={() => setActiveFilters(p => ({ ...p, category: [] }))}
                     />
+
                 </div>
             )}
 

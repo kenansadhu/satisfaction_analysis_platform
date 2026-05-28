@@ -154,6 +154,11 @@ export default function FacultyDetailPage() {
     const surveyId = activeSurveyId && activeSurveyId !== "all" ? activeSurveyId : null;
 
     useEffect(() => {
+        const name = data?.faculty?.name;
+        if (name) document.title = `${name} | Satisfaction Voice`;
+    }, [data?.faculty?.name]);
+
+    useEffect(() => {
         if (!surveyId) { setData(null); setNpsByColumn([]); return; }
         setLoading(true);
         setData(null);

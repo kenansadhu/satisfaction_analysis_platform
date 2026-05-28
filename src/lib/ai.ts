@@ -141,10 +141,18 @@ export async function callGemini(
     text = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
 
     if (options.jsonMode !== false) {
+        // First attempt: direct parse
         try {
             return JSON.parse(text);
         } catch {
-            throw new AIError(`AI returned invalid JSON. Raw response: ${text.slice(0, 200)}...`, 502);
+            // Second attempt: extract the first {...} or [...] block from surrounding prose
+            const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+            if (jsonMatch) {
+                try {
+                    return JSON.parse(jsonMatch[0]);
+                } catch { /* fall through */ }
+            }
+            throw new AIError(`AI returned invalid JSON. Raw response: ${text.slice(0, 400)}`, 502);
         }
     }
     return text;

@@ -11,6 +11,7 @@ import { useTheme } from "next-themes";
 import { Sun, Moon } from "lucide-react";
 
 export default function LoginPage() {
+    useEffect(() => { document.title = "Login | Satisfaction Voice"; }, []);
     const router = useRouter();
     const { theme, setTheme } = useTheme();
 

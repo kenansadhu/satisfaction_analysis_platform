@@ -83,6 +83,7 @@ function MiniSentimentBar({ s }: { s: SentimentData }) {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FacultyInsightsPage() {
+    useEffect(() => { document.title = "Faculty Insights | Satisfaction Voice"; }, []);
     const { activeSurveyId, activeSurvey } = useActiveSurvey();
     const [faculties, setFaculties] = useState<FacultyRow[]>([]);
     const [loading, setLoading] = useState(true);
