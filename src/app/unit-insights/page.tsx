@@ -200,6 +200,7 @@ export default function UnitInsightsPage() {
                                     avgScore !== null && avgScore >= 50 ? "text-amber-400" : "text-red-400"
                                 }`}>{avgScore ?? "—"}</div>
                                 <div className="text-sm text-indigo-200/50 font-medium mt-1">out of 100</div>
+                                <div className="text-[10px] text-indigo-300/30 mt-1">pos%×1 · neu%×0.5 · neg%×0</div>
                                 <div className="mt-3 text-center">
                                     <div className="text-base font-semibold text-white/80">{analyzedUnits.length} <span className="text-white/40 font-normal">of</span> {units.length}</div>
                                     <div className="text-xs text-indigo-300/60 font-medium uppercase tracking-wide">units analyzed</div>
@@ -299,7 +300,10 @@ export default function UnitInsightsPage() {
 
                         {/* Bottom strip: Sentiment */}
                         <div className="relative border-t border-white/10 px-8 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                            <div className="text-[10px] font-semibold uppercase tracking-widest text-indigo-300/70 shrink-0">Overall Sentiment</div>
+                            <div className="shrink-0">
+                                <div className="text-[10px] font-semibold uppercase tracking-widest text-indigo-300/70">Overall Sentiment</div>
+                                <div className="text-[9px] text-indigo-300/30 mt-0.5">each comment AI-classified as pos, neu, or neg</div>
+                            </div>
                             <div className="flex-1 flex flex-col gap-1.5 min-w-0">
                                 <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
                                     {overallPosPct > 0 && <div style={{ width: `${overallPosPct}%` }} className="bg-emerald-400 transition-all duration-700" />}

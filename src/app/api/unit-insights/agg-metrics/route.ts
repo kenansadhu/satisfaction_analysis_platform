@@ -123,6 +123,7 @@ export async function GET(request: Request) {
     const facCountsMap = new Map<string, FacCount>();
     const sentCounts = { Positive: 0, Negative: 0, Neutral: 0 };
     let totalSegments = 0;
+    const inputsWithSegments = new Set<number>();
 
     for (const seg of allSegs) {
         const catName = catMap.get(seg.category_id);
@@ -146,6 +147,7 @@ export async function GET(request: Request) {
 
         sentCounts[seg.sentiment as keyof typeof sentCounts]++;
         totalSegments++;
+        inputsWithSegments.add(seg.raw_input_id);
 
         if (!facCountsMap.has(faculty)) {
             facCountsMap.set(faculty, { faculty_name: faculty, positive: 0, negative: 0, neutral: 0, total: 0 });
@@ -256,7 +258,7 @@ export async function GET(request: Request) {
         : "N/A";
 
     return NextResponse.json({
-        total_text_inputs: allInputIds.length,
+        total_text_inputs: inputsWithSegments.size,
         total_segments: totalSegments,
         sentiment_counts: sentCounts,
         category_counts: Array.from(catCountsMap.values()),

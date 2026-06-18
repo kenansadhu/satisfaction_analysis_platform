@@ -29,7 +29,7 @@ export default function SettingsPage() {
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Rebuild cache state
-    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_cross_signals' | 'warm_faculty_detail' | 'done' | 'error';
+    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_rollup' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_cross_signals' | 'warm_faculty_detail' | 'done' | 'error';
     const [rebuildStep, setRebuildStep] = useState<RebuildStep>('idle');
     const [rebuildElapsed, setRebuildElapsed] = useState(0);
     const [rebuildError, setRebuildError] = useState<string | null>(null);
@@ -111,6 +111,7 @@ export default function SettingsPage() {
         { key: 'warm_nps',            label: 'Warming NPS cache' },
         { key: 'warm_radar',          label: 'Warming radar charts cache' },
         { key: 'warm_qual',           label: 'Warming qualitative summary' },
+        { key: 'warm_faculty_rollup',     label: 'Warming faculty sentiment rollup' },
         { key: 'warm_faculty_list',      label: 'Warming faculty list cache' },
         { key: 'warm_cross_mentions',    label: 'Warming cross-unit mentions cache' },
         { key: 'warm_dependency_graph',  label: 'Warming dependency graph cache' },
@@ -121,8 +122,8 @@ export default function SettingsPage() {
 
     const STEP_PROGRESS: Partial<Record<RebuildStep, number>> = {
         clearing: 5, phase1: 20, phase2: 37,
-        warm_report: 48, warm_nps: 57, warm_radar: 63,
-        warm_qual: 69, warm_faculty_list: 74,
+        warm_report: 48, warm_nps: 55, warm_radar: 61,
+        warm_qual: 67, warm_faculty_rollup: 72, warm_faculty_list: 76,
         warm_cross_mentions: 79, warm_dependency_graph: 83, warm_cross_signals: 87, warm_faculty_detail: 93,
     };
 
@@ -203,6 +204,9 @@ export default function SettingsPage() {
 
             setRebuildStep('warm_qual');
             await fetch(`/api/analytics/unit-qual-summary?surveyId=${activeSurveyId}`).catch(() => {});
+
+            setRebuildStep('warm_faculty_rollup');
+            await fetch(`/api/executive/faculty-rollup?surveyId=${activeSurveyId}`).catch(() => {});
 
             setRebuildStep('warm_faculty_list');
             await fetch(`/api/executive/faculty-list?surveyId=${activeSurveyId}`).catch(() => {});

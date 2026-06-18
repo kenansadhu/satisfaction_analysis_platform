@@ -733,7 +733,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                             <div className="lg:col-span-1 flex flex-col justify-center py-2 pr-4 lg:border-r lg:border-white/10">
                                 <p className="text-xs font-semibold text-indigo-300 uppercase tracking-widest mb-3">Sentiment Score</p>
                                 <div className="flex items-end gap-3">
-                                    <span className="text-7xl font-black text-white leading-none tabular-nums">{sentimentScore}</span>
+                                    <span className={`text-7xl font-black leading-none tabular-nums ${sentimentScore >= 70 ? "text-emerald-400" : sentimentScore >= 40 ? "text-amber-400" : "text-red-400"}`}>{sentimentScore}</span>
                                     <div className="mb-1 space-y-1">
                                         <span className="text-2xl text-indigo-300 font-light">/100</span>
                                         <p className={`text-xs font-semibold ${sentimentScore >= 70 ? "text-emerald-400" : sentimentScore >= 40 ? "text-amber-400" : "text-red-400"}`}>
@@ -741,6 +741,8 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                         </p>
                                     </div>
                                 </div>
+                                <p className="text-[10px] text-indigo-300/30 mt-2">pos%×1 · neu%×0.5 · neg%×0</p>
+                                <p className="text-[10px] text-indigo-300/30 mt-0.5">≥70 excellent · 40–69 moderate · &lt;40 needs focus</p>
                             </div>
 
                             {/* Avg Rating */}

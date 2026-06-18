@@ -438,10 +438,10 @@ export default function FacultyDetailPage() {
                                                             </div>
                                                             <div className="flex flex-wrap gap-1.5">
                                                                 {topStrengths.map(([name, count]) => (
-                                                                    <span key={name} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                                                                    <span key={name} title={`Mentioned in ${count} of ${numPrograms} study programs`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
                                                                         <ThumbsUp className="w-3 h-3" />
                                                                         {name}
-                                                                        {numPrograms > 1 && <span className="text-emerald-400 dark:text-emerald-600 font-bold">{count}/{numPrograms}</span>}
+                                                                        {numPrograms > 1 && <span className="text-emerald-400 dark:text-emerald-600 font-bold">{count}/{numPrograms} prog</span>}
                                                                     </span>
                                                                 ))}
                                                             </div>
@@ -455,10 +455,10 @@ export default function FacultyDetailPage() {
                                                             </div>
                                                             <div className="flex flex-wrap gap-1.5">
                                                                 {topConcerns.map(([name, count]) => (
-                                                                    <span key={name} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
+                                                                    <span key={name} title={`Mentioned in ${count} of ${numPrograms} study programs`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
                                                                         <ThumbsUp className="w-3 h-3 rotate-180" />
                                                                         {name}
-                                                                        {numPrograms > 1 && <span className="text-red-400 dark:text-red-600 font-bold">{count}/{numPrograms}</span>}
+                                                                        {numPrograms > 1 && <span className="text-red-400 dark:text-red-600 font-bold">{count}/{numPrograms} prog</span>}
                                                                     </span>
                                                                 ))}
                                                             </div>
@@ -532,12 +532,12 @@ export default function FacultyDetailPage() {
                                                                                 <div className="bg-slate-300 dark:bg-slate-600" style={{ width: `${passivePct}%` }} />
                                                                                 <div className="bg-red-400" style={{ width: `${detractorPct}%` }} />
                                                                             </div>
-                                                                            <div className="text-[10px] text-slate-400 w-28 text-right">
-                                                                                <span className="text-emerald-600 font-semibold">{nps.promoters}P</span>
+                                                                            <div className="text-[10px] text-slate-400 w-36 text-right" title="promoters · passives · detractors / total">
+                                                                                <span className="text-emerald-600 font-semibold">{nps.promoters} prom</span>
                                                                                 {" · "}
-                                                                                <span className="text-slate-400">{nps.passives}Pa</span>
+                                                                                <span className="text-slate-400">{nps.passives} pass</span>
                                                                                 {" · "}
-                                                                                <span className="text-red-500 font-semibold">{nps.detractors}D</span>
+                                                                                <span className="text-red-500 font-semibold">{nps.detractors} det</span>
                                                                                 {" / "}
                                                                                 {nps.total}
                                                                             </div>
