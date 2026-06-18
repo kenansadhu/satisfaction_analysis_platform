@@ -44,7 +44,7 @@ export default function LoginPage() {
                 }
                 const { error } = await supabase.auth.signUp({ email, password });
                 if (error) throw error;
-                setError("Account created! You can now sign in. An admin will assign your access level.");
+                setError("Account created! Check your email to confirm your account, then sign in.");
                 setMode("login");
             }
         } catch (err: any) {
@@ -88,7 +88,7 @@ export default function LoginPage() {
                         <CardDescription className="text-slate-400">
                             {mode === "login"
                                 ? "Sign in to access the analytics platform."
-                                : "Sign up — an admin will grant you access after review."}
+                                : "Sign up with your @uph.edu email — confirm it and you're in."}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>

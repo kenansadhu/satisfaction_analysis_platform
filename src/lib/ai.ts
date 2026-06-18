@@ -78,9 +78,12 @@ function logUsage(params: { functionName: string; modelId: string; inputTokens: 
 export async function callGemini(
     prompt: string,
     options: {
-        jsonMode?: boolean;
+        jsonMode?: boolean;       // parse/extract JSON from the response (default true)
+        jsonMime?: boolean;       // set responseMimeType="application/json" (default same as jsonMode)
         model?: string;
-        functionId?: string; // if set, logs token usage to ai_usage_logs
+        functionId?: string;      // if set, logs token usage to ai_usage_logs
+        maxOutputTokens?: number;
+        thinkingBudget?: number;  // cap thinking tokens (0 = off, default = model decides)
     } = {}
 ): Promise<unknown> {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -92,9 +95,16 @@ export async function callGemini(
     const modelId = options.model || AI_MODEL;
     const model = genAI.getGenerativeModel({ model: modelId });
 
+    const useJsonMime = options.jsonMime !== undefined ? options.jsonMime : options.jsonMode !== false;
     const generationConfig: Record<string, unknown> = {};
-    if (options.jsonMode !== false) {
+    if (useJsonMime) {
         generationConfig.responseMimeType = "application/json";
+    }
+    if (options.maxOutputTokens) {
+        generationConfig.maxOutputTokens = options.maxOutputTokens;
+    }
+    if (options.thinkingBudget !== undefined) {
+        generationConfig.thinkingConfig = { thinkingBudget: options.thinkingBudget };
     }
 
     const maxRetries = 3;

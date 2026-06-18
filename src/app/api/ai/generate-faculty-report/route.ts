@@ -81,6 +81,17 @@ export async function POST(req: NextRequest) {
         const overallProgScore = programQuality.overallScore;
         const overallCampusScore = campusExperience.overallScore;
 
+        const facultyNameLower = faculty.name.toLowerCase();
+        // Only undergraduate Pendidikan and Keperawatan faculties have dorm residents.
+        // Pascasarjana (graduate) students do not live in the asrama.
+        const isResidenceFaculty = (
+            (facultyNameLower.includes("keperawatan") || facultyNameLower.includes("nursing")) ||
+            (facultyNameLower.includes("pendidikan") && !facultyNameLower.includes("pascasarjana"))
+        );
+        const residenceInstruction = isResidenceFaculty
+            ? `\n- UPH RESIDENCE (ASRAMA): This faculty has students living in the UPH residence/asrama. You MAY include residence-related feedback and its impact on student experience when relevant data is present.`
+            : `\n- UPH RESIDENCE (ASRAMA): Do NOT mention or discuss the UPH residence/asrama in this report — it is not relevant for this faculty.`;
+
         const prompt = `You are an objective Data Intelligence Engine writing an Executive Analysis Report for the "${faculty.name}" faculty.
 ${faculty.description ? `\nFACULTY CONTEXT: ${faculty.description}` : ""}
 
@@ -98,9 +109,10 @@ CAMPUS SERVICE UNITS (as rated by this faculty's students):
 ${campusUnitsText}
 
 SSI SCALE REFERENCE: < 3.00 = needs improvement (red) | 3.00–3.19 = adequate (amber) | ≥ 3.20 = good (green)
+${residenceInstruction}
 
 === QUALITATIVE EVIDENCE SAMPLES (verbatim, with unit) ===
-${segmentSamples.length > 0 ? JSON.stringify(segmentSamples.slice(0, 80)) : "No qualitative samples available."}
+${segmentSamples.length > 0 ? JSON.stringify(segmentSamples.slice(0, 40).map(s => ({ ...s, text: s.text.slice(0, 150) }))) : "No qualitative samples available."}
 
 YOUR TASK: Write a boardroom-quality JSON executive analysis report.
 
@@ -119,7 +131,7 @@ YOUR TASK: Write a boardroom-quality JSON executive analysis report.
   "closing_statement": "..."
 }
 
-Exactly 3 items per list. Return ONLY valid JSON.`;
+RESPOND WITH ONLY THE JSON OBJECT — no markdown, no code fences, no commentary before or after. Start your response with { and end with }. Exactly 3 items per list. If data is too sparse, use {"title":"Limited Data","detail":"Insufficient feedback to identify a third distinct point.","evidence":"N/A"} as filler. Keep executive_summary under 120 words, each detail/action under 80 words.`;
 
         const finalPrompt = prompt
             + (customInstructions ? `\n\n---\nANALYST CONTEXT:\n${customInstructions}` : "")
@@ -128,7 +140,7 @@ Exactly 3 items per list. Return ONLY valid JSON.`;
         let parsed: any;
         let retries = 0;
         while (retries <= 2) {
-            const raw = await callGemini(finalPrompt, { jsonMode: true, model: modelId, functionId: retries === 0 ? "generate-report" : undefined });
+            const raw = await callGemini(finalPrompt, { jsonMode: true, jsonMime: false, model: modelId, maxOutputTokens: 16384, thinkingBudget: 8192, functionId: retries === 0 ? "generate-report" : undefined });
             try {
                 parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
                 if (parsed?.executive_summary) break;

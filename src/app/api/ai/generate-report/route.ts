@@ -70,10 +70,10 @@ export async function POST(req: Request) {
       finalQualitativeData = (rawInputs || [])
         .filter(ri => ri.raw_text && ri.raw_text.length > 10 && !likertLabelPattern.test(ri.raw_text.trim()))
         .map(f => ({
-          segment_text: f.raw_text as string,
+          segment_text: (f.raw_text as string).slice(0, 150),
           sentiment: "Neutral",
           category_name: f.source_column
-        })).slice(0, 100);
+        })).slice(0, 40);
     }
 
     // aggregation
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Insufficient Data: No feedback found for this unit to analyze." }, { status: 400 });
     }
 
-    const statsPrompt = `Unit Respondents: ${unitRespondentCount || 0} unique students out of ${totalSurveyPopulation} total survey participants.
+    const statsPrompt = `Unit Respondents: ${unitRespondentCount || 0} unique students gave feedback on this unit (note: participation in this survey is optional — respondent count does not reflect actual service utilization).
 Qualitative Data: ${finalQualitativeData.length} items provided. Sentiment Distribution: ${sentimentCounts.Positive} Positive, ${sentimentCounts.Negative} Negative, ${sentimentCounts.Neutral} Neutral.`;
 
     const categoryPrompt = Object.entries(categories).map(([name, count]) => `${name} (${count})`).join(', ');
@@ -243,14 +243,13 @@ Qualitative Data: ${finalQualitativeData.length} items provided. Sentiment Distr
       }
     }
 
-    // 4. RESTORE OBJECTIVE DATA INTELLIGENCE ENGINE PROMPT WITH ENHANCED CONTEXT & WEIGHTING
-    const prompt = `You are an objective Data Intelligence Engine tasked with writing an Executive Analysis Report for the "${unit?.name || 'Unit'}" department. 
+    // 4. Build prompt
+    const prompt = `You are an objective Data Intelligence Engine tasked with writing an Executive Analysis Report for the "${unit?.name || 'Unit'}" department.
 
 CONTEXT: ${unit?.description || 'No additional context provided.'}
 
-=== CRITICAL PERFORMANCE DATA ===
-- POPULATION CONTEXT: Out of ${totalSurveyPopulation} total survey participants, ${unitRespondentCount || 0} students interacted with this unit.
-- UTILIZATION RATE: ${((unitRespondentCount || 0) / (totalSurveyPopulation || 1) * 100).toFixed(1)}%
+=== PERFORMANCE DATA ===
+- RESPONDENTS: ${unitRespondentCount || 0} unique students gave feedback on this unit. NOTE: this survey is optional and partially voluntary — respondent count does NOT reflect actual service utilization. Do not draw any conclusions about how widely the unit is used.
 - QUANTITATIVE METRICS:
 ${quantPrompt || "No quantitative scores available."}
 
@@ -260,29 +259,29 @@ ${npsPrompt}
 - QUALITATIVE STATE:
 ${statsPrompt}
 - CATEGORIES: ${categoryPrompt}
-- EVIDENCE SAMPLES (VERBATIM): ${JSON.stringify(finalQualitativeData.slice(0, 80).map(s => ({ text: s.segment_text, sentiment: s.sentiment, category: s.category_name })))}
+- EVIDENCE SAMPLES (VERBATIM): ${JSON.stringify(finalQualitativeData.slice(0, 40).map(s => ({ text: s.segment_text, sentiment: s.sentiment, category: s.category_name })))}
 
 === CROSS-UNIT SIGNALS ===
-OUTGOING — students processed by this unit whose feedback mentions other departments:
+OUTGOING — students from this unit whose feedback mentions other departments:
 ${outgoingPrompt}
 
 INCOMING — students from other units who reference this unit in their feedback:
 ${incomingPrompt}
 
 IMPORTANT INTERPRETATION RULES:
-1. "Utilization Weighting": A low utilization rate (e.g., < 30%) is a CRITICAL concern for "Reach", but do not let it completely invalidate high satisfaction scores. If satisfaction scores are high, report them as a "Key Advantage" (Quality) while flagging utilization as a "Vulnerability" (Reach). Always use the actual scores from QUANTITATIVE METRICS above — never invent or assume numbers.
-2. "Quant Scales":
+1. "Quant Scales":
    - "Likert (1-4)": 2.5 is average, 3.5+ is excellent.
    - "Binary/Percentage (0-1)": 0.8 is 80% positivity, 0.2 is 20%.
    - "NPS 0–10": NPS ranges from −100 to +100. ≥50 is excellent, 0–49 is good, below 0 is a concern. Treat NPS as a standalone loyalty metric — never average it with Likert scores.
-3. "Evidence": You MUST provide verbatim quotes for every strength and concern. Quotes must be actual student-written sentences from EVIDENCE SAMPLES. NEVER return "N/A" for evidence if text is provided. NEVER use Likert answer labels (e.g., "4 = Sangat Setuju", "3 = Setuju") as evidence — those are scale labels, not student comments.
-4. "Comment Count ≠ Utilization": The number of qualitative comments (${finalQualitativeData.length}) reflects how many students wrote open-ended text — NOT how many students used this unit. Do NOT interpret a low comment count as low service utilization. Use UTILIZATION RATE (${((unitRespondentCount || 0) / (totalSurveyPopulation || 1) * 100).toFixed(1)}%) for reach/access conclusions instead.
+2. "Evidence": You MUST provide verbatim quotes for every strength and concern. Quotes must be actual student-written sentences from EVIDENCE SAMPLES. NEVER return "N/A" for evidence if text is provided. NEVER use Likert answer labels (e.g., "4 = Sangat Setuju", "3 = Setuju") as evidence — those are scale labels, not student comments.
+3. "Comment Count ≠ Utilization": The number of qualitative comments reflects how many students chose to write text — NOT how many used the service. Never draw conclusions about utilization rates or service reach from respondent or comment counts. Focus purely on satisfaction quality from those who did respond.
+4. "Length": Keep each field concise — executive_summary under 120 words, each detail/action under 80 words.
 
 YOUR TASK:
 Produce a boardroom-quality JSON report.
 
 {
-  "executive_summary": "High-level overview. Acknowledge quality of service vs volume of reach.",
+  "executive_summary": "High-level overview of service quality based on scores and sentiment.",
   "overall_verdict": "Excellent | Good | Needs Improvement | Critical",
   "strengths": [
     { "title": "...", "detail": "...cite metrics...", "evidence": "verbatim quote from samples" }
@@ -296,7 +295,7 @@ Produce a boardroom-quality JSON report.
   "closing_statement": "..."
 }
 
-Return ONLY valid JSON. Exactly 3 items per list.`;
+RESPOND WITH ONLY THE JSON OBJECT — no markdown, no code fences, no commentary before or after. Start your response with { and end with }. Exactly 3 items per list. If data is too sparse to identify a third distinct point, use {"title":"Limited Data","detail":"Insufficient feedback to identify a third distinct point.","evidence":"N/A"} (or equivalent for concerns/recommendations) as the filler — but always return exactly 3.`;
 
     const finalPrompt = prompt
       + (customInstructions ? `\n\n---\nANALYST CONTEXT (provided by report owner — follow these directives):\n${customInstructions}` : "")
@@ -307,7 +306,7 @@ Return ONLY valid JSON. Exactly 3 items per list.`;
     const maxRetries = 2;
 
     while (retries <= maxRetries) {
-      const reportJson = await callGemini(finalPrompt, { jsonMode: true, model: modelId, functionId: retries === 0 ? "generate-report" : undefined });
+      const reportJson = await callGemini(finalPrompt, { jsonMode: true, jsonMime: false, model: modelId, maxOutputTokens: 16384, thinkingBudget: 8192, functionId: retries === 0 ? "generate-report" : undefined });
       try {
         parsed = typeof reportJson === 'string' ? JSON.parse(reportJson) : reportJson;
         // Verify it didn't hallucinate an empty object

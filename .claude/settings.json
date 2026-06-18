@@ -37,7 +37,11 @@
       "Bash(cd /c/Users/kenan/Documents/Creations/\"New SSI Analysis and Report\"/student-voice-platform && find src/app -type f -name \"page.tsx\" | head -20)",
       "Read(//c/c/Users/kenan/Documents/Creations/New SSI Analysis and Report/student-voice-platform/src/**)",
       "mcp__claude_ai_Supabase__apply_migration",
-      "mcp__claude_ai_Supabase__list_tables"
+      "mcp__claude_ai_Supabase__list_tables",
+      "Bash(Get-ChildItem -Path src\\\\app -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Read(//c/c/Users/kenan/Documents/Creations/New SSI Analysis and Report/**)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\kenan\\OneDrive\\Documents\\Creations\\New SSI Analysis and Report\\New 2026\\student-voice-platform\\src\\app\\faculty-insights",
