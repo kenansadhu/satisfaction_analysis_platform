@@ -1,38 +1,53 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, Sparkles, Mail, Lock, AlertCircle } from "lucide-react";
-import { useTheme } from "next-themes";
-import { Sun, Moon } from "lucide-react";
+import {
+    Loader2, Mail, Lock, CheckCircle2, AlertCircle,
+    ArrowLeft, RefreshCw, GitBranch,
+} from "lucide-react";
 
-export default function LoginPage() {
-    useEffect(() => { document.title = "Login | Satisfaction Voice"; }, []);
+function LoginInner() {
     const router = useRouter();
-    const { theme, setTheme } = useTheme();
+    const searchParams = useSearchParams();
 
-    const [email, setEmail] = useState("");
+    const [email, setEmail]       = useState("");
     const [password, setPassword] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [mode, setMode] = useState<"login" | "signup">("login");
+    const [loading, setLoading]   = useState(false);
+    const [error, setError]       = useState<string | null>(null);
+    const [mode, setMode]         = useState<"login" | "signup" | "pending">("login");
+    const [pendingEmail, setPendingEmail] = useState("");
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [resending, setResending] = useState(false);
 
-    // If already logged in, redirect away
+    const confirmed = searchParams.get("confirmed") === "true";
+
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (session) router.replace("/");
         });
     }, [router]);
 
+    useEffect(() => {
+        if (resendCooldown <= 0) return;
+        const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+        return () => clearTimeout(t);
+    }, [resendCooldown]);
+
+    const handleResend = async () => {
+        setResending(true);
+        await supabase.auth.resend({ type: "signup", email: pendingEmail });
+        setResending(false);
+        setResendCooldown(60);
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-
         try {
             if (mode === "login") {
                 const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -42,116 +57,179 @@ export default function LoginPage() {
                 if (!email.toLowerCase().endsWith("@uph.edu")) {
                     throw new Error("Only @uph.edu email addresses are allowed to sign up.");
                 }
-                const { error } = await supabase.auth.signUp({ email, password });
+                const { error } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+                });
                 if (error) throw error;
-                setError("Account created! Check your email to confirm your account, then sign in.");
-                setMode("login");
+                setPendingEmail(email);
+                setResendCooldown(60);
+                setMode("pending");
             }
         } catch (err: any) {
-            setError(err.message || "Something went wrong.");
+            setError(err.message || "Something went wrong. Please try again.");
         } finally {
             setLoading(false);
         }
     };
 
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center p-4">
-            {/* Gradient orbs */}
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-            {/* Theme toggle */}
-            <button
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                className="absolute top-4 right-4 p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-            >
-                {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
-            <div className="w-full max-w-md relative">
-                {/* Logo */}
-                <div className="flex items-center gap-3 mb-8 justify-center">
-                    <div className="px-3 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
-                        <span className="text-xl font-bold text-white">SVP</span>
-                    </div>
-                    <span className="text-lg font-bold text-white tracking-tight">Student Voice Platform</span>
-                </div>
-
-                <Card className="border-white/10 bg-white/5 backdrop-blur-xl shadow-2xl">
-                    <CardHeader className="pb-4">
-                        <div className="flex items-center gap-2 mb-1">
-                            <Sparkles className="w-5 h-5 text-blue-400" />
-                            <CardTitle className="text-white text-xl">
-                                {mode === "login" ? "Welcome back" : "Create account"}
-                            </CardTitle>
-                        </div>
-                        <CardDescription className="text-slate-400">
-                            {mode === "login"
-                                ? "Sign in to access the analytics platform."
-                                : "Sign up with your @uph.edu email — confirm it and you're in."}
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div className="space-y-1">
-                                <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Email</label>
-                                <div className="relative">
-                                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                                    <Input
-                                        type="email"
-                                        placeholder="you@uph.edu"
-                                        value={email}
-                                        onChange={e => setEmail(e.target.value)}
-                                        required
-                                        className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-slate-500 focus:border-blue-400 focus:ring-blue-400/20"
-                                    />
-                                </div>
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Password</label>
-                                <div className="relative">
-                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                                    <Input
-                                        type="password"
-                                        placeholder="••••••••"
-                                        value={password}
-                                        onChange={e => setPassword(e.target.value)}
-                                        required
-                                        className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-slate-500 focus:border-blue-400 focus:ring-blue-400/20"
-                                    />
-                                </div>
-                            </div>
-
-                            {error && (
-                                <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${error.includes("created") ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-red-500/10 text-red-300 border border-red-500/20"}`}>
-                                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                                    {error}
-                                </div>
-                            )}
-
-                            <Button
-                                type="submit"
-                                disabled={loading}
-                                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-600/25 border border-blue-500/50 h-11"
-                            >
-                                {loading ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : mode === "login" ? "Sign In" : "Create Account"}
-                            </Button>
-
-                            <div className="text-center pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(null); }}
-                                    className="text-sm text-slate-400 hover:text-blue-400 transition-colors"
-                                >
-                                    {mode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-                                </button>
-                            </div>
-                        </form>
-                    </CardContent>
-                </Card>
+    // ── Shared page shell ────────────────────────────────────────────────────
+    const Shell = ({ children }: { children: React.ReactNode }) => (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+            <div className="w-full max-w-sm">
+                {children}
+            </div>
+            <div className="mt-8 flex items-center gap-2 text-xs text-slate-400">
+                <GitBranch className="w-3.5 h-3.5" />
+                Satisfaction Voice · Universitas Pelita Harapan
             </div>
         </div>
+    );
+
+    // ── Pending — awaiting email confirmation ────────────────────────────────
+    if (mode === "pending") {
+        return (
+            <Shell>
+                <div className="text-center mb-7">
+                    <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Satisfaction Voice</h1>
+                    <p className="text-sm text-slate-500 mt-1">Student Analytics Platform</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
+                    <div className="p-8 text-center">
+                        <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto mb-5">
+                            <Mail className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <h2 className="text-base font-bold text-slate-900 mb-1">Check your inbox</h2>
+                        <p className="text-slate-500 text-sm mb-1">Confirmation link sent to</p>
+                        <p className="text-blue-600 font-semibold text-sm mb-4 break-all">{pendingEmail}</p>
+                        <p className="text-slate-400 text-xs leading-relaxed mb-6">
+                            Click the link in that email, then return here to sign in with your password.
+                        </p>
+
+                        <div className="space-y-2.5">
+                            <Button
+                                onClick={handleResend}
+                                disabled={resendCooldown > 0 || resending}
+                                variant="outline"
+                                className="w-full h-10 border-slate-200 text-slate-600 hover:bg-slate-50 text-sm"
+                            >
+                                {resending ? (
+                                    <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Sending…</>
+                                ) : resendCooldown > 0 ? (
+                                    <><RefreshCw className="w-3.5 h-3.5 mr-2" />Resend in {resendCooldown}s</>
+                                ) : (
+                                    <><RefreshCw className="w-3.5 h-3.5 mr-2" />Resend confirmation email</>
+                                )}
+                            </Button>
+                            <button
+                                onClick={() => { setMode("login"); setError(null); setEmail(""); setPassword(""); }}
+                                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors mx-auto"
+                            >
+                                <ArrowLeft className="w-3 h-3" /> Back to sign in
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </Shell>
+        );
+    }
+
+    // ── Login / Signup ───────────────────────────────────────────────────────
+    return (
+        <Shell>
+            <div className="text-center mb-7">
+                <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Satisfaction Voice</h1>
+                <p className="text-sm text-slate-500 mt-1">
+                    {mode === "login" ? "Sign in to your analytics dashboard" : "Create a new account"}
+                </p>
+            </div>
+
+            {/* Email confirmed banner */}
+            {confirmed && (
+                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm mb-4">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Email confirmed — sign in below to get started.</span>
+                </div>
+            )}
+
+            {/* Form card */}
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
+                <div className="p-8">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="space-y-1.5">
+                            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Email</label>
+                            <div className="relative">
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                <Input
+                                    type="email"
+                                    placeholder="you@uph.edu"
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    required
+                                    className="pl-9 h-10 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-400 transition-colors text-sm"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Password</label>
+                            <div className="relative">
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                <Input
+                                    type="password"
+                                    placeholder="••••••••"
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    required
+                                    minLength={mode === "signup" ? 8 : undefined}
+                                    className="pl-9 h-10 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-400 transition-colors text-sm"
+                                />
+                            </div>
+                            {mode === "signup" && (
+                                <p className="text-[11px] text-slate-400">Minimum 8 characters.</p>
+                            )}
+                        </div>
+
+                        {error && (
+                            <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+                                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                                <span>{error}</span>
+                            </div>
+                        )}
+
+                        <Button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-sm text-sm mt-1"
+                        >
+                            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : mode === "login" ? "Sign In" : "Create Account"}
+                        </Button>
+                    </form>
+
+                    <div className="mt-5 pt-5 border-t border-slate-100 text-center">
+                        <button
+                            type="button"
+                            onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(null); }}
+                            className="text-sm text-slate-400 hover:text-slate-700 transition-colors"
+                        >
+                            {mode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Shell>
+    );
+}
+
+export default function LoginPage() {
+    useEffect(() => { document.title = "Sign In | Satisfaction Voice"; }, []);
+    return (
+        <Suspense>
+            <LoginInner />
+        </Suspense>
     );
 }
