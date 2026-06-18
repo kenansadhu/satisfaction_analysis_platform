@@ -6,23 +6,7 @@ Each entry below lists: **file → line range → what it was → why it's inact
 
 ---
 
-## 1. Executive Insights — "Insights" tab hero strip
-
-- **File:** [src/app/executive/page.tsx](src/app/executive/page.tsx)
-- **Flag:** `SHOW_INSIGHTS_HERO_STRIP` (set to `false` near the top of the component, ~line 60)
-- **Block location:** inside the `<TabsContent value="insights">` content, immediately after the `TabsList`.
-- **What it was:** A dark gradient hero showing five tiles — Overall Sentiment Score (giant `text-8xl`), Feedback (comment count), Issues (negative count), Active Units, NPS.
-- **Why deactivated:**
-  - The Summary tab already shows the same headline numbers (SSI Score, Sentiment Score, NPS, Respondents) in a more polished hero strip with the same dark gradient.
-  - Users who land on Executive Insights see the Summary tab first by default, so the second hero on the Insights tab was visual repetition without new information.
-  - The `text-8xl` score size was also the only spot in the app reaching that scale, breaking typographic consistency.
-- **What still renders on the Insights tab:** Category Intelligence (Praises/Issues radars), Action Priority Matrix, Sentiment-by-Unit heatmap, Shared Categories. None of those duplicate the Summary tab.
-- **Restore:** Flip `SHOW_INSIGHTS_HERO_STRIP` to `true`, or delete the wrapping `{SHOW_INSIGHTS_HERO_STRIP && (...)}` to make the hero permanent.
-- **Permanent removal:** Delete the entire `{SHOW_INSIGHTS_HERO_STRIP && (...)}` block (including the banner comment above it), plus the `SHOW_INSIGHTS_HERO_STRIP` constant declaration.
-
----
-
-## 2. Executive Insights — Suggestions tab — "Themes" subtab
+## 1. Executive Insights — Suggestions tab — "Themes" subtab
 
 - **File:** [src/components/executive/SuggestionHub.tsx](src/components/executive/SuggestionHub.tsx)
 - **Flag:** `SHOW_THEMES_TAB` (set to `false` inside the component, ~line 71)

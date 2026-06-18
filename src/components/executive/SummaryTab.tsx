@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoHint } from "@/components/ui/info-hint";
 import {
-    FileText, Target, Users, MessageSquare, ThumbsUp,
+    FileText, Target, Users, ThumbsUp,
     Sparkles, TrendingUp, AlertTriangle, Lightbulb, Info,
     ArrowUpDown, ArrowRight,
 } from "lucide-react";
@@ -32,10 +32,11 @@ interface ReportData {
     survey: { id: number; title: string };
     globalSatisfactionIndex: number | null;
     campusSatisfaction: { campus: string; satisfaction_index: number }[];
+    campusParticipation: { campus: string; respondents: number }[];
     totalRespondents: number;
     units: UnitReport[];
 }
-interface NpsTotals { nps_score: number | null; total: number; }
+interface NpsTotals { nps_score: number | null; total: number; promoters: number; passives: number; detractors: number; }
 
 interface AISummaryFinding { type: "strength" | "concern" | "notable"; title: string; body: string; }
 interface AISummarySpotlight { type: "top" | "bottom"; unit: string; ssi: number; insight: string; }
@@ -156,13 +157,16 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
     }
     if (!reportData) return null;
 
-    const { globalSatisfactionIndex, campusSatisfaction, totalRespondents, units } = reportData;
+    const { globalSatisfactionIndex, campusSatisfaction, campusParticipation, totalRespondents, units } = reportData;
 
     const totalPos  = units.reduce((s, u) => s + (u.qualitative?.positive ?? 0), 0);
     const totalNeg  = units.reduce((s, u) => s + (u.qualitative?.negative ?? 0), 0);
     const totalQual = units.reduce((s, u) => s + (u.qualitative?.total ?? 0), 0);
     const totalNeu  = totalQual - totalPos - totalNeg;
     const globalSentiment = totalQual > 0 ? computeSentiment(totalPos, totalNeg, totalNeu) : null;
+    const sentPosPct = totalQual > 0 ? Math.round(totalPos / totalQual * 100) : 0;
+    const sentNeuPct = totalQual > 0 ? Math.round(totalNeu / totalQual * 100) : 0;
+    const sentNegPct = totalQual > 0 ? 100 - sentPosPct - sentNeuPct : 0;
     const allCampuses = campusSatisfaction.map(c => c.campus);
 
     // Units with a score, with pre-computed sentiment
@@ -203,6 +207,19 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                 {globalSatisfactionIndex?.toFixed(2) ?? "N/A"}
                             </div>
                             <p className="text-blue-200/40 text-xs mt-1">out of 4.00 · target ≥ 3.20</p>
+                            {campusSatisfaction.length > 0 && (
+                                <div className="flex flex-col gap-1.5 mt-2">
+                                    {campusSatisfaction.map(cs => (
+                                        <div key={cs.campus} className="flex items-center gap-2 text-sm">
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${ssiBgColor(cs.satisfaction_index)}`} />
+                                            <span className="text-blue-200/60 font-medium">{shortCampus(cs.campus)}</span>
+                                            <span className={`font-bold tabular-nums ${ssiTextColor(cs.satisfaction_index)}`}>
+                                                {cs.satisfaction_index.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                         <div>
                             <p className="text-xs font-semibold text-blue-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
@@ -215,7 +232,14 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                             <div className={`text-5xl md:text-6xl font-black tracking-tight ${globalSentiment !== null ? sentimentTextColor(globalSentiment) : "text-slate-500"}`}>
                                 {globalSentiment !== null ? globalSentiment : "—"}
                             </div>
-                            <p className="text-blue-200/40 text-xs mt-1">out of 100 · pos=1, neutral=0.5, neg=0</p>
+                            <p className="text-blue-200/40 text-xs mt-1">pos% ×1 · neu% ×0.5 · neg% ×0</p>
+                            {totalQual > 0 && (
+                                <div className="flex flex-col gap-1 mt-2">
+                                    <span className="flex items-center gap-1.5 text-sm text-emerald-400/80"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />{sentPosPct}% positive</span>
+                                    <span className="flex items-center gap-1.5 text-sm text-amber-300/80"><span className="w-2 h-2 rounded-full bg-amber-300 shrink-0" />{sentNeuPct}% neutral</span>
+                                    <span className="flex items-center gap-1.5 text-sm text-red-400/80"><span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />{sentNegPct}% negative</span>
+                                </div>
+                            )}
                         </div>
                         <div>
                             <p className="text-xs font-semibold text-blue-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
@@ -230,7 +254,12 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                     <div className={`text-5xl md:text-6xl font-black tracking-tight ${npsData.nps_score >= 50 ? "text-emerald-400" : npsData.nps_score >= 0 ? "text-amber-400" : "text-red-400"}`}>
                                         {npsData.nps_score > 0 ? `+${npsData.nps_score}` : npsData.nps_score}
                                     </div>
-                                    <p className="text-blue-200/40 text-xs mt-1">net promoter · n = {npsData.total.toLocaleString()}</p>
+                                    <p className="text-blue-200/40 text-xs mt-1">% promoters (9–10) minus % detractors (0–6)</p>
+                                    <div className="flex flex-col gap-1 mt-2">
+                                        <span className="flex items-center gap-1.5 text-sm text-emerald-400/80"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />{Math.round(npsData.promoters / npsData.total * 100)}% promoter</span>
+                                        <span className="flex items-center gap-1.5 text-sm text-amber-300/80"><span className="w-2 h-2 rounded-full bg-amber-300 shrink-0" />{Math.round(npsData.passives / npsData.total * 100)}% passive</span>
+                                        <span className="flex items-center gap-1.5 text-sm text-red-400/80"><span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />{Math.round(npsData.detractors / npsData.total * 100)}% detractor</span>
+                                    </div>
                                 </>
                             ) : (
                                 <>
@@ -250,24 +279,20 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                 {totalRespondents.toLocaleString()}
                             </div>
                             <p className="text-blue-200/40 text-xs mt-1">{scoredUnits.length} units evaluated</p>
+                            {campusParticipation.length > 0 && (
+                                <div className="flex flex-col gap-1.5 mt-2">
+                                    {campusParticipation.map(cp => (
+                                        <div key={cp.campus} className="flex items-center gap-2 text-sm">
+                                            <span className="w-2 h-2 rounded-full shrink-0 bg-blue-400" />
+                                            <span className="text-blue-200/60 font-medium">{shortCampus(cp.campus)}</span>
+                                            <span className="font-bold tabular-nums text-white/70">
+                                                {cp.respondents.toLocaleString()}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                        {campusSatisfaction.map(cs => (
-                            <div key={cs.campus} className="flex items-center gap-2.5 bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 backdrop-blur-sm">
-                                <div className={`w-2 h-2 rounded-full shrink-0 ${ssiBgColor(cs.satisfaction_index)}`} />
-                                <span className="text-blue-200/70 text-sm font-medium">{shortCampus(cs.campus)}</span>
-                                <span className={`font-bold text-base tabular-nums ${ssiTextColor(cs.satisfaction_index)}`}>
-                                    {cs.satisfaction_index.toFixed(2)}
-                                </span>
-                            </div>
-                        ))}
-                        {totalQual > 0 && (
-                            <div className="flex items-center gap-2.5 bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 backdrop-blur-sm">
-                                <MessageSquare className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                                <span className="text-blue-200/70 text-sm">{totalQual.toLocaleString()} feedback segments</span>
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>
@@ -299,7 +324,7 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                     <div>
                         <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">Unit Performance Overview</h2>
                         <p className="text-xs text-slate-400 mt-0.5">
-                            SSI: satisfaction score on a 1–4 scale (target ≥ 3.20). Sentiment: 0–100 score from open-ended comments (positive=1 pt, neutral=0.5, negative=0).
+                            SSI: satisfaction score on a 1–4 scale (target ≥ 3.20). Sentiment: 0–100 score from AI-classified open-ended comments (≥60 healthy · 40–59 mixed · &lt;40 critical).
                         </p>
                     </div>
                     {/* Sort toggle */}

@@ -164,6 +164,26 @@ export function NpsTab({ surveyId }: { surveyId: string | null }) {
 
     return (
         <div className="space-y-6">
+            {/* NPS benchmark legend */}
+            <div className="flex flex-wrap items-center gap-3 px-5 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+                <span className="text-slate-500 dark:text-slate-400 font-medium shrink-0">NPS scale (−100 to +100):</span>
+                <span className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-400">≥ 50</span>
+                    <span className="text-emerald-600/70 dark:text-emerald-500/70">Excellent — strong loyalty</span>
+                </span>
+                <span className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/50">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                    <span className="font-semibold text-amber-700 dark:text-amber-400">0 – 49</span>
+                    <span className="text-amber-600/70 dark:text-amber-500/70">Good — room to improve</span>
+                </span>
+                <span className="flex items-center gap-2 px-3 py-1 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+                    <span className="font-semibold text-red-700 dark:text-red-400">&lt; 0</span>
+                    <span className="text-red-600/70 dark:text-red-500/70">Concern — detractors outnumber promoters</span>
+                </span>
+            </div>
+
             {/* 1. NPS score card + score distribution (overview) */}
             {data.units.map(u => {
                 const qual = qualByUnit.get(u.unit_id);
