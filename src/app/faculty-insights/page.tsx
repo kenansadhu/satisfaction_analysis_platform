@@ -267,8 +267,8 @@ export default function FacultyInsightsPage() {
                                             <TrendingUp className="w-3 h-3 text-emerald-400" /> Highest NPS
                                         </div>
                                         <div className="text-xs font-bold text-white/80 truncate">{topNpsFaculty.short_name || topNpsFaculty.name}</div>
-                                        <div className={`text-base font-black tabular-nums leading-none mt-0.5 ${computeNpsScore(topNpsFaculty.nps!) >= 50 ? "text-emerald-400" : computeNpsScore(topNpsFaculty.nps!) >= 0 ? "text-amber-400" : "text-red-400"}`}>
-                                            {(() => { const s = computeNpsScore(topNpsFaculty.nps!); return s > 0 ? `+${s}` : s; })()}
+                                        <div className={`text-base font-black tabular-nums leading-none mt-0.5 ${(computeNpsScore(topNpsFaculty.nps) ?? 0) >= 50 ? "text-emerald-400" : (computeNpsScore(topNpsFaculty.nps) ?? 0) >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                                            {(() => { const s = computeNpsScore(topNpsFaculty.nps) ?? 0; return s > 0 ? `+${s}` : s; })()}
                                         </div>
                                     </div>
                                 )}
@@ -278,8 +278,8 @@ export default function FacultyInsightsPage() {
                                             <TrendingDown className="w-3 h-3 text-red-400" /> Lowest NPS
                                         </div>
                                         <div className="text-xs font-bold text-white/80 truncate">{bottomNpsFaculty.short_name || bottomNpsFaculty.name}</div>
-                                        <div className={`text-base font-black tabular-nums leading-none mt-0.5 ${computeNpsScore(bottomNpsFaculty.nps!) >= 50 ? "text-emerald-400" : computeNpsScore(bottomNpsFaculty.nps!) >= 0 ? "text-amber-400" : "text-red-400"}`}>
-                                            {(() => { const s = computeNpsScore(bottomNpsFaculty.nps!); return s > 0 ? `+${s}` : s; })()}
+                                        <div className={`text-base font-black tabular-nums leading-none mt-0.5 ${(computeNpsScore(bottomNpsFaculty.nps) ?? 0) >= 50 ? "text-emerald-400" : (computeNpsScore(bottomNpsFaculty.nps) ?? 0) >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                                            {(() => { const s = computeNpsScore(bottomNpsFaculty.nps) ?? 0; return s > 0 ? `+${s}` : s; })()}
                                         </div>
                                     </div>
                                 )}
