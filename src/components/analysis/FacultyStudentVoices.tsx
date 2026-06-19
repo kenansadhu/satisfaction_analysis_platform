@@ -183,16 +183,24 @@ export function FacultyStudentVoices({
         return () => clearTimeout(t);
     }, [search]);
 
-    // Fetch category breakdown
+    // Fetch category breakdown — re-runs whenever unit/sentiment/program filters change
     useEffect(() => {
         if (!surveyId || !categoryUnitIds?.length) return;
-        const params = new URLSearchParams({ facultyId, surveyId, unitIds: categoryUnitIds.join(",") });
+        const params = new URLSearchParams({ facultyId, surveyId });
+        // Use the selected unit if filtered, otherwise pass the full allowed set
+        if (unitFilter !== "all") {
+            params.set("unitIds", unitFilter);
+        } else {
+            params.set("unitIds", categoryUnitIds.join(","));
+        }
+        if (studyProgramFilter !== "all") params.set("studyProgram", studyProgramFilter);
+        if (sentimentFilter !== "all") params.set("sentiment", sentimentFilter);
         fetch(`/api/faculty-insights/categories?${params}`)
             .then(r => r.json())
             .then(d => setCategories(d.categories || []))
             .catch(() => setCategories([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [surveyId, facultyId, categoryUnitIds?.join(",")]);
+    }, [surveyId, facultyId, categoryUnitIds?.join(","), unitFilter, studyProgramFilter, sentimentFilter]);
 
     const buildParams = (pg: number) => {
         const p = new URLSearchParams({ facultyId, page: String(pg) });

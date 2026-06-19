@@ -59,7 +59,7 @@ export default function RawDataExplorer({
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <Table2 className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-                        <CardTitle className="text-base text-slate-800 dark:text-slate-100">Student Voices</CardTitle>
+                        <CardTitle className="text-base text-slate-800 dark:text-slate-100">Student voices about the supporting unit's services</CardTitle>
                         <Badge variant="outline" className="text-[10px] dark:border-slate-700 dark:text-slate-300">Verify</Badge>
                     </div>
                     <ChevronDown className={`w-4 h-4 text-slate-400 dark:text-slate-500 transition-transform ${showRawData ? 'rotate-180' : ''}`} />
@@ -159,8 +159,9 @@ export default function RawDataExplorer({
                                         <tr>
                                             {rawDataTab === "comments" ? (
                                                 <>
-                                                    <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300 w-[50%]">Comment</th>
+                                                    <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300 w-[45%]">Comment</th>
                                                     <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Category</th>
+                                                    <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Study Program</th>
                                                     <th className="text-left p-2 font-medium text-slate-600 dark:text-slate-300">Sentiment</th>
                                                 </>
                                             ) : (
@@ -186,6 +187,11 @@ export default function RawDataExplorer({
                                                                 </span>
                                                             )}
                                                         </td>
+                                                        <td className="p-2">
+                                                            {entry.study_program
+                                                                ? <span className="text-[11px] text-slate-600 dark:text-slate-400">{entry.study_program}</span>
+                                                                : <span className="text-[11px] text-slate-300 dark:text-slate-600">—</span>}
+                                                        </td>
                                                         <td className="p-2"><span className={`inline-flex items-center gap-1 text-[10px] font-medium ${entry.sentiment === 'Positive' ? 'text-green-700 dark:text-green-400' : entry.sentiment === 'Negative' ? 'text-red-700 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}><span className={`w-1.5 h-1.5 rounded-full ${entry.sentiment === 'Positive' ? 'bg-green-500' : entry.sentiment === 'Negative' ? 'bg-red-500' : 'bg-slate-400'}`} />{entry.sentiment}</span></td>
                                                     </>
                                                 ) : (
@@ -198,7 +204,7 @@ export default function RawDataExplorer({
                                             </tr>
                                         ))}
                                         {rawDataEntries.length === 0 && (
-                                            <tr><td colSpan={3} className="p-6 text-center text-slate-400 dark:text-slate-500">No data found.</td></tr>
+                                            <tr><td colSpan={rawDataTab === "comments" ? 4 : 3} className="p-6 text-center text-slate-400 dark:text-slate-500">No data found.</td></tr>
                                         )}
                                     </tbody>
                                 </table>

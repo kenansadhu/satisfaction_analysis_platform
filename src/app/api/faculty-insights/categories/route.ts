@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
     const facultyId = parseInt(sp.get("facultyId") || "");
     const surveyId = parseInt(sp.get("surveyId") || "");
     const unitIds = sp.get("unitIds") ? sp.get("unitIds")!.split(",").map(Number).filter(Boolean) : null;
+    const studyProgram = sp.get("studyProgram") || null;
+    const sentimentFilter = sp.get("sentiment") || null;
 
     if (!facultyId || !surveyId) {
         return NextResponse.json({ error: "facultyId and surveyId required" }, { status: 400 });
@@ -44,16 +46,17 @@ export async function GET(req: NextRequest) {
     const { data: cats } = await supabase.from("analysis_categories").select("id, name");
     const catIdToName = new Map((cats || []).map(c => [c.id as number, c.name as string]));
 
-    // Respondents for this faculty
+    // Respondents for this faculty (optionally filtered by study program)
     const respIds: number[] = [];
     let from = 0;
     while (true) {
-        const { data } = await supabase
+        let q = supabase
             .from("respondents")
             .select("id")
             .eq("survey_id", surveyId)
-            .eq("faculty_id", facultyId)
-            .range(from, from + PAGE - 1);
+            .eq("faculty_id", facultyId);
+        if (studyProgram) q = (q as any).eq("study_program", studyProgram);
+        const { data } = await (q as any).range(from, from + PAGE - 1);
         if (!data?.length) break;
         for (const r of data as { id: number }[]) respIds.push(r.id);
         if (data.length < PAGE) break;
@@ -76,17 +79,19 @@ export async function GET(req: NextRequest) {
 
     if (!inputIds.length) return NextResponse.json({ categories: [] });
 
-    // Segments with category + sentiment (skip null category_id)
+    // Segments with category + sentiment (skip null category_id, optionally filter by sentiment)
     const segments: { category_id: number; sentiment: string }[] = await batchIn(
         inputIds,
         CHUNK,
         async chunk => {
-            const { data } = await supabase
+            let q = supabase
                 .from("feedback_segments")
                 .select("category_id, sentiment")
                 .in("raw_input_id", chunk)
                 .not("segment_text", "is", null)
                 .not("category_id", "is", null);
+            if (sentimentFilter) q = (q as any).eq("sentiment", sentimentFilter);
+            const { data } = await q;
             return (data || []) as { category_id: number; sentiment: string }[];
         }
     );

@@ -434,7 +434,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                     if (s.sentiment === 'Negative') facCountsMap[facName].negative += 1;
                     facCountsMap[facName].total += 1;
 
-                    sampleSegments.push({ ...s, category_name: catName });
+                    sampleSegments.push({ ...s, category_name: catName, study_program: r.respondents?.study_program ?? null });
 
                     if (s.related_unit_ids && s.related_unit_ids.length > 0) {
                         const otherIds = s.related_unit_ids.filter((id: number) => id !== parseInt(unitId));
