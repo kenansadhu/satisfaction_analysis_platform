@@ -460,7 +460,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
             setDashboardMetrics({
                 total_segments: totalSegments,
                 sentiment_counts: sentimentCounts,
+                unfiltered_sentiment_counts: sentimentCounts,
                 category_counts: Object.values(catCountsMap),
+                all_category_counts: Object.values(catCountsMap),
                 faculty_counts: Object.values(facCountsMap)
             });
             setAllSegments(sampleSegments);
