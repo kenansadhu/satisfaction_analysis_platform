@@ -158,13 +158,13 @@ export default function UnitInsightsPage() {
         : null;
     // Macro percentages — average of per-unit percentages, consistent with avgScore
     const macroPosPct = analyzedUnits.length > 0
-        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.positive || 0) / u.total_segments * 100 : 0), 0) / analyzedUnits.length)
+        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.positive || 0) / (u.total_segments || 1) * 100 : 0), 0) / analyzedUnits.length)
         : 0;
     const macroNeuPct = analyzedUnits.length > 0
-        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.neutral || 0) / u.total_segments * 100 : 0), 0) / analyzedUnits.length)
+        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.neutral || 0) / (u.total_segments || 1) * 100 : 0), 0) / analyzedUnits.length)
         : 0;
     const macroNegPct = analyzedUnits.length > 0
-        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.negative || 0) / u.total_segments * 100 : 0), 0) / analyzedUnits.length)
+        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.negative || 0) / (u.total_segments || 1) * 100 : 0), 0) / analyzedUnits.length)
         : 0;
     const topUnit = analyzedUnits.length > 0 ? [...analyzedUnits].sort((a, b) => (b.score || 0) - (a.score || 0))[0] : null;
 
