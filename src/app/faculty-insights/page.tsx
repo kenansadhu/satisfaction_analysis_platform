@@ -163,10 +163,10 @@ export default function FacultyInsightsPage() {
         : null;
     const facultiesWithNps = faculties.filter((f): f is typeof f & { nps: NpsCounts } => !!(f.nps && f.nps.total > 0));
     const topNpsFaculty = facultiesWithNps.length > 0
-        ? [...facultiesWithNps].sort((a, b) => computeNpsScore(b.nps) - computeNpsScore(a.nps))[0]
+        ? [...facultiesWithNps].sort((a, b) => (computeNpsScore(b.nps) ?? 0) - (computeNpsScore(a.nps) ?? 0))[0]
         : null;
     const bottomNpsFaculty = facultiesWithNps.length > 1
-        ? [...facultiesWithNps].sort((a, b) => computeNpsScore(a.nps) - computeNpsScore(b.nps))[0]
+        ? [...facultiesWithNps].sort((a, b) => (computeNpsScore(a.nps) ?? 0) - (computeNpsScore(b.nps) ?? 0))[0]
         : null;
 
     const totalPQPos = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.positive || 0), 0);
