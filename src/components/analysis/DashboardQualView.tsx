@@ -91,29 +91,41 @@ export default function DashboardQualView({ catCounts, handleQualDrillDown, cros
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
             {/* --- SENTIMENT BY CATEGORY (FULL WIDTH) --- */}
-            {(!section || section === "chart") && <Card className="shadow-sm border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 print:break-inside-avoid">
-                <CardHeader className="pb-2">
-                    <div className="flex items-center gap-2">
-                        <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                        <CardTitle className="text-base text-slate-800 dark:text-slate-100">Sentiment by Category</CardTitle>
+            {(!section || section === "chart") && (() => {
+                const sortedCats = [...Object.values(catCounts)].sort((a: any, b: any) => {
+                    const aOther = (a.name as string).toLowerCase() === "others";
+                    const bOther = (b.name as string).toLowerCase() === "others";
+                    if (aOther && !bOther) return 1;
+                    if (!aOther && bOther) return -1;
+                    return b.total - a.total;
+                });
+                return (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden print:break-inside-avoid">
+                        <div className="h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
+                        <div className="p-4 pb-2">
+                            <div className="flex items-center gap-2 mb-0.5">
+                                <MessageSquare className="w-4 h-4 text-indigo-500" />
+                                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Sentiment by Category</h3>
+                            </div>
+                            <p className="text-xs text-slate-400 dark:text-slate-500 ml-6">What students are saying, broken down by topic. Sorted by volume.</p>
+                        </div>
+                        <div className="px-4 pb-4" style={{ height: `${Math.max(300, sortedCats.length * 40 + 40)}px` }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={sortedCats} layout="vertical" margin={{ top: 0, right: 20, bottom: 0, left: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke={isDark ? "#334155" : "#f1f5f9"} />
+                                    <XAxis type="number" tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+                                    <YAxis dataKey="name" type="category" width={180} tick={{ fontSize: 11, fill: isDark ? "#cbd5e1" : "#475569" }} axisLine={false} tickLine={false} />
+                                    <Tooltip cursor={{ fill: isDark ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} />
+                                    <Legend verticalAlign="top" height={30} wrapperStyle={{ color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }} />
+                                    <Bar dataKey="positive" name="Positive" stackId="a" fill="#22c55e" />
+                                    <Bar dataKey="neutral"  name="Neutral"  stackId="a" fill="#94a3b8" />
+                                    <Bar dataKey="negative" name="Negative" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
-                    <CardDescription className="dark:text-slate-400">Click bars to view comments. {Object.keys(catCounts).length} categories detected.</CardDescription>
-                </CardHeader>
-                <CardContent style={{ height: `${Math.max(300, Object.keys(catCounts).length * 40)}px` }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={Object.values(catCounts)} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }} onClick={handleQualDrillDown}>
-                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                            <XAxis type="number" tick={{ fill: isDark ? "#94a3b8" : "#64748b" }} />
-                            <YAxis dataKey="name" type="category" width={140} tick={{ fontSize: 11, fill: isDark ? "#cbd5e1" : "#475569" }} />
-                            <Tooltip cursor={{ fill: isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)' }} contentStyle={isDark ? { backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' } : undefined} />
-                            <Legend wrapperStyle={{ color: isDark ? "#cbd5e1" : undefined }} />
-                            <Bar dataKey="positive" stackId="a" fill="#4ade80" name="Positive" radius={[4, 0, 0, 4]} cursor="pointer" />
-                            <Bar dataKey="neutral" stackId="a" fill="#94a3b8" name="Neutral" cursor="pointer" />
-                            <Bar dataKey="negative" stackId="a" fill="#f87171" name="Negative" radius={[0, 4, 4, 0]} cursor="pointer" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </CardContent>
-            </Card>}
+                );
+            })()}
 
             {/* --- CROSS-UNIT MENTIONS TABLE --- */}
             {(!section || section === "cross") && localSegments.length > 0 && (

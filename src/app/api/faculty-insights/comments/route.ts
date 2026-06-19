@@ -59,7 +59,14 @@ export async function GET(req: NextRequest) {
         u.id as number,
         { name: u.name as string, short: (u.short_name || u.name) as string },
     ]));
-    const catNameToId = new Map((catsRes.data || []).map(c => [c.name as string, c.id as number]));
+    // Multiple rows in analysis_categories can share the same display name.
+    // Build a name→[ids] map so the category filter hits ALL matching rows.
+    const catNameToIds = new Map<string, number[]>();
+    for (const c of (catsRes.data || [])) {
+        const ids = catNameToIds.get(c.name as string) ?? [];
+        ids.push(c.id as number);
+        catNameToIds.set(c.name as string, ids);
+    }
     const catIdToName = new Map((catsRes.data || []).map(c => [c.id as number, c.name as string]));
 
     // ── Respondents for this faculty ───────────────────────────────────────────
@@ -109,17 +116,27 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Input IDs (with optional unit filter) ─────────────────────────────────
+    // Paginate within each chunk — Supabase caps every query at 1000 rows silently.
     const inputMap = new Map<number, number>(); // input_id → target_unit_id
     const inputToResp = new Map<number, number>(); // input_id → respondent_id
     await batchIn(respIds, CHUNK, async chunk => {
-        let q = supabase.from("raw_feedback_inputs")
-            .select("id, target_unit_id, respondent_id")
-            .in("respondent_id", chunk)
-            .eq("is_quantitative", false);
-        if (unitId) q = (q as any).eq("target_unit_id", unitId);
-        else if (unitIds?.length) q = (q as any).in("target_unit_id", unitIds);
-        const { data } = await q;
-        return (data || []) as { id: number; target_unit_id: number; respondent_id: number }[];
+        const all: { id: number; target_unit_id: number; respondent_id: number }[] = [];
+        let inputFrom = 0;
+        while (true) {
+            let q = supabase.from("raw_feedback_inputs")
+                .select("id, target_unit_id, respondent_id")
+                .in("respondent_id", chunk)
+                .eq("is_quantitative", false)
+                .range(inputFrom, inputFrom + PAGE - 1);
+            if (unitId) q = (q as any).eq("target_unit_id", unitId);
+            else if (unitIds?.length) q = (q as any).in("target_unit_id", unitIds);
+            const { data } = await q;
+            if (!data?.length) break;
+            all.push(...(data as { id: number; target_unit_id: number; respondent_id: number }[]));
+            if (data.length < PAGE) break;
+            inputFrom += PAGE;
+        }
+        return all;
     }).then(rows => {
         for (const r of rows) {
             if (r.target_unit_id) {
@@ -134,26 +151,31 @@ export async function GET(req: NextRequest) {
     }
 
     const inputIds = [...inputMap.keys()];
-    const categoryId = category ? catNameToId.get(category) ?? null : null;
+    const categoryIds = category ? (catNameToIds.get(category) ?? []) : [];
 
     // ── Segments ───────────────────────────────────────────────────────────────
-    const rawSegments: {
-        id: number;
-        segment_text: string;
-        sentiment: string;
-        category_id: number | null;
-        raw_input_id: number;
-        is_suggestion: boolean;
-    }[] = await batchIn(inputIds, CHUNK, async chunk => {
-        let q = supabase.from("feedback_segments")
-            .select("id, segment_text, sentiment, category_id, raw_input_id, is_suggestion")
-            .in("raw_input_id", chunk)
-            .not("segment_text", "is", null);
-        if (sentiment) q = (q as any).eq("sentiment", sentiment);
-        if (categoryId) q = (q as any).eq("category_id", categoryId);
-        if (suggestionOnly) q = (q as any).eq("is_suggestion", true);
-        const { data } = await q;
-        return (data || []) as typeof rawSegments;
+    // Paginate within each chunk — Supabase caps every query at 1000 rows silently.
+    type RawSegment = { id: number; segment_text: string; sentiment: string; category_id: number | null; raw_input_id: number; is_suggestion: boolean };
+    const rawSegments: RawSegment[] = await batchIn(inputIds, CHUNK, async chunk => {
+        const all: RawSegment[] = [];
+        let segFrom = 0;
+        while (true) {
+            let q = supabase.from("feedback_segments")
+                .select("id, segment_text, sentiment, category_id, raw_input_id, is_suggestion")
+                .in("raw_input_id", chunk)
+                .not("segment_text", "is", null)
+                .range(segFrom, segFrom + PAGE - 1);
+            if (sentiment) q = (q as any).eq("sentiment", sentiment);
+            if (categoryIds.length === 1) q = (q as any).eq("category_id", categoryIds[0]);
+            else if (categoryIds.length > 1) q = (q as any).in("category_id", categoryIds);
+            if (suggestionOnly) q = (q as any).eq("is_suggestion", true);
+            const { data } = await q;
+            if (!data?.length) break;
+            all.push(...(data as RawSegment[]));
+            if (data.length < PAGE) break;
+            segFrom += PAGE;
+        }
+        return all;
     });
 
     // ── Build comment objects ─────────────────────────────────────────────────

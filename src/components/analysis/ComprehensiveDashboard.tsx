@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useTheme } from "next-themes";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, AlertTriangle, BarChart2, MessageSquare, Target, CheckCircle2, Sparkles } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { toast } from "sonner";
 import { useAnalysis } from "@/context/AnalysisContext";
 
@@ -57,7 +57,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     const [dashboardMetrics, setDashboardMetrics] = useState<{
         total_segments: number;
         sentiment_counts: { Positive: number; Negative: number; Neutral: number };
+        unfiltered_sentiment_counts: { Positive: number; Negative: number; Neutral: number };
         category_counts: any[];
+        all_category_counts: any[];
         faculty_counts: any[];
     } | null>(null);
 
@@ -583,9 +585,13 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
     const sentimentCounts = dashboardMetrics?.sentiment_counts || { Positive: 0, Negative: 0, Neutral: 0 };
     const totalSegments = dashboardMetrics?.total_segments || 0;
 
+    // Sentiment score uses unfiltered counts so the sentiment filter doesn't make the score jump to 100/0
+    const unfilteredSentCounts = dashboardMetrics?.unfiltered_sentiment_counts || sentimentCounts;
+    const unfilteredTotal = unfilteredSentCounts.Positive + unfilteredSentCounts.Neutral + unfilteredSentCounts.Negative;
+
     let sentimentScore = 0;
-    if (totalSegments > 0) {
-        sentimentScore = Math.round((sentimentCounts.Positive * 100 + sentimentCounts.Neutral * 50) / totalSegments);
+    if (unfilteredTotal > 0) {
+        sentimentScore = Math.round((unfilteredSentCounts.Positive * 100 + unfilteredSentCounts.Neutral * 50) / unfilteredTotal);
     }
 
     let topNegativeCategory = { name: "N/A", count: 0 };
@@ -604,6 +610,22 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                 topNegativeCategory = { name: c.category_name, count: c.true_negative_count };
             }
         });
+    }
+
+    // Unfiltered by category — used for pills so counts stay stable when a pill is active
+    let allCatCounts: Record<string, any> = {};
+    if (dashboardMetrics?.all_category_counts) {
+        dashboardMetrics.all_category_counts.forEach((c: any) => {
+            allCatCounts[c.category_name] = {
+                name: c.category_name,
+                positive: c.positive_count,
+                negative: c.negative_count,
+                neutral: c.neutral_count,
+                total: c.total
+            };
+        });
+    } else {
+        allCatCounts = catCounts;
     }
 
     // Pick up to 4 representative student quotes for the voices summary card.
@@ -635,13 +657,7 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
         }
     }
 
-    const pieData = [
-        { name: 'Positive', value: sentimentCounts.Positive, color: '#22c55e' },
-        { name: 'Neutral',  value: sentimentCounts.Neutral,  color: '#94a3b8' },
-        { name: 'Negative', value: sentimentCounts.Negative, color: '#ef4444' },
-    ];
-
-    const facultyChartData = [...(dashboardMetrics?.faculty_counts || [])].sort((a, b) => b.positive - a.positive);
+    const facultyChartData = [...(dashboardMetrics?.faculty_counts || [])].sort((a, b) => b.total - a.total);
 
     // --- HANDLERS ---
     const handleQualDrillDown = (data: any) => {
@@ -741,8 +757,22 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                         </p>
                                     </div>
                                 </div>
-                                <p className="text-[10px] text-indigo-300/30 mt-2">pos%×1 · neu%×0.5 · neg%×0</p>
-                                <p className="text-[10px] text-indigo-300/30 mt-0.5">≥70 excellent · 40–69 moderate · &lt;40 needs focus</p>
+                                {unfilteredTotal > 0 && (
+                                    <div className="grid grid-cols-3 gap-x-3 mt-2">
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-emerald-400">{Math.round(unfilteredSentCounts.Positive / unfilteredTotal * 100)}% pos</p>
+                                            <p className="text-[10px] text-emerald-400/50">×1</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-slate-400">{Math.round(unfilteredSentCounts.Neutral / unfilteredTotal * 100)}% neu</p>
+                                            <p className="text-[10px] text-slate-400/50">×0.5</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-red-400">{Math.round(unfilteredSentCounts.Negative / unfilteredTotal * 100)}% neg</p>
+                                            <p className="text-[10px] text-red-400/50">×0</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Avg Rating */}
@@ -754,7 +784,11 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                                 <p className="text-4xl font-black text-white mt-3 tabular-nums">
                                     {globalAvgScore}<span className="text-lg font-normal text-slate-400">/4.0</span>
                                 </p>
-                                <p className="text-xs text-slate-500 mt-2">{quantGroups.filter(g => g.type === "SCORE").length} score metrics</p>
+                                <div className="mt-2 space-y-0.5">
+                                    <p className="text-xs text-slate-500">
+                                        {quantGroups.filter(g => g.type === "SCORE" && g.chartData.length > 0 && Math.max(...g.chartData.map((d: ChartData) => parseFloat(d.name))) > 1).length} Likert scale metrics
+                                    </p>
+                                </div>
                             </div>
 
                             {/* Comments */}
@@ -796,6 +830,84 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         categories={categories}
                     />
 
+                    {/* Category pills — filter both charts below */}
+                    {categories.length > 0 && Object.keys(allCatCounts).length > 0 && (
+                        <div className="space-y-2.5 px-0.5">
+                            <div className="flex items-center gap-2.5">
+                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                                    Feedback Themes
+                                </span>
+                                {activeFilters.category.length === 0 ? (
+                                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                                        — click a topic to filter the charts below
+                                    </span>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                                            {activeFilters.category.length} topic{activeFilters.category.length > 1 ? "s" : ""} selected
+                                        </span>
+                                        <span className="text-slate-300 dark:text-slate-600">·</span>
+                                        <button
+                                            onClick={() => setActiveFilters(p => ({ ...p, category: [] }))}
+                                            className="text-[11px] text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="columns-2 lg:columns-3 gap-x-1.5">
+                                {[...categories]
+                                    .filter((cat: { id: number; name: string }) => !!allCatCounts[cat.name])
+                                    .sort((a: { id: number; name: string }, b: { id: number; name: string }) => {
+                                        const aOther = a.name.toLowerCase() === "others";
+                                        const bOther = b.name.toLowerCase() === "others";
+                                        if (aOther && !bOther) return 1;
+                                        if (!aOther && bOther) return -1;
+                                        return (allCatCounts[b.name]?.total ?? 0) - (allCatCounts[a.name]?.total ?? 0);
+                                    })
+                                    .map((cat: { id: number; name: string }) => {
+                                        const cc = allCatCounts[cat.name];
+                                        const posPct = Math.round((cc.positive / cc.total) * 100);
+                                        const negPct = Math.round((cc.negative / cc.total) * 100);
+                                        const score = cc.total > 0 ? (cc.positive * 100 + cc.neutral * 50) / cc.total : 50;
+                                        const tier = score >= 70 ? "good" : score >= 40 ? "moderate" : "bad";
+                                        const active = activeFilters.category.includes(cat.name);
+                                        return (
+                                            <div key={cat.id} className="break-inside-avoid mb-1.5">
+                                                <button
+                                                    onClick={() => setActiveFilters(p => ({
+                                                        ...p,
+                                                        category: p.category.includes(cat.name)
+                                                            ? p.category.filter(x => x !== cat.name)
+                                                            : [...p.category, cat.name]
+                                                    }))}
+                                                    className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150 cursor-pointer
+                                                        ${active
+                                                            ? "bg-indigo-50 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700 shadow-sm ring-1 ring-indigo-200 dark:ring-indigo-800"
+                                                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:shadow-sm"
+                                                        }`}
+                                                >
+                                                    <span className={`w-2 h-2 rounded-full shrink-0 ${tier === "bad" ? "bg-red-400" : tier === "good" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                                                    <span className={`flex-1 min-w-0 truncate text-left ${active ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-700 dark:text-slate-200"}`}>
+                                                        {cat.name}
+                                                    </span>
+                                                    <span className={`font-black tabular-nums shrink-0 ${active ? "text-indigo-600 dark:text-indigo-400" : tier === "bad" ? "text-red-500 dark:text-red-400" : tier === "good" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500 dark:text-amber-400"}`}>
+                                                        {cc.total}
+                                                    </span>
+                                                    <div className="flex w-10 h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
+                                                        {posPct > 0 && <div style={{ width: `${posPct}%` }} className="bg-emerald-400" />}
+                                                        {(100 - posPct - negPct) > 0 && <div style={{ width: `${100 - posPct - negPct}%` }} className="bg-slate-300 dark:bg-slate-500" />}
+                                                        {negPct > 0 && <div style={{ width: `${negPct}%` }} className="bg-red-400" />}
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Sentiment Analysis band */}
                     <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl p-5 space-y-5">
                         <div className="flex items-center gap-2">
@@ -803,46 +915,50 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                             <h2 className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-widest">Sentiment Analysis</h2>
                         </div>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                            {/* Donut pie */}
-                            <div className="bg-white dark:bg-slate-900 rounded-xl border border-indigo-100 dark:border-indigo-900/40 p-4">
-                                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Overall Distribution</p>
-                                <div style={{ height: 260 }}>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie data={pieData} cx="50%" cy="50%" innerRadius={65} outerRadius={95} paddingAngle={4} dataKey="value" stroke={isDark ? "#0f172a" : "#ffffff"} strokeWidth={2}>
-                                                {pieData.map((entry, i) => <Cell key={i} fill={entry.color} className="hover:opacity-80 transition-opacity" />)}
-                                            </Pie>
-                                            <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} itemStyle={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 600 }} />
-                                            <Legend verticalAlign="bottom" height={30} wrapperStyle={{ color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }} />
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
+                            {/* Sentiment by Category chart — always shows all categories */}
+                            {Object.keys(allCatCounts).length > 0 && (
+                                <DashboardQualView
+                                    catCounts={allCatCounts}
+                                    handleQualDrillDown={handleQualDrillDown}
+                                    crossUnitSegments={crossUnitSegments}
+                                    allUnits={allUnits}
+                                    unitId={unitId}
+                                    surveyId={surveyId}
+                                    section="chart"
+                                />
+                            )}
 
                             {/* Faculty breakdown */}
-                            {facultyChartData.length > 0 ? (
-                                <div className="bg-white dark:bg-slate-900 rounded-xl border border-indigo-100 dark:border-indigo-900/40 p-4">
-                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">By Faculty</p>
-                                    <div style={{ height: Math.max(260, facultyChartData.length * 36 + 40) }}>
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+                                <div className="h-1 bg-gradient-to-r from-teal-500 to-cyan-500" />
+                                <div className="p-4 pb-2">
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                        <Target className="w-4 h-4 text-teal-500" />
+                                        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Sentiment by Faculty</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-400 dark:text-slate-500 ml-6">Feedback by faculty, sorted by volume. Filter by topic using the pills above.</p>
+                                </div>
+                                {facultyChartData.length > 0 ? (
+                                    <div className="px-4 pb-4" style={{ height: Math.max(260, facultyChartData.length * 36 + 40) }}>
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart data={facultyChartData} layout="vertical" margin={{ top: 0, right: 20, bottom: 0, left: 0 }}>
                                                 <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke={isDark ? "#334155" : "#f1f5f9"} />
                                                 <XAxis type="number" tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-                                                <YAxis dataKey="faculty_name" type="category" width={180} tick={{ fontSize: 10, fill: isDark ? "#cbd5e1" : "#475569" }} axisLine={false} tickLine={false} />
-                                                <Tooltip cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} />
+                                                <YAxis dataKey="faculty_name" type="category" width={180} tick={{ fontSize: 11, fill: isDark ? "#cbd5e1" : "#475569" }} axisLine={false} tickLine={false} />
+                                                <Tooltip cursor={{ fill: isDark ? 'rgba(20,184,166,0.1)' : 'rgba(20,184,166,0.06)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} />
                                                 <Legend verticalAlign="top" height={30} wrapperStyle={{ color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }} />
                                                 <Bar dataKey="positive" name="Positive" stackId="a" fill="#22c55e" />
                                                 <Bar dataKey="neutral"  name="Neutral"  stackId="a" fill="#94a3b8" />
-                                                <Bar dataKey="negative" name="Negative" stackId="a" fill="#ef4444" radius={[0, 3, 3, 0]} />
+                                                <Bar dataKey="negative" name="Negative" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="bg-white dark:bg-slate-900 rounded-xl border border-indigo-100 dark:border-indigo-900/40 p-4 flex items-center justify-center text-slate-400 text-sm">
-                                    No faculty breakdown available
-                                </div>
-                            )}
+                                ) : (
+                                    <div className="px-4 pb-8 flex items-center justify-center text-slate-400 text-sm">
+                                        No faculty breakdown available
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 
@@ -919,16 +1035,86 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         </div>
                     )}
 
-                    {/* Sentiment by Category — before Student Voices */}
-                    <DashboardQualView
-                        catCounts={catCounts}
-                        handleQualDrillDown={handleQualDrillDown}
-                        crossUnitSegments={crossUnitSegments}
-                        allUnits={allUnits}
-                        unitId={unitId}
-                        surveyId={surveyId}
-                        section="chart"
-                    />
+                    {/* ── Feedback Themes filter strip ─────────────────────────────── */}
+                    {categories.length > 0 && Object.keys(catCounts).length > 0 && (
+                        <div className="space-y-2.5 px-0.5">
+                            {/* Label row */}
+                            <div className="flex items-center gap-2.5">
+                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                                    Feedback Themes
+                                </span>
+                                {activeFilters.category.length === 0 ? (
+                                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                                        — click a topic to filter the comments below
+                                    </span>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                                            {activeFilters.category.length} topic{activeFilters.category.length > 1 ? "s" : ""} selected
+                                        </span>
+                                        <span className="text-slate-300 dark:text-slate-600">·</span>
+                                        <button
+                                            onClick={() => setActiveFilters(p => ({ ...p, category: [] }))}
+                                            className="text-[11px] text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Chips — 3-column vertical fill, sorted by total desc */}
+                            <div className="columns-2 lg:columns-3 gap-x-1.5">
+                                {[...categories]
+                                    .filter((cat: { id: number; name: string }) => !!catCounts[cat.name])
+                                    .sort((a: { id: number; name: string }, b: { id: number; name: string }) => {
+                                        const aOther = a.name.toLowerCase() === "others";
+                                        const bOther = b.name.toLowerCase() === "others";
+                                        if (aOther && !bOther) return 1;
+                                        if (!aOther && bOther) return -1;
+                                        return (catCounts[b.name]?.total ?? 0) - (catCounts[a.name]?.total ?? 0);
+                                    })
+                                    .map((cat: { id: number; name: string }) => {
+                                        const cc = catCounts[cat.name];
+                                        const posPct = Math.round((cc.positive / cc.total) * 100);
+                                        const negPct = Math.round((cc.negative / cc.total) * 100);
+                                        const score = cc.total > 0 ? (cc.positive * 100 + cc.neutral * 50) / cc.total : 50;
+                                        const tier = score >= 70 ? "good" : score >= 40 ? "moderate" : "bad";
+                                        const active = activeFilters.category.includes(cat.name);
+                                        return (
+                                            <div key={cat.id} className="break-inside-avoid mb-1.5">
+                                                <button
+                                                    onClick={() => setActiveFilters(p => ({
+                                                        ...p,
+                                                        category: p.category.includes(cat.name)
+                                                            ? p.category.filter(x => x !== cat.name)
+                                                            : [...p.category, cat.name]
+                                                    }))}
+                                                    className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150 cursor-pointer
+                                                        ${active
+                                                            ? "bg-indigo-50 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700 shadow-sm ring-1 ring-indigo-200 dark:ring-indigo-800"
+                                                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:shadow-sm"
+                                                        }`}
+                                                >
+                                                    <span className={`w-2 h-2 rounded-full shrink-0 ${tier === "bad" ? "bg-red-400" : tier === "good" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                                                    <span className={`flex-1 min-w-0 truncate text-left ${active ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-700 dark:text-slate-200"}`}>
+                                                        {cat.name}
+                                                    </span>
+                                                    <span className={`font-black tabular-nums shrink-0 ${active ? "text-indigo-600 dark:text-indigo-400" : tier === "bad" ? "text-red-500 dark:text-red-400" : tier === "good" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500 dark:text-amber-400"}`}>
+                                                        {cc.total}
+                                                    </span>
+                                                    <div className="flex w-10 h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
+                                                        {posPct > 0 && <div style={{ width: `${posPct}%` }} className="bg-emerald-400" />}
+                                                        {(100 - posPct - negPct) > 0 && <div style={{ width: `${100 - posPct - negPct}%` }} className="bg-slate-300 dark:bg-slate-500" />}
+                                                        {negPct > 0 && <div style={{ width: `${negPct}%` }} className="bg-red-400" />}
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Student Voices */}
                     <RawDataExplorer
@@ -947,16 +1133,6 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
                         suggestionOnly={rawDataSuggestionOnly}
                         setSuggestionOnly={setRawDataSuggestionOnly}
                         hideRatings={true}
-                        categories={categories}
-                        catCounts={catCounts}
-                        activeCategories={activeFilters.category}
-                        onCategoryToggle={catName => setActiveFilters(p => ({
-                            ...p,
-                            category: p.category.includes(catName)
-                                ? p.category.filter(x => x !== catName)
-                                : [...p.category, catName]
-                        }))}
-                        onCategoryClear={() => setActiveFilters(p => ({ ...p, category: [] }))}
                     />
 
                 </div>

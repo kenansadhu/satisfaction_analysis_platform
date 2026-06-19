@@ -686,7 +686,10 @@ export default function FacultyDetailPage() {
                                                 ...(data.programQuality.unit ? [data.programQuality.unit.id] : []),
                                                 ...(data.npsUnitIds ?? []),
                                             ]}
-                                            categoryUnitIds={data.programQuality.unit ? [data.programQuality.unit.id] : []}
+                                            categoryUnitIds={[
+                                                ...(data.programQuality.unit ? [data.programQuality.unit.id] : []),
+                                                ...(data.npsUnitIds ?? []),
+                                            ]}
                                         />
                                     </>
                                 );

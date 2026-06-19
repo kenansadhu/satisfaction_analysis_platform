@@ -53,20 +53,26 @@ const LEFT_BORDER: Record<string, string> = {
     Neutral: "border-l-slate-300 dark:border-l-slate-600",
 };
 
+function sentimentTier(cat: CategoryRow): "good" | "moderate" | "bad" {
+    if (cat.total === 0) return "moderate";
+    const score = (cat.positive * 100 + cat.neutral * 50) / cat.total;
+    if (score >= 70) return "good";
+    if (score >= 40) return "moderate";
+    return "bad";
+}
+
 function dotColor(cat: CategoryRow) {
-    const posPct = cat.total > 0 ? cat.positive / cat.total : 0;
-    const negPct = cat.total > 0 ? cat.negative / cat.total : 0;
-    if (negPct >= 0.4) return "bg-red-400";
-    if (posPct >= 0.6) return "bg-emerald-400";
+    const t = sentimentTier(cat);
+    if (t === "bad") return "bg-red-400";
+    if (t === "good") return "bg-emerald-400";
     return "bg-amber-400";
 }
 
 function countColor(cat: CategoryRow, active: boolean) {
     if (active) return "text-violet-600 dark:text-violet-400";
-    const posPct = cat.total > 0 ? cat.positive / cat.total : 0;
-    const negPct = cat.total > 0 ? cat.negative / cat.total : 0;
-    if (negPct >= 0.4) return "text-red-500 dark:text-red-400";
-    if (posPct >= 0.6) return "text-emerald-600 dark:text-emerald-400";
+    const t = sentimentTier(cat);
+    if (t === "bad") return "text-red-500 dark:text-red-400";
+    if (t === "good") return "text-emerald-600 dark:text-emerald-400";
     return "text-amber-500 dark:text-amber-400";
 }
 
@@ -76,18 +82,17 @@ function CategoryChip({ cat, active, onClick }: { cat: CategoryRow; active: bool
     return (
         <button
             onClick={onClick}
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150 shrink-0
+            className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150
                 ${active
                     ? "bg-violet-50 dark:bg-violet-950/30 border-violet-300 dark:border-violet-700 shadow-sm ring-1 ring-violet-200 dark:ring-violet-800"
                     : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-violet-200 dark:hover:border-violet-800 hover:shadow-sm"
                 }`}
         >
             <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor(cat)}`} />
-            <span className={active ? "text-violet-700 dark:text-violet-300 font-semibold" : "text-slate-700 dark:text-slate-200"}>
+            <span className={`flex-1 min-w-0 truncate text-left ${active ? "text-violet-700 dark:text-violet-300 font-semibold" : "text-slate-700 dark:text-slate-200"}`}>
                 {cat.name}
             </span>
-            <span className={`font-black tabular-nums ${countColor(cat, active)}`}>{cat.total}</span>
-            {/* Mini sentiment bar */}
+            <span className={`font-black tabular-nums shrink-0 ${countColor(cat, active)}`}>{cat.total}</span>
             <div className="flex w-10 h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
                 {posPct > 0 && <div style={{ width: `${posPct}%` }} className="bg-emerald-400" />}
                 {(100 - posPct - negPct) > 0 && <div style={{ width: `${100 - posPct - negPct}%` }} className="bg-slate-300 dark:bg-slate-500" />}
@@ -205,8 +210,15 @@ export function FacultyStudentVoices({
     const buildParams = (pg: number) => {
         const p = new URLSearchParams({ facultyId, page: String(pg) });
         if (surveyId) p.set("surveyId", surveyId);
-        if (unitFilter !== "all") p.set("unitId", unitFilter);
-        else if (restrictToUnitIds?.length) p.set("unitIds", restrictToUnitIds.join(","));
+        if (unitFilter !== "all") {
+            p.set("unitId", unitFilter);
+        } else if (categoryFilter && categoryUnitIds?.length) {
+            // Scope to the same units the chip counts were computed from so the
+            // count shown on the chip matches the number of comments returned.
+            p.set("unitIds", categoryUnitIds.join(","));
+        } else if (restrictToUnitIds?.length) {
+            p.set("unitIds", restrictToUnitIds.join(","));
+        }
         if (sentimentFilter !== "all") p.set("sentiment", sentimentFilter);
         if (studyProgramFilter !== "all") p.set("studyProgram", studyProgramFilter);
         if (categoryFilter) p.set("category", categoryFilter);
@@ -379,14 +391,21 @@ export function FacultyStudentVoices({
                             </button>
                         )}
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                        {categories.map(cat => (
-                            <CategoryChip
-                                key={cat.name}
-                                cat={cat}
-                                active={categoryFilter === cat.name}
-                                onClick={() => setCategoryFilter(categoryFilter === cat.name ? null : cat.name)}
-                            />
+                    <div className="columns-2 lg:columns-3 gap-x-1.5">
+                        {[...categories].sort((a, b) => {
+                            const aOther = a.name.toLowerCase() === "others";
+                            const bOther = b.name.toLowerCase() === "others";
+                            if (aOther && !bOther) return 1;
+                            if (!aOther && bOther) return -1;
+                            return b.total - a.total;
+                        }).map(cat => (
+                            <div key={cat.name} className="break-inside-avoid mb-1.5">
+                                <CategoryChip
+                                    cat={cat}
+                                    active={categoryFilter === cat.name}
+                                    onClick={() => setCategoryFilter(categoryFilter === cat.name ? null : cat.name)}
+                                />
+                            </div>
                         ))}
                     </div>
                 </div>

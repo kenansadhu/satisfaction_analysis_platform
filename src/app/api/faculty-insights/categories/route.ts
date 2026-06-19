@@ -79,20 +79,30 @@ export async function GET(req: NextRequest) {
 
     if (!inputIds.length) return NextResponse.json({ categories: [] });
 
-    // Segments with category + sentiment (skip null category_id, optionally filter by sentiment)
+    // Segments with category + sentiment (skip null category_id, optionally filter by sentiment).
+    // Paginate within each chunk — Supabase caps every query at 1000 rows silently.
     const segments: { category_id: number; sentiment: string }[] = await batchIn(
         inputIds,
         CHUNK,
         async chunk => {
-            let q = supabase
-                .from("feedback_segments")
-                .select("category_id, sentiment")
-                .in("raw_input_id", chunk)
-                .not("segment_text", "is", null)
-                .not("category_id", "is", null);
-            if (sentimentFilter) q = (q as any).eq("sentiment", sentimentFilter);
-            const { data } = await q;
-            return (data || []) as { category_id: number; sentiment: string }[];
+            const all: { category_id: number; sentiment: string }[] = [];
+            let segFrom = 0;
+            while (true) {
+                let q = supabase
+                    .from("feedback_segments")
+                    .select("category_id, sentiment")
+                    .in("raw_input_id", chunk)
+                    .not("segment_text", "is", null)
+                    .not("category_id", "is", null)
+                    .range(segFrom, segFrom + PAGE - 1);
+                if (sentimentFilter) q = (q as any).eq("sentiment", sentimentFilter);
+                const { data } = await q;
+                if (!data?.length) break;
+                all.push(...(data as { category_id: number; sentiment: string }[]));
+                if (data.length < PAGE) break;
+                segFrom += PAGE;
+            }
+            return all;
         }
     );
 

@@ -69,20 +69,27 @@ export async function GET(request: Request) {
 
     // ── 2. Fetch text input IDs (no text content) ────────────────────────────
     const inputToResp = new Map<number, number>(); // input_id → respondent_id
-    const inputFetches: PromiseLike<void>[] = [];
+    const inputFetches: Promise<void>[] = [];
     for (let i = 0; i < filteredRespIds.length; i += CHUNK) {
         const chunk = filteredRespIds.slice(i, i + CHUNK);
         inputFetches.push(
-            supabase
-                .from("raw_feedback_inputs")
-                .select("id, respondent_id")
-                .eq("target_unit_id", parseInt(unitId))
-                .eq("is_quantitative", false)
-                .eq("requires_analysis", false)
-                .in("respondent_id", chunk)
-                .then(({ data }) => {
-                    if (data) for (const r of data) inputToResp.set(r.id, r.respondent_id);
-                })
+            (async () => {
+                let iFrom = 0;
+                while (true) {
+                    const { data } = await supabase
+                        .from("raw_feedback_inputs")
+                        .select("id, respondent_id")
+                        .eq("target_unit_id", parseInt(unitId))
+                        .eq("is_quantitative", false)
+                        .eq("requires_analysis", false)
+                        .in("respondent_id", chunk)
+                        .range(iFrom, iFrom + 999);
+                    if (!data?.length) break;
+                    for (const r of data) inputToResp.set(r.id, r.respondent_id);
+                    if (data.length < 1000) break;
+                    iFrom += 1000;
+                }
+            })()
         );
     }
     await Promise.all(inputFetches);
@@ -96,17 +103,28 @@ export async function GET(request: Request) {
     const catMap = new Map((catData || []).map(c => [c.id, c.name as string]));
 
     // ── 4. Fetch segment data — only (sentiment, category_id, raw_input_id) ──
+    // Paginate inside each chunk: with 3–10 segments per input and SEG_CHUNK=1000
+    // inputs, a single query can return 3k–10k rows, silently capped at 1000.
     type SegRow = { category_id: number; sentiment: string; raw_input_id: number };
     const allSegs: SegRow[] = [];
-    const segFetches: PromiseLike<void>[] = [];
+    const segFetches: Promise<void>[] = [];
     for (let i = 0; i < allInputIds.length; i += SEG_CHUNK) {
         const chunk = allInputIds.slice(i, i + SEG_CHUNK);
         segFetches.push(
-            supabase
-                .from("feedback_segments")
-                .select("sentiment, category_id, raw_input_id")
-                .in("raw_input_id", chunk)
-                .then(({ data }) => { if (data) allSegs.push(...(data as SegRow[])); })
+            (async () => {
+                let segFrom = 0;
+                while (true) {
+                    const { data } = await supabase
+                        .from("feedback_segments")
+                        .select("sentiment, category_id, raw_input_id")
+                        .in("raw_input_id", chunk)
+                        .range(segFrom, segFrom + 999);
+                    if (!data?.length) break;
+                    allSegs.push(...(data as SegRow[]));
+                    if (data.length < 1000) break;
+                    segFrom += 1000;
+                }
+            })()
         );
     }
     await Promise.all(segFetches);
@@ -119,15 +137,34 @@ export async function GET(request: Request) {
     };
     type FacCount = { faculty_name: string; positive: number; negative: number; neutral: number; total: number };
 
-    const catCountsMap = new Map<string, CatCount>();
+    const catCountsMap = new Map<string, CatCount>();   // filtered by category + sentiment
+    const allCatCountsMap = new Map<string, CatCount>(); // filtered by sentiment only (not category) — for pill display
     const facCountsMap = new Map<string, FacCount>();
     const sentCounts = { Positive: 0, Negative: 0, Neutral: 0 };
+    const unfilteredSentCounts = { Positive: 0, Negative: 0, Neutral: 0 }; // ignores sentiment + category filter — for hero score
     let totalSegments = 0;
     const inputsWithSegments = new Set<number>();
 
     for (const seg of allSegs) {
         const catName = catMap.get(seg.category_id);
         if (!catName) continue;
+
+        // Always count for hero sentiment score (ignores sentiment + category filter)
+        unfilteredSentCounts[seg.sentiment as keyof typeof unfilteredSentCounts]++;
+
+        // Always accumulate into allCatCountsMap (ignores categoryFilter) so pills show stable counts
+        if (sentimentFilter.length === 0 || sentimentFilter.includes(seg.sentiment)) {
+            if (!allCatCountsMap.has(catName)) {
+                allCatCountsMap.set(catName, { category_name: catName, positive_count: 0, negative_count: 0, neutral_count: 0, total: 0, true_negative_count: 0 });
+            }
+            const allCat = allCatCountsMap.get(catName)!;
+            allCat.total++;
+            if (seg.sentiment === "Negative") allCat.true_negative_count++;
+            if (seg.sentiment === "Positive") allCat.positive_count++;
+            else if (seg.sentiment === "Negative") allCat.negative_count++;
+            else allCat.neutral_count++;
+        }
+
         if (categoryFilter.length > 0 && !categoryFilter.includes(catName)) continue;
         if (sentimentFilter.length > 0 && !sentimentFilter.includes(seg.sentiment)) continue;
 
@@ -160,19 +197,30 @@ export async function GET(request: Request) {
     }
 
     // ── 6. Fetch quantitative scores (numbers only) ──────────────────────────
+    // Paginate: CHUNK=500 respondents × ~5–10 score questions = 2500–5000 rows,
+    // silently capped at 1000 without .range().
     const quantRows: { source_column: string; numerical_score: number; respondent_id: number }[] = [];
-    const quantFetches: PromiseLike<void>[] = [];
+    const quantFetches: Promise<void>[] = [];
     for (let i = 0; i < filteredRespIds.length; i += CHUNK) {
         const chunk = filteredRespIds.slice(i, i + CHUNK);
         quantFetches.push(
-            supabase
-                .from("raw_feedback_inputs")
-                .select("source_column, numerical_score, respondent_id")
-                .eq("target_unit_id", parseInt(unitId))
-                .eq("is_quantitative", true)
-                .not("numerical_score", "is", null)
-                .in("respondent_id", chunk)
-                .then(({ data }) => { if (data) quantRows.push(...(data as any[])); })
+            (async () => {
+                let qFrom = 0;
+                while (true) {
+                    const { data } = await supabase
+                        .from("raw_feedback_inputs")
+                        .select("source_column, numerical_score, respondent_id")
+                        .eq("target_unit_id", parseInt(unitId))
+                        .eq("is_quantitative", true)
+                        .not("numerical_score", "is", null)
+                        .in("respondent_id", chunk)
+                        .range(qFrom, qFrom + 999);
+                    if (!data?.length) break;
+                    quantRows.push(...(data as any[]));
+                    if (data.length < 1000) break;
+                    qFrom += 1000;
+                }
+            })()
         );
     }
 
@@ -261,7 +309,9 @@ export async function GET(request: Request) {
         total_text_inputs: inputsWithSegments.size,
         total_segments: totalSegments,
         sentiment_counts: sentCounts,
+        unfiltered_sentiment_counts: unfilteredSentCounts,
         category_counts: Array.from(catCountsMap.values()),
+        all_category_counts: Array.from(allCatCountsMap.values()),
         faculty_counts: Array.from(facCountsMap.values()),
         quant_groups: quantGroupsArr,
         global_avg_score: globalAvgScore,
