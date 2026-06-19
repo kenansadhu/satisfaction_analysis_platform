@@ -338,7 +338,9 @@ export default function ComprehensiveDashboard({ unitId, surveyId, view = "insig
             setDashboardMetrics({
                 total_segments: json.total_segments,
                 sentiment_counts: json.sentiment_counts,
+                unfiltered_sentiment_counts: json.unfiltered_sentiment_counts ?? json.sentiment_counts,
                 category_counts: json.category_counts,
+                all_category_counts: json.all_category_counts ?? json.category_counts,
                 faculty_counts: json.faculty_counts,
             });
             setQuantGroups(json.quant_groups || []);
