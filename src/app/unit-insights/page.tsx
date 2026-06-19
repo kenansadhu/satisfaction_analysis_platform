@@ -145,9 +145,6 @@ export default function UnitInsightsPage() {
     );
 
     const analyzedUnits = units.filter(u => u.score !== undefined);
-    const avgScore = analyzedUnits.length > 0
-        ? Math.round(analyzedUnits.reduce((s, u) => s + (u.score || 0), 0) / analyzedUnits.length)
-        : null;
     const totalSegments = units.reduce((s, u) => s + (u.total_segments || 0), 0);
 
     const goodUnits = analyzedUnits.filter(u => (u.score || 0) >= 70);
@@ -155,8 +152,20 @@ export default function UnitInsightsPage() {
     const poorUnits = analyzedUnits.filter(u => (u.score || 0) < 50);
     const totalPos = units.reduce((s, u) => s + (u.positive || 0), 0);
     const totalNeg = units.reduce((s, u) => s + (u.negative || 0), 0);
-    const overallPosPct = totalSegments > 0 ? Math.round((totalPos / totalSegments) * 100) : 0;
-    const overallNegPct = totalSegments > 0 ? Math.round((totalNeg / totalSegments) * 100) : 0;
+    // Macro average score — each unit weighted equally
+    const avgScore = analyzedUnits.length > 0
+        ? Math.round(analyzedUnits.reduce((s, u) => s + (u.score || 0), 0) / analyzedUnits.length)
+        : null;
+    // Macro percentages — average of per-unit percentages, consistent with avgScore
+    const macroPosPct = analyzedUnits.length > 0
+        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.positive || 0) / u.total_segments * 100 : 0), 0) / analyzedUnits.length)
+        : 0;
+    const macroNeuPct = analyzedUnits.length > 0
+        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.neutral || 0) / u.total_segments * 100 : 0), 0) / analyzedUnits.length)
+        : 0;
+    const macroNegPct = analyzedUnits.length > 0
+        ? Math.round(analyzedUnits.reduce((s, u) => s + ((u.total_segments || 0) > 0 ? (u.negative || 0) / u.total_segments * 100 : 0), 0) / analyzedUnits.length)
+        : 0;
     const topUnit = analyzedUnits.length > 0 ? [...analyzedUnits].sort((a, b) => (b.score || 0) - (a.score || 0))[0] : null;
 
     return (
@@ -200,11 +209,22 @@ export default function UnitInsightsPage() {
                                     avgScore !== null && avgScore >= 50 ? "text-amber-400" : "text-red-400"
                                 }`}>{avgScore ?? "—"}</div>
                                 <div className="text-sm text-indigo-200/50 font-medium mt-1">out of 100</div>
-                                <div className="text-[10px] text-indigo-300/30 mt-1">pos%×1 · neu%×0.5 · neg%×0</div>
-                                <div className="mt-3 text-center">
-                                    <div className="text-base font-semibold text-white/80">{analyzedUnits.length} <span className="text-white/40 font-normal">of</span> {units.length}</div>
-                                    <div className="text-xs text-indigo-300/60 font-medium uppercase tracking-wide">units analyzed</div>
-                                </div>
+                                {analyzedUnits.length > 0 && (
+                                    <div className="grid grid-cols-3 gap-x-3 mt-2 w-full">
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-emerald-400">{macroPosPct}% pos</p>
+                                            <p className="text-[10px] text-emerald-400/50">×1</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-slate-400">{macroNeuPct}% neu</p>
+                                            <p className="text-[10px] text-slate-400/50">×0.5</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-red-400">{macroNegPct}% neg</p>
+                                            <p className="text-[10px] text-red-400/50">×0</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Center: Score Distribution */}
@@ -298,27 +318,6 @@ export default function UnitInsightsPage() {
                             </div>
                         </div>
 
-                        {/* Bottom strip: Sentiment */}
-                        <div className="relative border-t border-white/10 px-8 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                            <div className="shrink-0">
-                                <div className="text-[10px] font-semibold uppercase tracking-widest text-indigo-300/70">Overall Sentiment</div>
-                                <div className="text-[9px] text-indigo-300/30 mt-0.5">each comment AI-classified as pos, neu, or neg</div>
-                            </div>
-                            <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-                                <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
-                                    {overallPosPct > 0 && <div style={{ width: `${overallPosPct}%` }} className="bg-emerald-400 transition-all duration-700" />}
-                                    {(100 - overallPosPct - overallNegPct) > 0 && <div style={{ width: `${100 - overallPosPct - overallNegPct}%` }} className="bg-amber-400/70 transition-all duration-700" />}
-                                    {overallNegPct > 0 && <div style={{ width: `${overallNegPct}%` }} className="bg-red-400 transition-all duration-700" />}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-4 shrink-0 text-xs font-semibold tabular-nums">
-                                <span className="text-emerald-400">{overallPosPct}% positive</span>
-                                <span className="text-white/20">·</span>
-                                <span className="text-amber-400/80">{100 - overallPosPct - overallNegPct}% neutral</span>
-                                <span className="text-white/20">·</span>
-                                <span className="text-red-400">{overallNegPct}% negative</span>
-                            </div>
-                        </div>
                     </div>
                 )}
 

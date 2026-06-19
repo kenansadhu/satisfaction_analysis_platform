@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoHint } from "@/components/ui/info-hint";
 import {
-    GraduationCap, ArrowRight, Search, Users, BookOpen,
-    Building2, CheckCircle2, AlertTriangle, XCircle, Target
+    GraduationCap, ArrowRight, Search, BookOpen,
+    Building2, CheckCircle2, AlertTriangle, XCircle, Target, TrendingUp, TrendingDown
 } from "lucide-react";
 import Link from "next/link";
 import { useActiveSurvey } from "@/context/SurveyContext";
@@ -158,6 +158,17 @@ export default function FacultyInsightsPage() {
     }, { promoter: 0, passive: 0, detractor: 0, total: 0 });
     const overallNpsScore = overallNps.total > 0 ? computeNpsScore(overallNps) : null;
 
+    const bottomFaculty = withData.length > 0
+        ? [...withData].sort((a, b) => (a.data?.programQuality.avg_score ?? 0) - (b.data?.programQuality.avg_score ?? 0))[0]
+        : null;
+    const facultiesWithNps = faculties.filter(f => f.nps && f.nps.total > 0);
+    const topNpsFaculty = facultiesWithNps.length > 0
+        ? [...facultiesWithNps].sort((a, b) => computeNpsScore(b.nps!) - computeNpsScore(a.nps!))[0]
+        : null;
+    const bottomNpsFaculty = facultiesWithNps.length > 1
+        ? [...facultiesWithNps].sort((a, b) => computeNpsScore(a.nps!) - computeNpsScore(b.nps!))[0]
+        : null;
+
     const totalPQPos = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.positive || 0), 0);
     const totalPQNeg = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.negative || 0), 0);
     const totalPQTotal = withData.reduce((s, f) => s + (f.data?.programQuality.sentiment.total || 0), 0);
@@ -239,51 +250,84 @@ export default function FacultyInsightsPage() {
                                 </div>
                             </div>
 
-                            {/* Right: Top faculty + NPS + respondents */}
-                            <div className="flex flex-col justify-center gap-6 px-8 py-8 flex-1 min-w-0">
-                                <div>
-                                    <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-2">Top Faculty (PQ)</div>
-                                    {topFaculty ? (
-                                        <div className="flex items-start gap-2.5">
-                                            <div className="p-2 bg-emerald-500/20 rounded-lg shrink-0 mt-0.5">
-                                                <GraduationCap className="w-4 h-4 text-emerald-400" />
+                            {/* Column 3: NPS */}
+                            <div className="flex flex-col justify-center gap-5 px-8 py-8 lg:w-64 shrink-0">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 flex items-center gap-1.5">
+                                    <Target className="w-3 h-3" /> NPS Score
+                                    <InfoHint side="bottom" iconClassName="text-teal-300/60 hover:text-teal-100">
+                                        <strong>Net Promoter Score (−100 to +100)</strong> — % promoters (9–10) minus % detractors (0–6), aggregated across all NPS questions and faculties.<br /><br />Benchmarks: ≥50 excellent · 0–49 good · &lt;0 concern.
+                                    </InfoHint>
+                                </div>
+                                <div className={`text-4xl font-black tabular-nums leading-none ${overallNpsScore === null ? "text-white/30" : overallNpsScore >= 50 ? "text-emerald-400" : overallNpsScore >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                                    {overallNpsScore !== null ? (overallNpsScore > 0 ? `+${overallNpsScore}` : overallNpsScore) : "—"}
+                                </div>
+                                {topNpsFaculty && (
+                                    <div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-widest text-teal-300/50 mb-1 flex items-center gap-1">
+                                            <TrendingUp className="w-3 h-3 text-emerald-400" /> Highest NPS
+                                        </div>
+                                        <div className="text-xs font-bold text-white/80 truncate">{topNpsFaculty.short_name || topNpsFaculty.name}</div>
+                                        <div className={`text-base font-black tabular-nums leading-none mt-0.5 ${computeNpsScore(topNpsFaculty.nps!) >= 50 ? "text-emerald-400" : computeNpsScore(topNpsFaculty.nps!) >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                                            {(() => { const s = computeNpsScore(topNpsFaculty.nps!); return s > 0 ? `+${s}` : s; })()}
+                                        </div>
+                                    </div>
+                                )}
+                                {bottomNpsFaculty && (
+                                    <div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-widest text-teal-300/50 mb-1 flex items-center gap-1">
+                                            <TrendingDown className="w-3 h-3 text-red-400" /> Lowest NPS
+                                        </div>
+                                        <div className="text-xs font-bold text-white/80 truncate">{bottomNpsFaculty.short_name || bottomNpsFaculty.name}</div>
+                                        <div className={`text-base font-black tabular-nums leading-none mt-0.5 ${computeNpsScore(bottomNpsFaculty.nps!) >= 50 ? "text-emerald-400" : computeNpsScore(bottomNpsFaculty.nps!) >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                                            {(() => { const s = computeNpsScore(bottomNpsFaculty.nps!); return s > 0 ? `+${s}` : s; })()}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Column 4: PQ Rankings */}
+                            <div className="flex flex-col justify-center gap-5 px-8 py-8 flex-1 min-w-0">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70">
+                                    PQ Rankings
+                                </div>
+                                {topFaculty && (
+                                    <div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-widest text-teal-300/50 mb-1.5 flex items-center gap-1">
+                                            <TrendingUp className="w-3 h-3 text-emerald-400" /> Top Faculty
+                                        </div>
+                                        <div className="flex items-start gap-2">
+                                            <div className="p-1.5 bg-emerald-500/20 rounded-lg shrink-0 mt-0.5">
+                                                <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
                                             </div>
                                             <div className="min-w-0">
-                                                <div className="text-sm font-bold text-white leading-snug truncate">{topFaculty.name}</div>
-                                                <div className={`text-xl font-black tabular-nums leading-none mt-0.5 ${scoreColor(topFaculty.data?.programQuality.avg_score ?? null)}`}>
+                                                <div className="text-xs font-bold text-white/80 truncate">{topFaculty.short_name || topFaculty.name}</div>
+                                                <div className={`text-lg font-black tabular-nums leading-none mt-0.5 ${scoreColor(topFaculty.data?.programQuality.avg_score ?? null)}`}>
                                                     {topFaculty.data?.programQuality.avg_score?.toFixed(2) ?? "—"}
-                                                    <span className="text-sm font-medium text-white/30 ml-0.5">/4.00</span>
+                                                    <span className="text-xs font-medium text-white/30 ml-0.5">/4.00</span>
                                                 </div>
                                             </div>
                                         </div>
-                                    ) : <span className="text-white/30 text-sm">—</span>}
-                                </div>
-
-                                <div className="flex items-center gap-8">
+                                    </div>
+                                )}
+                                {bottomFaculty && bottomFaculty.id !== topFaculty?.id && (
                                     <div>
-                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
-                                            Overall NPS
-                                            <InfoHint side="left" iconClassName="text-teal-300/60 hover:text-teal-100">
-                                                <strong>Net Promoter Score (−100 to +100)</strong> aggregated across all NPS questions in the survey, summed over every faculty. Promoters (9–10) minus Detractors (0–6) as a percentage of total responses.
-                                            </InfoHint>
+                                        <div className="text-[10px] font-semibold uppercase tracking-widest text-teal-300/50 mb-1.5 flex items-center gap-1">
+                                            <TrendingDown className="w-3 h-3 text-red-400" /> Lowest Faculty
                                         </div>
-                                        <div className={`text-xl font-black tabular-nums leading-none ${overallNpsScore === null ? "text-white/30" : overallNpsScore >= 50 ? "text-emerald-400" : overallNpsScore >= 0 ? "text-amber-400" : "text-red-400"}`}>
-                                            {overallNpsScore !== null ? (overallNpsScore > 0 ? `+${overallNpsScore}` : overallNpsScore) : "—"}
+                                        <div className="flex items-start gap-2">
+                                            <div className="p-1.5 bg-red-500/20 rounded-lg shrink-0 mt-0.5">
+                                                <GraduationCap className="w-3.5 h-3.5 text-red-400" />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-xs font-bold text-white/80 truncate">{bottomFaculty.short_name || bottomFaculty.name}</div>
+                                                <div className={`text-lg font-black tabular-nums leading-none mt-0.5 ${scoreColor(bottomFaculty.data?.programQuality.avg_score ?? null)}`}>
+                                                    {bottomFaculty.data?.programQuality.avg_score?.toFixed(2) ?? "—"}
+                                                    <span className="text-xs font-medium text-white/30 ml-0.5">/4.00</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div>
-                                        <div className="text-xs font-semibold uppercase tracking-widest text-teal-300/70 mb-1 flex items-center gap-1.5">
-                                            Respondents
-                                            <InfoHint side="left" iconClassName="text-teal-300/60 hover:text-teal-100">
-                                                Total students who responded across all faculties. Response rate (shown on Campus Experience) is computed against enrolled headcount where available.
-                                            </InfoHint>
-                                        </div>
-                                        <div className="flex items-baseline gap-1.5">
-                                            <Users className="w-3.5 h-3.5 text-teal-400 shrink-0 self-center" />
-                                            <span className="text-xl font-black text-white tabular-nums">{totalRespondents.toLocaleString()}</span>
-                                        </div>
-                                    </div>
-                                </div>
+                                )}
                             </div>
                         </div>
 

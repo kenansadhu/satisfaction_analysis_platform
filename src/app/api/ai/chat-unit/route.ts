@@ -203,12 +203,23 @@ NPS FROM GLOBAL CACHE: NPS ${npsForUnit.nps_score > 0 ? '+' : ''}${npsForUnit.np
             `${m.role === 'user' ? 'USER' : 'AI'}: ${m.content}`
         ).join('\n\n');
 
+        // ── Sentiment score from full dataset (cache) ─────────────────────────────
+        const fullPos   = cacheUnit?.positive ?? null;
+        const fullNeu   = cacheUnit?.neutral ?? null;
+        const fullNeg   = cacheUnit?.negative ?? null;
+        const fullTotal = cacheUnit?.total_segments ?? null;
+        const unitSentimentScore = fullTotal != null && fullTotal > 0
+            ? Math.round(((fullPos ?? 0) + 0.5 * (fullNeu ?? 0)) / fullTotal * 100)
+            : null;
+
         // ── System prompt ─────────────────────────────────────────────────────────
         const systemPrompt = `You are an objective Data Intelligence Engine analyzing feedback for "${unitName}" — a university service unit.
 CONTEXT: ${unitDescription}
 
 ━━ POPULATION & REACH ━━
 Survey total: ${totalSurveyPopulation} respondents | This unit reached: ${unitRespondentCount} (${((unitRespondentCount / (totalSurveyPopulation || 1)) * 100).toFixed(1)}%)
+Full dataset segments: ${fullTotal ?? '?'} total (${fullPos ?? '?'} pos / ${fullNeu ?? '?'} neu / ${fullNeg ?? '?'} neg)
+Sentiment Score (full dataset): ${unitSentimentScore !== null ? `${unitSentimentScore}/100` : 'N/A'} — ${unitSentimentScore !== null ? (unitSentimentScore >= 70 ? 'Excellent' : unitSentimentScore >= 40 ? 'Moderate' : 'Needs Focus') : ''}
 Qualitative sample (200 max): ${sentimentCounts.Positive} Positive, ${sentimentCounts.Negative} Negative, ${sentimentCounts.Neutral} Neutral
 
 ━━ QUANTITATIVE SCORES ━━
@@ -216,7 +227,7 @@ Qualitative sample (200 max): ${sentimentCounts.Positive} Positive, ${sentimentC
 ${quantPrompt}
 
 ━━ NPS (NET PROMOTER SCORE) ━━
-(NPS −100 to +100: ≥50 excellent | >0 healthy | <0 urgent)
+(NPS −100 to +100: ≥50 excellent | >0 healthy | <0 urgent · Formula: %Promoters [9–10] − %Detractors [0–6]; Passives [7–8] not counted)
 ${npsPrompt}
 ${globalNpsBlock}
 ${topThemesBlock}
@@ -237,6 +248,15 @@ CONVERSATION HISTORY:
 ${conversationHistory}
 
 USER: ${prompt}
+
+━━ FORMULA REFERENCE (use these to answer "how is X calculated?" questions) ━━
+Sentiment Score (0–100)  = (positive_segments + 0.5 × neutral_segments) / total_segments × 100
+  Benchmarks: ≥70 Excellent · 40–69 Moderate · <40 Needs Focus
+  Macro average = mean of individual unit scores, each unit weighted equally (not pooled across all units)
+NPS (−100 to +100)       = % Promoters (score 9–10) − % Detractors (score 0–6) · Passives (7–8) ignored
+  Benchmarks: ≥50 Excellent · 0–49 Good · <0 Concern
+Likert SSI (1–4)         : ≥3.20 Strong · ≥3.00 Fair · <3.00 Needs Attention · <2.50 Critical
+Binary scale (0–1)       : value = % of students who answered positively (e.g. 0.82 = 82% positive)
 
 ━━ FORMATTING RULES ━━
 1. OPENING: On the very first message (empty conversation history), open with a short impressive greeting — one confident sentence that signals you have this unit's data loaded and you're ready to dig in. On all subsequent messages, skip the greeting and go straight to the insight.

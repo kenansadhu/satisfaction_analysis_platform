@@ -9,7 +9,7 @@ import { PraisesRadar } from "@/components/analytics/PraisesRadar";
 import { CategoryInsightPanels } from "@/components/analytics/CategoryInsightPanels";
 import { ActionPriorityMatrix } from "@/components/analytics/ActionPriorityMatrix";
 import CrossUnitMentions from "@/components/analytics/CrossUnitMentions";
-import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, Share2, Target, LayoutDashboard } from "lucide-react";
+import { Users, MessageSquareQuote, AlertTriangle, Activity, Loader2, BarChart2, GitCompareArrows, FileText, Database, Sparkles, Lightbulb, TrendingUp, TrendingDown, Share2, Target, LayoutDashboard } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Survey } from "@/types";
@@ -21,6 +21,7 @@ import { NpsTab } from "@/components/executive/NpsTab";
 import { DependencyGraph } from "@/components/analytics/DependencyGraph";
 import { CrossUnitComments } from "@/components/analytics/CrossUnitComments";
 import { useActiveSurvey } from "@/context/SurveyContext";
+import { InfoHint } from "@/components/ui/info-hint";
 
 type UnitPerformance = {
     id: number;
@@ -90,18 +91,22 @@ export default function ExecutiveDashboard() {
 
                 // Calculate globals
                 let globalTotal = 0;
-                let globalScoreSum = 0;
                 let globalCritical = 0;
+                let macroScoreSum = 0;
+                let macroScoreCount = 0;
 
                 (stats as UnitPerformance[]).forEach(u => {
                     globalTotal += u.total;
-                    globalScoreSum += (u.score * u.total);
                     globalCritical += u.negative;
+                    if (u.total > 0) {
+                        macroScoreSum += u.score;
+                        macroScoreCount++;
+                    }
                 });
 
                 setUnits(stats);
                 setTotalComments(globalTotal);
-                setOverallScore(globalTotal > 0 ? Math.round(globalScoreSum / globalTotal) : 0);
+                setOverallScore(macroScoreCount > 0 ? Math.round(macroScoreSum / macroScoreCount) : 0);
                 setCriticalIssues(globalCritical);
 
             } catch (err) {
@@ -222,12 +227,15 @@ export default function ExecutiveDashboard() {
 
                         {/* ── SENTIMENTS HERO ──────────────────────────────────────────────── */}
                         {(() => {
-                            const totalPos = units.reduce((s, u) => s + u.positive, 0);
-                            const totalNeg = criticalIssues;
-                            const totalNeu = totalComments - totalPos - totalNeg;
-                            const posPct = totalComments > 0 ? Math.round(totalPos / totalComments * 100) : 0;
-                            const neuPct = totalComments > 0 ? Math.round(totalNeu / totalComments * 100) : 0;
-                            const negPct = totalComments > 0 ? 100 - posPct - neuPct : 0;
+                            // Macro percentages — each unit weighted equally, consistent with overallScore
+                            const qualUnits = units.filter(u => u.total > 0);
+                            const macroPosPct = qualUnits.length > 0
+                                ? Math.round(qualUnits.reduce((s, u) => s + (u.positive / u.total * 100), 0) / qualUnits.length)
+                                : 0;
+                            const macroNeuPct = qualUnits.length > 0
+                                ? Math.round(qualUnits.reduce((s, u) => s + ((u.total - u.positive - u.negative) / u.total * 100), 0) / qualUnits.length)
+                                : 0;
+                            const macroNegPct = qualUnits.length > 0 ? 100 - macroPosPct - macroNeuPct : 0;
                             const sentUnits = units
                                 .filter(u => !npsUnitIds.has(u.id) && !excludedScoreUnitIds.has(u.id) && u.id !== studyProgramUnitId && u.total >= 10)
                                 .sort((a, b) => b.score - a.score);
@@ -235,22 +243,27 @@ export default function ExecutiveDashboard() {
                             const worstUnit = sentUnits[sentUnits.length - 1] ?? null;
                             return (
                                 <div className="relative rounded-2xl overflow-hidden shadow-2xl">
-                                    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-purple-950 to-indigo-950" />
-                                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(168,85,247,0.18),transparent_60%)]" />
-                                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(99,102,241,0.12),transparent_60%)]" />
+                                    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950" />
+                                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(59,130,246,0.2),transparent_60%)]" />
+                                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(139,92,246,0.12),transparent_60%)]" />
                                     <div className="relative z-10 p-8 md:p-10 space-y-6">
 
                                         {/* Score + Volume strip */}
                                         <div className="flex items-center gap-8">
                                             {/* Overall score */}
                                             <div className="shrink-0">
-                                                <p className="text-xs font-semibold text-purple-300/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                                                <p className="text-xs font-semibold text-slate-400/70 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                                     <MessageSquareQuote className="w-3.5 h-3.5" /> Sentiment Score
+                                                    <InfoHint side="bottom" iconClassName="text-slate-400/60 hover:text-slate-200">
+                                                        <strong>Sentiment Score (0–100)</strong> — derived from AI analysis of open-ended student comments. Each segment is classified positive (×1), neutral (×0.5), or negative (×0).<br /><br />
+                                                        Benchmarks: ≥60 healthy · 40–59 mixed · &lt;40 critical.<br /><br />
+                                                        This score is a <strong>macro average</strong> — each unit contributes equally regardless of how many comments it received.
+                                                    </InfoHint>
                                                 </p>
                                                 <div className={`text-5xl md:text-6xl font-black tracking-tight ${overallScore >= 60 ? "text-emerald-400" : overallScore >= 40 ? "text-amber-400" : "text-red-400"}`}>
                                                     {loading ? "—" : overallScore}
                                                 </div>
-                                                <p className="text-purple-300/40 text-xs mt-1">pos%×1 · neu%×0.5 · neg%×0</p>
+                                                <p className="text-slate-500 text-xs mt-1">each unit weighted equally</p>
                                             </div>
 
                                             {/* Divider */}
@@ -258,23 +271,31 @@ export default function ExecutiveDashboard() {
 
                                             {/* Volume bar */}
                                             <div className="flex-1 space-y-2">
-                                                <p className="text-xs font-semibold text-purple-300/70 uppercase tracking-widest flex items-center gap-1.5">
+                                                <p className="text-xs font-semibold text-slate-400/70 uppercase tracking-widest flex items-center gap-1.5">
                                                     <Activity className="w-3.5 h-3.5" />
                                                     {loading ? "Loading…" : `${totalComments.toLocaleString()} feedback segments analyzed`}
                                                 </p>
-                                                {!loading && totalComments > 0 && (
+                                                {!loading && qualUnits.length > 0 && (
                                                     <>
                                                         <div className="w-full h-2.5 rounded-full overflow-hidden flex">
-                                                            <div className="bg-emerald-400 transition-all" style={{ width: `${posPct}%` }} />
-                                                            <div className="bg-amber-300 transition-all" style={{ width: `${neuPct}%` }} />
-                                                            <div className="bg-red-400 transition-all" style={{ width: `${negPct}%` }} />
+                                                            <div className="bg-emerald-400 transition-all" style={{ width: `${macroPosPct}%` }} />
+                                                            <div className="bg-amber-300 transition-all" style={{ width: `${macroNeuPct}%` }} />
+                                                            <div className="bg-red-400 transition-all" style={{ width: `${macroNegPct}%` }} />
                                                         </div>
-                                                        <div className="flex flex-wrap gap-4 text-sm">
-                                                            <span className="flex items-center gap-1.5 text-emerald-400/80"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />{posPct}% positive ({totalPos.toLocaleString()})</span>
-                                                            <span className="flex items-center gap-1.5 text-amber-300/80"><span className="w-2 h-2 rounded-full bg-amber-300 shrink-0" />{neuPct}% neutral ({totalNeu.toLocaleString()})</span>
-                                                            <span className="flex items-center gap-1.5 text-red-400/80"><span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />{negPct}% negative ({totalNeg.toLocaleString()})</span>
+                                                        <div className="grid grid-cols-3 gap-x-3 mt-1 w-64">
+                                                            <div>
+                                                                <p className="text-[11px] font-semibold text-emerald-400">{macroPosPct}% pos</p>
+                                                                <p className="text-[10px] text-emerald-400/50">×1</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-[11px] font-semibold text-amber-300">{macroNeuPct}% neu</p>
+                                                                <p className="text-[10px] text-amber-300/50">×0.5</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-[11px] font-semibold text-red-400">{macroNegPct}% neg</p>
+                                                                <p className="text-[10px] text-red-400/50">×0</p>
+                                                            </div>
                                                         </div>
-                                                        <p className="text-xs text-purple-300/30">each comment is AI-classified as positive, neutral, or negative</p>
                                                     </>
                                                 )}
                                             </div>
@@ -293,10 +314,10 @@ export default function ExecutiveDashboard() {
                                                 ) : (
                                                     <>
                                                         <p className="text-lg font-black text-emerald-400 leading-snug">{topCategories.praise.name}</p>
-                                                        <p className="text-sm text-emerald-300/60 tabular-nums">{topCategories.praise.count.toLocaleString()} positive segments</p>
+                                                        <p className="text-sm text-emerald-400/80 tabular-nums">{topCategories.praise.count.toLocaleString()} positive segments</p>
                                                     </>
                                                 )}
-                                                <p className="text-xs text-purple-300/30 pt-1">topic with the most positive comments across all units</p>
+                                                <p className="text-xs text-white/30 pt-1">topic with the most positive comments across all units</p>
                                             </div>
 
                                             {/* Top Concern */}
@@ -309,10 +330,10 @@ export default function ExecutiveDashboard() {
                                                 ) : (
                                                     <>
                                                         <p className="text-lg font-black text-red-400 leading-snug">{topCategories.concern.name}</p>
-                                                        <p className="text-sm text-red-300/60 tabular-nums">{topCategories.concern.count.toLocaleString()} negative segments</p>
+                                                        <p className="text-sm text-red-400/80 tabular-nums">{topCategories.concern.count.toLocaleString()} negative segments</p>
                                                     </>
                                                 )}
-                                                <p className="text-xs text-purple-300/30 pt-1">topic with the most negative comments across all units</p>
+                                                <p className="text-xs text-white/30 pt-1">topic with the most negative comments across all units</p>
                                             </div>
 
                                             {/* Best Sentiment Unit */}
@@ -328,13 +349,13 @@ export default function ExecutiveDashboard() {
                                                         <p className="text-sm text-blue-300/60 tabular-nums">Score: <span className="text-emerald-400 font-bold">{bestUnit.score}/100</span></p>
                                                     </>
                                                 )}
-                                                <p className="text-xs text-purple-300/30 pt-1">pos%×1 + neu%×0.5 + neg%×0 · highest among units with ≥10 comments</p>
+                                                <p className="text-xs text-white/30 pt-1">unit with the highest sentiment score</p>
                                             </div>
 
                                             {/* Needs Attention */}
                                             <div className="bg-white/[0.06] border border-white/10 rounded-xl p-5 space-y-2">
                                                 <p className="text-xs font-semibold text-amber-300/70 uppercase tracking-widest flex items-center gap-1.5">
-                                                    <AlertTriangle className="w-3.5 h-3.5" /> Needs Attention
+                                                    <TrendingDown className="w-3.5 h-3.5" /> Lowest Sentiment
                                                 </p>
                                                 {loading || !worstUnit ? (
                                                     <p className="text-2xl font-black text-slate-500">—</p>
@@ -344,7 +365,7 @@ export default function ExecutiveDashboard() {
                                                         <p className="text-sm text-amber-300/60 tabular-nums">Score: <span className="text-red-400 font-bold">{worstUnit.score}/100</span></p>
                                                     </>
                                                 )}
-                                                <p className="text-xs text-purple-300/30 pt-1">pos%×1 + neu%×0.5 + neg%×0 · lowest among units with ≥10 comments</p>
+                                                <p className="text-xs text-white/30 pt-1">unit with the lowest sentiment score</p>
                                             </div>
 
                                         </div>

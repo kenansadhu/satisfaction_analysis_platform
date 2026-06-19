@@ -29,7 +29,7 @@ export default function SettingsPage() {
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Rebuild cache state
-    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_rollup' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_cross_signals' | 'warm_faculty_detail' | 'done' | 'error';
+    type RebuildStep = 'idle' | 'clearing' | 'phase1' | 'phase2' | 'warm_report' | 'warm_nps' | 'warm_radar' | 'warm_qual' | 'warm_faculty_rollup' | 'warm_faculty_list' | 'warm_cross_mentions' | 'warm_dependency_graph' | 'warm_cross_signals' | 'warm_faculty_detail' | 'warm_unit_insights' | 'done' | 'error';
     const [rebuildStep, setRebuildStep] = useState<RebuildStep>('idle');
     const [rebuildElapsed, setRebuildElapsed] = useState(0);
     const [rebuildError, setRebuildError] = useState<string | null>(null);
@@ -117,6 +117,7 @@ export default function SettingsPage() {
         { key: 'warm_dependency_graph',  label: 'Warming dependency graph cache' },
         { key: 'warm_cross_signals',     label: 'Building cross-unit signals cache' },
         { key: 'warm_faculty_detail',    label: 'Warming faculty detail caches' },
+        { key: 'warm_unit_insights',     label: 'Warming unit insights caches' },
         { key: 'done',                   label: 'Complete' },
     ];
 
@@ -235,6 +236,14 @@ export default function SettingsPage() {
                     setWarmFacultyProgress({ current: i + 1, total: faculties.length });
                 }
                 setWarmFacultyProgress(null);
+            }
+
+            setRebuildStep('warm_unit_insights');
+            const { data: orgUnits } = await sb.from('organization_units').select('id');
+            if (orgUnits?.length) {
+                for (const unit of orgUnits) {
+                    await fetch(`/api/unit-insights/agg-metrics?unitId=${unit.id}&surveyId=${activeSurveyId}`).catch(() => {});
+                }
             }
 
             setRebuildStep('done');

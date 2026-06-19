@@ -84,9 +84,10 @@ export async function POST(req: Request) {
             const pos = u.positive ?? 0;
             const neg = u.negative ?? 0;
             const total = u.total_segments ?? (pos + neg + (u.neutral ?? 0));
+            const neu = u.neutral ?? (total - pos - neg);
             const positive_pct   = total > 0 ? Math.round(pos / total * 100) : null;
             const negative_pct   = total > 0 ? Math.round(neg / total * 100) : null;
-            const sentiment_score = positive_pct;
+            const sentiment_score = total > 0 ? Math.round((pos + 0.5 * neu) / total * 100) : null;
             const norm_score     = u.score != null ? Math.round((u.score - 1) / 3 * 100) : null;
             const disparity_gap  = norm_score != null && sentiment_score != null ? norm_score - sentiment_score : null;
             return { ...u, positive_pct, negative_pct, sentiment_score, norm_score, disparity_gap };
@@ -227,7 +228,7 @@ Note: Each unit also has score_distributions[] (histogram per column) and respon
 PRE-COMPUTED DERIVED KEYS (use these directly in chart yKey/yKeys — do NOT invent other key names):
 • positive_pct       = % of segments that are positive (0–100). Use as qualitative sentiment proxy.
 • negative_pct       = % of segments that are negative (0–100).
-• sentiment_score    = same as positive_pct — the headline sentiment quality score.
+• sentiment_score    = (positive + 0.5 × neutral) / total × 100. Positive segments score 1, neutral 0.5, negative 0. Range 0–100.
 • norm_score         = Likert avg mapped to 0–100 scale: ((score−1)/3)×100. Comparable with sentiment_score.
 • disparity_gap      = norm_score − sentiment_score. POSITIVE = quant inflated vs qual. NEGATIVE = underrated.
   → Use disparity_gap for "iceberg" / gap analysis charts.

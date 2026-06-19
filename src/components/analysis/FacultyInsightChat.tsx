@@ -58,21 +58,26 @@ export default function FacultyInsightChat({
     const [customInstructions, setCustomInstructions] = useState("");
     const [lastSaved, setLastSaved] = useState<string | null>(null);
     const [reportError, setReportError] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
 
     // Load persisted data via server-side API
     useEffect(() => {
         if (!surveyId) return;
-        fetch(`/api/ai/faculty-specialist?facultyId=${facultyId}&surveyId=${surveyId}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.messages?.length) setMessages(data.messages);
-                if (data.report) {
-                    setReport(data.report);
-                    if (data.generatedAt) setLastSaved(new Date(data.generatedAt).toLocaleString());
-                }
-            })
-            .catch(() => {});
+        supabase.auth.getUser().then(({ data: { user } }) => {
+            const uid = user?.id ?? null;
+            setUserId(uid);
+            fetch(`/api/ai/faculty-specialist?facultyId=${facultyId}&surveyId=${surveyId}&userId=${uid ?? 'anon'}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.messages?.length) setMessages(data.messages);
+                    if (data.report) {
+                        setReport(data.report);
+                        if (data.generatedAt) setLastSaved(new Date(data.generatedAt).toLocaleString());
+                    }
+                })
+                .catch(() => {});
+        });
     }, [facultyId, surveyId]);
 
     // Auto-scroll
@@ -132,7 +137,7 @@ export default function FacultyInsightChat({
                 fetch("/api/ai/faculty-specialist", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ facultyId, surveyId, messages: finalMessages }),
+                    body: JSON.stringify({ facultyId, surveyId, userId: userId ?? 'anon', messages: finalMessages }),
                 }).catch(() => {});
             }
         } catch (error: any) {
@@ -395,11 +400,10 @@ export default function FacultyInsightChat({
                                         if (!confirm("Permanently clear this discussion history?")) return;
                                         setMessages([]);
                                         if (surveyId) {
-                                            // Save empty history server-side
                                             fetch("/api/ai/faculty-specialist", {
                                                 method: "POST",
                                                 headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ facultyId, surveyId, messages: [] }),
+                                                body: JSON.stringify({ facultyId, surveyId, userId: userId ?? 'anon', messages: [] }),
                                             }).catch(() => {});
                                         }
                                         toast.success("Discussion cleared");
@@ -422,9 +426,33 @@ export default function FacultyInsightChat({
                                         </div>
                                         Faculty AI Analyst
                                     </div>
-                                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100/50 dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-800/50">
-                                        <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Live</span>
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100/50 dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-800/50">
+                                            <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                            <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Live</span>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="ghost"
+                                            disabled={messages.length === 0 || isLoading}
+                                            title="Clear conversation"
+                                            className="h-8 w-8 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all disabled:opacity-30"
+                                            onClick={async () => {
+                                                if (!confirm("Permanently clear this discussion history?")) return;
+                                                setMessages([]);
+                                                if (surveyId) {
+                                                    fetch("/api/ai/faculty-specialist", {
+                                                        method: "POST",
+                                                        headers: { "Content-Type": "application/json" },
+                                                        body: JSON.stringify({ facultyId, surveyId, userId: userId ?? 'anon', messages: [] }),
+                                                    }).catch(() => {});
+                                                }
+                                                toast.success("Discussion cleared");
+                                            }}
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
                                     </div>
                                 </CardTitle>
                             </CardHeader>

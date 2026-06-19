@@ -57,10 +57,20 @@ export async function POST(req: NextRequest) {
         const facUnitScores = facSummaryAll.filter((r: any) => r.faculty === facultyName);
         const facNpsScores  = npsByFacultyAll.filter((r: any) => r.faculty === facultyName);
 
-        // Build institution-wide avg per unit for comparison
+        // Build institution-wide avg Likert score per unit from faculties_summary (weighted by respondent count)
+        // NOTE: allUnits[].score is the sentiment score (0–100), NOT the Likert avg — do not use it here.
         const instAvgMap = new Map<number, number>();
-        for (const u of allUnits) {
-            if (u.score != null) instAvgMap.set(u.unit_id, u.score);
+        const _unitAgg = new Map<number, { sum: number; count: number }>();
+        for (const r of facSummaryAll) {
+            if (r.avg_score != null && r.count > 0) {
+                const prev = _unitAgg.get(r.unit_id) || { sum: 0, count: 0 };
+                prev.sum += r.avg_score * r.count;
+                prev.count += r.count;
+                _unitAgg.set(r.unit_id, prev);
+            }
+        }
+        for (const [uid, { sum, count }] of _unitAgg) {
+            instAvgMap.set(uid, parseFloat((sum / count).toFixed(2)));
         }
 
         // Faculty comparison block: this faculty vs institution for each unit
@@ -197,6 +207,23 @@ Institution faculties: ${surveyContext.faculties?.length || '?'} | Programs: ${s
 
         const conversationHistory = (history || []).map(m => `${m.role === "user" ? "USER" : "AI"}: ${m.content}`).join("\n\n");
 
+        // ── Compute sentiment scores from pct data ────────────────────────────────
+        const pqPosPct  = programQuality?.overallSentiment?.positive_pct ?? null;
+        const pqNegPct  = programQuality?.overallSentiment?.negative_pct ?? null;
+        const pqNeuPct  = pqPosPct !== null && pqNegPct !== null ? Math.max(0, 100 - pqPosPct - pqNegPct) : null;
+        const pqSentScore = pqPosPct !== null && pqNeuPct !== null
+            ? Math.round(pqPosPct + pqNeuPct * 0.5)
+            : null;
+
+        const cePosPct  = campusExperience?.overallSentiment?.positive_pct ?? null;
+        const ceNegPct  = campusExperience?.overallSentiment?.negative_pct ?? null;
+        const ceNeuPct  = cePosPct !== null && ceNegPct !== null ? Math.max(0, 100 - cePosPct - ceNegPct) : null;
+        const ceSentScore = cePosPct !== null && ceNeuPct !== null
+            ? Math.round(cePosPct + ceNeuPct * 0.5)
+            : null;
+
+        const sentLabel = (s: number | null) => s === null ? '' : s >= 70 ? ' (Excellent)' : s >= 40 ? ' (Moderate)' : ' (Needs Focus)';
+
         // ── 5. System prompt ──────────────────────────────────────────────────────
         const systemPrompt = `You are an objective Data Intelligence Engine analyzing survey data for the "${facultyName}" faculty.
 ${faculty?.description ? `FACULTY CONTEXT: ${faculty.description}` : ""}
@@ -207,12 +234,23 @@ ${institutionContextBlock}
 - Respondents: ${totalRespondents}${totalEnrolled > 0 ? ` / ${totalEnrolled} enrolled (${responseRate}% response rate)` : ""}
 - Overall Program Quality SSI: ${programQuality?.overallScore ?? "N/A"}
 - Overall Campus Experience SSI: ${campusExperience?.overallScore ?? "N/A"}
-- Sentiment (Program): ${programQuality?.overallSentiment?.positive_pct ?? "?"}% positive / ${programQuality?.overallSentiment?.negative_pct ?? "?"}% negative
-- Sentiment (Campus): ${campusExperience?.overallSentiment?.positive_pct ?? "?"}% positive / ${campusExperience?.overallSentiment?.negative_pct ?? "?"}% negative
+- Sentiment (Program): ${pqPosPct ?? "?"}% pos / ${pqNeuPct ?? "?"}% neu / ${pqNegPct ?? "?"}% neg → Score ${pqSentScore ?? "N/A"}/100${sentLabel(pqSentScore)}
+- Sentiment (Campus): ${cePosPct ?? "?"}% pos / ${ceNeuPct ?? "?"}% neu / ${ceNegPct ?? "?"}% neg → Score ${ceSentScore ?? "N/A"}/100${sentLabel(ceSentScore)}
+
+━━ FORMULA REFERENCE (use these to answer "how is X calculated?" questions) ━━
+Sentiment Score (0–100)  = (positive_segments + 0.5 × neutral_segments) / total_segments × 100
+  Equivalently: pos% × 1 + neu% × 0.5 + neg% × 0  (same result when working from percentages)
+  Benchmarks: ≥70 Excellent · 40–69 Moderate · <40 Needs Focus
+  Macro average = mean of individual unit/program scores, each weighted equally (not pooled)
+NPS (−100 to +100)       = % Promoters (score 9–10) − % Detractors (score 0–6) · Passives (7–8) ignored
+  Benchmarks: ≥50 Excellent · 0–49 Good · <0 Concern
+Likert SSI (1–4)         : ≥3.20 Strong · ≥3.00 Fair · <3.00 Needs Attention · <2.50 Critical
+Binary scale (0–1)       : value = % of students who answered positively (e.g. 0.82 = 82% positive)
 
 ━━ SCORE SCALES & THRESHOLDS ━━
 - Likert SSI (1–4): ≥3.20 Strong | ≥3.00 Fair | <3.00 Needs Attention | <2.50 Critical
 - NPS (−100 to +100): >0 healthy | >50 excellent | <0 urgent
+- Sentiment (0–100): ≥70 Excellent | 40–69 Moderate | <40 Needs Focus
 - Never mix SSI (1–4) with NPS scales
 
 ━━ STUDY PROGRAMS ━━
@@ -247,7 +285,7 @@ USER: ${prompt}
 4. For faculty vs institution comparisons: name the specific units where this faculty differs most (▲ or ▼).
 5. For NPS comparisons: flag any units where this faculty's NPS is significantly below institution average.
 6. Quote verbatim evidence from the segment sample to support claims.
-7. Distinguish SSI Likert (1–4) from NPS (−100 to +100) — never blend scales.
+7. Distinguish SSI Likert (1–4) from NPS (−100 to +100) from Sentiment Score (0–100) — never blend scales.
 
 Response:`;
 

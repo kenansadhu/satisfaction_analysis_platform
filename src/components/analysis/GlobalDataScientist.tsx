@@ -35,6 +35,7 @@ type SavedChart = {
 export default function GlobalDataScientist({ surveyId }: { surveyId?: string }) {
     const [activeTab, setActiveTab] = useState("saved");
     const [macroData, setMacroData] = useState<any[]>([]);
+    const [userId, setUserId] = useState<string | null>(null);
 
     // Feature States
     const [savedCharts, setSavedCharts] = useState<SavedChart[]>([]);
@@ -52,6 +53,10 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
     const [page, setPage] = useState(0);
     const CHARTS_PER_PAGE = 4;
 
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
+    }, []);
+
     // --- 1. INITIALIZATION ---
     const loadWorkspace = useCallback(async () => {
         setLoadingData(true);
@@ -63,7 +68,11 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
             const { data } = await res.json();
             setMacroData(data || []);
 
-            // B. Fetch Saved Chart Blueprints
+            // B. Fetch Saved Chart Blueprints (per user)
+            const { data: { user } } = await supabase.auth.getUser();
+            const uid = user?.id ?? null;
+            setUserId(uid);
+
             let query = supabase
                 .from('saved_ai_charts')
                 .select('*')
@@ -74,6 +83,7 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
             } else {
                 query = query.is('survey_id', null);
             }
+            if (uid) query = query.eq('user_id', uid);
 
             const { data: dbCharts, error: dbError } = await query;
             if (dbError) throw dbError;
@@ -163,7 +173,8 @@ export default function GlobalDataScientist({ surveyId }: { surveyId?: string })
                 survey_id: surveyId ? parseInt(surveyId) : null,
                 title: config.title,
                 description: config.description,
-                config: config
+                config: config,
+                user_id: userId,
             });
 
             if (insertError) throw insertError;

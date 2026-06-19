@@ -44,11 +44,21 @@ export async function POST(req: NextRequest) {
         .filter((u: any) => u.satisfaction_index !== null)
         .sort((a: any, b: any) => (b.satisfaction_index ?? 0) - (a.satisfaction_index ?? 0));
 
-    const totalPos = (report.units || []).reduce((s: number, u: any) => s + (u.qualitative?.positive ?? 0), 0);
-    const totalNeg = (report.units || []).reduce((s: number, u: any) => s + (u.qualitative?.negative ?? 0), 0);
-    const totalNeu = (report.units || []).reduce((s: number, u: any) => s + ((u.qualitative?.total ?? 0) - (u.qualitative?.positive ?? 0) - (u.qualitative?.negative ?? 0)), 0);
-    const totalQual = totalPos + totalNeg + totalNeu;
-    const sentimentScore = totalQual > 0 ? Math.round((totalPos + 0.5 * totalNeu) / totalQual * 100) : null;
+    // Macro averages — each unit weighted equally
+    const qualUnits = (report.units || []).filter((u: any) => (u.qualitative?.total ?? 0) > 0);
+    const totalQual = (report.units || []).reduce((s: number, u: any) => s + (u.qualitative?.total ?? 0), 0);
+    const sentimentScore = qualUnits.length > 0
+        ? Math.round(qualUnits.reduce((s: number, u: any) => {
+            const pos = u.qualitative.positive, neg = u.qualitative.negative, total = u.qualitative.total;
+            return s + (pos + 0.5 * (total - pos - neg)) / total * 100;
+          }, 0) / qualUnits.length)
+        : null;
+    const sentPosPct = qualUnits.length > 0
+        ? Math.round(qualUnits.reduce((s: number, u: any) => s + (u.qualitative.positive / u.qualitative.total * 100), 0) / qualUnits.length)
+        : null;
+    const sentNegPct = qualUnits.length > 0
+        ? Math.round(qualUnits.reduce((s: number, u: any) => s + (u.qualitative.negative / u.qualitative.total * 100), 0) / qualUnits.length)
+        : null;
 
     const contextData = {
         survey: report.survey,
@@ -57,7 +67,7 @@ export async function POST(req: NextRequest) {
         global_ssi: report.globalSatisfactionIndex,
         campus_ssi: report.campusSatisfaction,
         sentiment_score: sentimentScore,
-        sentiment_breakdown: { positive_pct: totalQual > 0 ? Math.round(totalPos / totalQual * 100) : null, negative_pct: totalQual > 0 ? Math.round(totalNeg / totalQual * 100) : null, total_segments: totalQual },
+        sentiment_breakdown: { positive_pct: sentPosPct, negative_pct: sentNegPct, total_segments: totalQual },
         nps: nps ? { score: nps.nps_score, total: nps.total } : null,
         units: unitsWithScore.map((u: any) => ({
             name: u.short_name || u.unit_name,

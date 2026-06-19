@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { supabaseServer as supabase } from "@/lib/supabase-server";
+
+export const maxDuration = 60;
 
 // Server-side aggregation for the unit insights tab.
 // Returns pre-computed metrics without any text content — no raw_text, no segment_text.
@@ -7,7 +10,7 @@ import { supabaseServer as supabase } from "@/lib/supabase-server";
 //   1. Server ↔ Supabase latency is ~5ms vs browser's ~200ms
 //   2. No large text payloads transferred to the browser
 //   3. All aggregation runs in Node, not in the browser
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const unitId = searchParams.get("unitId");
     const surveyId = searchParams.get("surveyId");
@@ -22,6 +25,22 @@ export async function GET(request: Request) {
     const programFilter = searchParams.getAll("program");
     const sentimentFilter = searchParams.getAll("sentiment");
     const categoryFilter = searchParams.getAll("category");
+
+    // Cache check — only for the unfiltered default load
+    const noFilters = locationFilter.length === 0 && facultyFilter.length === 0 &&
+        programFilter.length === 0 && sentimentFilter.length === 0 && categoryFilter.length === 0;
+    const cacheKey = `agg_metrics_unit_${unitId}`;
+    if (noFilters) {
+        const { data: cached } = await supabase
+            .from("survey_misc_cache")
+            .select("data")
+            .eq("survey_id", parseInt(surveyId))
+            .eq("cache_key", cacheKey)
+            .maybeSingle();
+        if (cached?.data) {
+            return NextResponse.json(cached.data);
+        }
+    }
 
     const RESP_PAGE = 1000;
     const CHUNK = 500;
@@ -305,7 +324,7 @@ export async function GET(request: Request) {
         ? (respScores.reduce((s, v) => s + v, 0) / respScores.length).toFixed(2)
         : "N/A";
 
-    return NextResponse.json({
+    const payload = {
         total_text_inputs: inputsWithSegments.size,
         total_segments: totalSegments,
         sentiment_counts: sentCounts,
@@ -321,5 +340,18 @@ export async function GET(request: Request) {
             faculties: Array.from(faculties).sort(),
             programs: Array.from(programs).sort(),
         },
-    });
+    };
+
+    // Write to cache when no filters applied (fire-and-forget)
+    if (noFilters) {
+        supabase
+            .from("survey_misc_cache")
+            .upsert(
+                { survey_id: parseInt(surveyId), cache_key: cacheKey, data: payload, updated_at: new Date().toISOString() },
+                { onConflict: "survey_id,cache_key" }
+            )
+            .then(({ error }) => { if (error) console.error("[agg-metrics cache] write error:", error.message); });
+    }
+
+    return NextResponse.json(payload);
 }

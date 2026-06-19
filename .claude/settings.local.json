@@ -3,7 +3,8 @@
     "allow": [
       "Bash(echo \"EXITCODE=$?\")",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(type \"C:\\\\Users\\\\LENOVO\\\\AppData\\\\Local\\\\Temp\\\\next-panic-4b85749fcf99b8a2473ad72d59cf2468.log\" 2>nul || echo \"Log file not found\")"
+      "Bash(type \"C:\\\\Users\\\\LENOVO\\\\AppData\\\\Local\\\\Temp\\\\next-panic-4b85749fcf99b8a2473ad72d59cf2468.log\" 2>nul || echo \"Log file not found\")",
+      "Bash(grep -E \"\\\\.ts$\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\LENOVO\\Documents\\Creations\\New SSI Analysis and Report\\student-voice-platform"

@@ -159,14 +159,24 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
 
     const { globalSatisfactionIndex, campusSatisfaction, campusParticipation, totalRespondents, units } = reportData;
 
-    const totalPos  = units.reduce((s, u) => s + (u.qualitative?.positive ?? 0), 0);
-    const totalNeg  = units.reduce((s, u) => s + (u.qualitative?.negative ?? 0), 0);
-    const totalQual = units.reduce((s, u) => s + (u.qualitative?.total ?? 0), 0);
-    const totalNeu  = totalQual - totalPos - totalNeg;
-    const globalSentiment = totalQual > 0 ? computeSentiment(totalPos, totalNeg, totalNeu) : null;
-    const sentPosPct = totalQual > 0 ? Math.round(totalPos / totalQual * 100) : 0;
-    const sentNeuPct = totalQual > 0 ? Math.round(totalNeu / totalQual * 100) : 0;
-    const sentNegPct = totalQual > 0 ? 100 - sentPosPct - sentNeuPct : 0;
+    // Macro averages — each unit weighted equally regardless of comment volume
+    const qualUnits = units.filter(u => (u.qualitative?.total ?? 0) > 0);
+    const globalSentiment = qualUnits.length > 0
+        ? Math.round(qualUnits.reduce((s, u) => {
+            const pos = u.qualitative!.positive, neg = u.qualitative!.negative, total = u.qualitative!.total;
+            return s + computeSentiment(pos, neg, total - pos - neg);
+          }, 0) / qualUnits.length)
+        : null;
+    const sentPosPct = qualUnits.length > 0
+        ? Math.round(qualUnits.reduce((s, u) => s + (u.qualitative!.positive / u.qualitative!.total * 100), 0) / qualUnits.length)
+        : 0;
+    const sentNeuPct = qualUnits.length > 0
+        ? Math.round(qualUnits.reduce((s, u) => {
+            const neu = u.qualitative!.total - u.qualitative!.positive - u.qualitative!.negative;
+            return s + (neu / u.qualitative!.total * 100);
+          }, 0) / qualUnits.length)
+        : 0;
+    const sentNegPct = qualUnits.length > 0 ? 100 - sentPosPct - sentNeuPct : 0;
     const allCampuses = campusSatisfaction.map(c => c.campus);
 
     // Units with a score, with pre-computed sentiment
@@ -233,7 +243,7 @@ export default function SummaryTab({ surveyId }: { surveyId?: string }) {
                                 {globalSentiment !== null ? globalSentiment : "—"}
                             </div>
                             <p className="text-blue-200/40 text-xs mt-1">pos% ×1 · neu% ×0.5 · neg% ×0</p>
-                            {totalQual > 0 && (
+                            {qualUnits.length > 0 && (
                                 <div className="flex flex-col gap-1 mt-2">
                                     <span className="flex items-center gap-1.5 text-sm text-emerald-400/80"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />{sentPosPct}% positive</span>
                                     <span className="flex items-center gap-1.5 text-sm text-amber-300/80"><span className="w-2 h-2 rounded-full bg-amber-300 shrink-0" />{sentNeuPct}% neutral</span>

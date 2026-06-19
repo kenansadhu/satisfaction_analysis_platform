@@ -41,12 +41,17 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
     const [customInstructions, setCustomInstructions] = useState("");
     const [lastSaved, setLastSaved] = useState<string | null>(null);
     const [reportError, setReportError] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
 
     // 1. Fetch persistent history and report on mount
     useEffect(() => {
         const fetchData = async () => {
-            const chatReportType = surveyId ? `chat_history_${surveyId}` : 'chat_history';
+            const { data: { user } } = await supabase.auth.getUser();
+            const uid = user?.id ?? null;
+            setUserId(uid);
+
+            const chatReportType = surveyId ? `chat_history_${surveyId}_${uid ?? 'anon'}` : `chat_history_${uid ?? 'anon'}`;
             const execReportType = surveyId ? `executive_${surveyId}` : 'executive';
 
             // Fetch Chat History
@@ -145,7 +150,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
 
             // Save History to DB
             const finalMessages = [...newMessages, { id: assistantId, role: "assistant" as const, content: streamedContent }];
-            const chatReportType = surveyId ? `chat_history_${surveyId}` : 'chat_history';
+            const chatReportType = surveyId ? `chat_history_${surveyId}_${userId ?? 'anon'}` : `chat_history_${userId ?? 'anon'}`;
             await supabase.from('unit_ai_reports').upsert({
                 unit_id: unitId,
                 report_type: chatReportType,
@@ -604,7 +609,7 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
                                     className="w-full justify-center gap-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 text-[10px] font-black uppercase tracking-widest transition-colors h-10"
                                     onClick={async () => {
                                         if (confirm("Permanently clear this discussion history?")) {
-                                            const chatReportType = surveyId ? `chat_history_${surveyId}` : 'chat_history';
+                                            const chatReportType = surveyId ? `chat_history_${surveyId}_${userId ?? 'anon'}` : `chat_history_${userId ?? 'anon'}`;
                                             setMessages([]);
                                             await supabase.from('unit_ai_reports').delete().eq('unit_id', unitId).eq('report_type', chatReportType);
                                             toast.success("Discussion cleared");
@@ -638,9 +643,28 @@ export default function UnitInsightChat({ unitId, surveyId, fullPage = false, un
                                         </div>
                                         AI Analysis Assistant
                                     </div>
-                                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100/50 dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-800/50">
-                                        <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Live System</span>
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100/50 dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-800/50">
+                                            <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                            <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Live System</span>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="ghost"
+                                            disabled={messages.length === 0 || isLoading}
+                                            title="Clear conversation"
+                                            className="h-8 w-8 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all disabled:opacity-30"
+                                            onClick={async () => {
+                                                if (!confirm("Permanently clear this discussion history?")) return;
+                                                const chatReportType = surveyId ? `chat_history_${surveyId}_${userId ?? 'anon'}` : `chat_history_${userId ?? 'anon'}`;
+                                                setMessages([]);
+                                                await supabase.from('unit_ai_reports').delete().eq('unit_id', unitId).eq('report_type', chatReportType);
+                                                toast.success("Discussion cleared");
+                                            }}
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
                                     </div>
                                 </CardTitle>
                             </CardHeader>

@@ -184,12 +184,78 @@ export function NpsTab({ surveyId }: { surveyId: string | null }) {
                 </span>
             </div>
 
-            {/* 1. NPS score card + score distribution (overview) */}
+            {/* 1. NPS hero card + score distribution (overview) */}
             {data.units.map(u => {
                 const qual = qualByUnit.get(u.unit_id);
+                const counts = toCounts(u);
+                const score = computeNpsScore(counts);
+                const color = npsBenchmarkColor(score);
+                const proPct = u.total > 0 ? Math.round(u.promoters / u.total * 100) : 0;
+                const pasPct = u.total > 0 ? Math.round(u.passives / u.total * 100) : 0;
+                const detPct = u.total > 0 ? 100 - proPct - pasPct : 0;
                 return (
                     <div key={`overview-${u.unit_id}::${u.column}`} className="space-y-4">
-                        <NpsCard title={u.column} subtitle={u.unit_name} counts={toCounts(u)} />
+                        {/* Hero card */}
+                        <div className="relative rounded-2xl overflow-hidden shadow-2xl">
+                            <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950" />
+                            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(59,130,246,0.2),transparent_60%)]" />
+                            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(139,92,246,0.12),transparent_60%)]" />
+                            <div className="relative z-10 p-8 md:p-10 space-y-6">
+                                {/* Title row — full width so long question names don't break the layout */}
+                                <p className="text-xs font-semibold text-slate-400/70 uppercase tracking-widest flex items-center gap-1.5">
+                                    <Target className="w-3.5 h-3.5 shrink-0" />
+                                    <span className="truncate">{u.column}</span>
+                                    <InfoHint side="bottom" iconClassName="text-slate-400/60 hover:text-slate-200">
+                                        <strong>Net Promoter Score (−100 to +100)</strong><br /><br />
+                                        % of Promoters (score 9–10) minus % of Detractors (score 0–6). Passives (7–8) are ignored.<br /><br />
+                                        Benchmarks: ≥50 excellent · 0–49 good · &lt;0 concern.
+                                    </InfoHint>
+                                </p>
+
+                                {/* Score + bar row */}
+                                <div className="flex items-center gap-8">
+                                    {/* Score */}
+                                    <div className="shrink-0">
+                                        <div className={`text-5xl md:text-6xl font-black tracking-tight ${color}`}>
+                                            {score === null ? "—" : score > 0 ? `+${score}` : score}
+                                        </div>
+                                        <p className="text-slate-500 text-xs mt-1">{u.total.toLocaleString()} respondents</p>
+                                        {u.total > 0 && (
+                                            <div className="grid grid-cols-3 gap-x-3 mt-2 w-56">
+                                                <div>
+                                                    <p className="text-[11px] font-semibold text-green-300">{proPct}% pro</p>
+                                                    <p className="text-[10px] text-green-300/50">+1</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[11px] font-semibold text-slate-400">{pasPct}% pas</p>
+                                                    <p className="text-[10px] text-slate-400/50">0</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[11px] font-semibold text-red-400">{detPct}% det</p>
+                                                    <p className="text-[10px] text-red-400/50">−1</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Divider */}
+                                    <div className="w-px self-stretch bg-white/10 shrink-0" />
+
+                                    {/* Bucket bar */}
+                                    <div className="flex-1 min-w-0 space-y-3">
+                                        <p className="text-xs font-semibold text-slate-400/70 uppercase tracking-widest">
+                                            Bucket distribution
+                                        </p>
+                                        <NpsBucketBar counts={counts} variant="full" showLabels={false} />
+                                        <div className="flex justify-between text-[10px] text-white/50 font-medium tabular-nums">
+                                            <span><span className="text-red-400">●</span> {detPct}% detractors ({u.detractors.toLocaleString()})</span>
+                                            <span><span className="text-amber-300">●</span> {pasPct}% passives ({u.passives.toLocaleString()})</span>
+                                            <span><span className="text-green-300">●</span> {proPct}% promoters ({u.promoters.toLocaleString()})</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         {qual && u.total > 0 && <ScoreDistribution scores={qual.score_distribution} />}
                     </div>
                 );

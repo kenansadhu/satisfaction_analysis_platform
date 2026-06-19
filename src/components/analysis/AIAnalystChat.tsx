@@ -123,10 +123,15 @@ export default function AIAnalystChat({ surveyId, macroData, dataLoading = false
     const [isLoading, setIsLoading] = useState(false);
     const [savedChartIds, setSavedChartIds] = useState<Set<string>>(new Set());
     const [hoveredSeries, setHoveredSeries] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
     // Live dataset from the API — this is the SAME data the AI analyzed
     const [liveData, setLiveData] = useState<any[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
+    }, []);
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -246,6 +251,7 @@ export default function AIAnalystChat({ surveyId, macroData, dataLoading = false
                 title: chart.title,
                 description: chart.description,
                 config: { ...chart, fullExplanation },
+                user_id: userId,
             });
             if (error) throw error;
 

@@ -79,6 +79,11 @@ export default function SavedChartsTab({ onOpenAnalyst }: Props) {
     const [page, setPage] = useState(0);
     const [hoveredSeries, setHoveredSeries] = useState<string | null>(null);
     const [showDataForChart, setShowDataForChart] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
+    }, []);
 
     const loadData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
@@ -94,13 +99,18 @@ export default function SavedChartsTab({ onOpenAnalyst }: Props) {
                 setMacroData(Array.isArray(raw) ? raw : (raw?.units || []));
             }
 
-            // Load saved charts
+            // Load saved charts (per user)
+            const { data: { user } } = await supabase.auth.getUser();
+            const uid = user?.id ?? null;
+            setUserId(uid);
+
             let query = supabase.from('saved_ai_charts').select('*').order('created_at', { ascending: false });
             if (selectedSurvey && selectedSurvey !== "all") {
                 query = query.eq('survey_id', parseInt(selectedSurvey));
             } else {
                 query = query.is('survey_id', null);
             }
+            if (uid) query = query.eq('user_id', uid);
             const { data } = await query;
             setSavedCharts(data || []);
             setPage(0);
@@ -122,6 +132,7 @@ export default function SavedChartsTab({ onOpenAnalyst }: Props) {
             title: `${chart.config.title} (Copy)`,
             description: chart.config.description,
             config: { ...chart.config, id: `chart_copy_${Date.now()}`, title: `${chart.config.title} (Copy)` },
+            user_id: userId,
         });
         if (!error) { toast.success("Chart duplicated!"); loadData(true); }
     };
