@@ -10,6 +10,18 @@ import {
     ArrowLeft, RefreshCw, GitBranch,
 } from "lucide-react";
 
+const Shell = ({ children }: { children: React.ReactNode }) => (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+            {children}
+        </div>
+        <div className="mt-8 flex items-center gap-2 text-xs text-slate-400">
+            <GitBranch className="w-3.5 h-3.5" />
+            Satisfaction Voice · Universitas Pelita Harapan
+        </div>
+    </div>
+);
+
 function LoginInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -73,19 +85,6 @@ function LoginInner() {
             setLoading(false);
         }
     };
-
-    // ── Shared page shell ────────────────────────────────────────────────────
-    const Shell = ({ children }: { children: React.ReactNode }) => (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
-            <div className="w-full max-w-sm">
-                {children}
-            </div>
-            <div className="mt-8 flex items-center gap-2 text-xs text-slate-400">
-                <GitBranch className="w-3.5 h-3.5" />
-                Satisfaction Voice · Universitas Pelita Harapan
-            </div>
-        </div>
-    );
 
     // ── Pending — awaiting email confirmation ────────────────────────────────
     if (mode === "pending") {
